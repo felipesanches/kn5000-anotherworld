@@ -161,16 +161,16 @@ Hardware_Init:
 
 	; DRAM initialization with timing delays
 	ld BC, 0400h
-.dram_pause1:
-	dec 1, BC
-	jr NZ, .dram_pause1
+;.dram_pause1:
+;	dec 1, BC
+;	jr NZ, .dram_pause1
 
 	ld (DRAM1REF), 081h	; Enable DRAM refresh
 
 	ld BC, 2000h
-.dram_pause2:
-	dec 1, BC
-	jr NZ, .dram_pause2
+;.dram_pause2:
+;	dec 1, BC
+;	jr NZ, .dram_pause2
 
 	ld (DRAM1REF), 071h
 	ld (DRAM1CRL), 08Bh
@@ -233,16 +233,25 @@ Send_Serial_Message:
 ; =============================================================================
 Serial_Send_Byte:
 	push BC
+	push DE
 
-	; Wait for TX buffer empty (bit 1 of SC0CR)
+	; Wait for TX buffer empty (bit 1 of SC0CR) with timeout
+	ld DE, 0FFFFh		; Timeout counter
 .wait_tx_empty:
 	ld C, (SC0CR)
 	bit 1, C
-	jr Z, .wait_tx_empty
+	jr NZ, .tx_ready
+	dec 1, DE
+	jr NZ, .wait_tx_empty
+	; Timeout - skip send
+	jr .send_done
 
+.tx_ready:
 	; Send byte
 	ld (SC0BUF), A
 
+.send_done:
+	pop DE
 	pop BC
 	ret
 

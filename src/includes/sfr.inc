@@ -92,7 +92,7 @@ BR1CR		EQU 0D7h	; Baud Rate 1 Control
 ;   Bit 2: Parity enable
 ;   Bit 1: Parity type (0=even, 1=odd)
 ;   Bit 0: 8-bit mode (1=8-bit, 0=7-bit)
-SC0MOD_8N1	EQU 029h	; 8-bit, no parity, 1 stop, baud gen, RX enable
+SC0MOD_8N1	EQU 069h	; 8-bit, no parity, 1 stop, baud gen (bits 7-6=01), RX enable
 
 ; SC0CR bit definitions:
 ;   Bit 7: TX interrupt enable
