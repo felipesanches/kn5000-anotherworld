@@ -91,6 +91,13 @@ Main_Loop:
 	jr Main_Loop
 
 ; =============================================================================
+; Default_Handler - Default interrupt handler for unused vectors
+; =============================================================================
+Default_Handler:
+	halt
+	jr Default_Handler	; Loop forever
+
+; =============================================================================
 ; Hardware_Init - Initialize essential hardware
 ; =============================================================================
 Hardware_Init:
@@ -254,25 +261,54 @@ Str_ItIsWorking:
 	include "vga.asm"
 
 ; =============================================================================
-; Padding to fill ROM to reset vector
+; Reset Handler Location (0xFFFEE0)
 ; =============================================================================
-	org 0FFFEE0h - 4
+; The vector table at 0xFFFF00 points here. This is a jump trampoline
+; to the actual boot code.
 
-; Padding bytes before reset vector
-	db 0FFh, 0FFh, 0FFh, 0FFh
-
-; =============================================================================
-; Reset Vector (0xFFFEE0)
-; =============================================================================
 	org 0FFFEE0h
 
-Reset_Vector:
-	jp Reset_Handler	; Jump to entry point
+Reset_Entry:
+	jp Reset_Handler	; Jump to actual boot code at 0xEF0000
 
-; Fill remaining ROM with 0xFF
+; =============================================================================
+; Fill gap between reset entry and vector table
+; =============================================================================
 	org 0FFFEE4h
-	rept 0100h - 4
+
+	; Padding from 0xFFFEE4 to 0xFFFEFF (28 bytes)
+	rept 01Ch
 	db 0FFh
+	endm
+
+; =============================================================================
+; Interrupt Vector Table (0xFFFF00 - 0xFFFFFF)
+; =============================================================================
+; The CPU reads from this table on reset and interrupts.
+; Each entry is a 32-bit address (little-endian).
+;
+; Vector 0 (at 0xFFFF00): Reset - CPU reads this on power-on
+; Vectors 1-63: Interrupt handlers (we point them to a default handler)
+
+	org 0FFFF00h
+
+VECTOR_TABLE:
+	; Vector 0: Reset - points to Reset_Entry at 0xFFFEE0
+	dd 00FFFEE0h
+
+	; Vectors 1-7: Point to default handler (halt)
+	dd Default_Handler	; Vector 1
+	dd Default_Handler	; Vector 2
+	dd Default_Handler	; Vector 3
+	dd Default_Handler	; Vector 4
+	dd Default_Handler	; Vector 5
+	dd Default_Handler	; Vector 6
+	dd Default_Handler	; Vector 7
+
+	; Vectors 8-63: Fill with default handler address
+	; Each vector is 4 bytes, we need 56 more vectors (8-63)
+	rept 56
+	dd Default_Handler
 	endm
 
 ; =============================================================================
