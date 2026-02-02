@@ -242,6 +242,7 @@ Serial_Send_Byte:
 	bit 1, C
 	jr NZ, .tx_ready
 	dec 1, DE
+	or DE, DE
 	jr NZ, .wait_tx_empty
 	; Timeout - skip send
 	jr .send_done

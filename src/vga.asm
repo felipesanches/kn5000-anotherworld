@@ -357,6 +357,7 @@ Draw_Char:
 	inc 1, XDE
 	sla 1, A		; Shift to next bit
 	dec 1, B
+	or B, B
 	jr NZ, .pixel_loop
 
 	pop XHL
@@ -366,6 +367,7 @@ Draw_Char:
 	add XDE, SCREEN_WIDTH
 	inc 1, XHL
 	dec 1, C
+	or C, C
 	jr NZ, .row_loop
 
 	ret
