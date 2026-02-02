@@ -15,13 +15,22 @@ Custom ROM development for the **Technics KN5000** arranger keyboard. ROMs can b
 ## Build Commands
 
 ```bash
-make          # Build all ROMs (output: build/custom_program.rom)
-make clean    # Remove build artifacts
-make check    # Verify ASL assembler is available
-make test     # Show MAME testing instructions
+make          # Build ROM and create MAME ROM set (default)
+make build    # Build custom ROM only (out/custom_program.rom)
+make romset   # Create complete MAME ROM set
+make test     # Run in MAME emulator
+make clean    # Remove build artifacts (preserves ROM set)
+make distclean# Remove everything including ROM set
+make check    # Verify tools and original ROMs are available
 ```
 
-**Requirements:** ASL Macro Assembler at `../tools/asl/asl`
+**Requirements:**
+- ASL Macro Assembler at `../tools/asl/asl`
+- Original KN5000 ROMs at `/mnt/shared/kn5000_original_roms/kn5000/`
+
+**Output:**
+- Build artifacts: `out/`
+- MAME ROM set: `/mnt/shared/custom_kn5000_roms/helloworld/kn5000/`
 
 ## Architecture
 
