@@ -290,6 +290,7 @@ Clear_Screen:
 	ld (XDE), A
 	inc 1, XDE
 	dec 1, XBC
+	or XBC, XBC		; Set Z flag based on full 32-bit value
 	jr NZ, .clear_loop
 
 	ret
