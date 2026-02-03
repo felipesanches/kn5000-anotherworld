@@ -12,6 +12,7 @@
 #
 # Requirements:
 #   - ASL Macro Assembler (asl) and p2bin in ../tools/asl/
+#   - MAME unidasm disassembler in ../tools/unidasm
 #   - Original KN5000 ROMs in /mnt/shared/kn5000_original_roms/kn5000/
 #   - MAME with kn5000 driver (for testing)
 # =============================================================================
@@ -20,6 +21,7 @@
 ASL_PATH := ../tools/asl
 ASL := $(ASL_PATH)/asl
 P2BIN := $(ASL_PATH)/p2bin
+UNIDASM := ../tools/unidasm
 
 # Assembler flags
 ASL_FLAGS := -w -q
@@ -33,6 +35,7 @@ INCLUDE_DIR := src/includes
 
 # Output files
 MAIN_ROM := $(BUILD_DIR)/custom_program.rom
+MAIN_DISASM := $(BUILD_DIR)/custom_program.lst
 
 # ROM size (2MB for program ROM)
 ROM_SIZE := 2097152
@@ -74,8 +77,9 @@ all: romset
 # Build custom ROM only (no ROM set creation)
 # =============================================================================
 .PHONY: build
-build: $(BUILD_DIR) $(MAIN_ROM)
+build: $(BUILD_DIR) $(MAIN_ROM) $(MAIN_DISASM)
 	@echo "Build complete: $(MAIN_ROM)"
+	@echo "Disassembly:    $(MAIN_DISASM)"
 
 # =============================================================================
 # Create build directory
@@ -98,6 +102,13 @@ $(MAIN_ROM): $(BUILD_DIR)/main.p
 		dd if=/dev/zero bs=1 count=$$(($(ROM_SIZE) - $$SIZE)) 2>/dev/null | tr '\0' '\377' >> $@; \
 	fi
 	@echo "ROM size: $$(stat -c%s "$@" 2>/dev/null || stat -f%z "$@" 2>/dev/null) bytes"
+
+# =============================================================================
+# Generate reference disassembly using MAME's unidasm
+# =============================================================================
+$(MAIN_DISASM): $(MAIN_ROM)
+	@echo "Generating reference disassembly..."
+	$(UNIDASM) $< -arch tlcs900 -basepc 0xE00000 > $@
 
 # =============================================================================
 # Create complete MAME ROM set
@@ -160,8 +171,8 @@ test-verify: romset
 # =============================================================================
 
 # Show hex dump of ROM
-.PHONY: disasm
-disasm: $(MAIN_ROM)
+.PHONY: hexdump
+hexdump: $(MAIN_ROM)
 	hexdump -C $(MAIN_ROM) | head -100
 
 # Show reset vector area
