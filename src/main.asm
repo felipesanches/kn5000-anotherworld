@@ -161,16 +161,18 @@ Hardware_Init:
 
 	; DRAM initialization with timing delays
 	ld BC, 0400h
-;.dram_pause1:
-;	dec 1, BC
-;	jr NZ, .dram_pause1
+.dram_pause1:
+	dec 1, BC
+	or BC, BC
+	jr NZ, .dram_pause1
 
 	ld (DRAM1REF), 081h	; Enable DRAM refresh
 
 	ld BC, 2000h
-;.dram_pause2:
-;	dec 1, BC
-;	jr NZ, .dram_pause2
+.dram_pause2:
+	dec 1, BC
+	or BC, BC
+	jr NZ, .dram_pause2
 
 	ld (DRAM1REF), 071h
 	ld (DRAM1CRL), 08Bh
