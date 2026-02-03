@@ -33,6 +33,9 @@ BUILD_DIR := out
 MAIN_SRC := src/main.asm
 INCLUDE_DIR := src/includes
 
+# Shared code from disasm repository
+DISASM_REPO := ../kn5000-roms-disasm
+
 # Output files
 MAIN_ROM := $(BUILD_DIR)/custom_program.rom
 MAIN_DISASM := $(BUILD_DIR)/custom_program.lst
@@ -91,7 +94,7 @@ $(BUILD_DIR):
 # Build main program ROM
 # =============================================================================
 $(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) | $(BUILD_DIR)
-	$(ASL) $(ASL_FLAGS) -i $(INCLUDE_DIR) $(MAIN_SRC) -o $@
+	$(ASL) $(ASL_FLAGS) -i $(INCLUDE_DIR) -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
 
 $(MAIN_ROM): $(BUILD_DIR)/main.p
 	$(P2BIN) $< $@ -l 0xFF

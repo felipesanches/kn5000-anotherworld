@@ -14,35 +14,45 @@
 ; Build: make
 ; Test: Run in MAME kn5000 driver with custom ROM set
 ;
-; Reference Documentation:
-;   ../kn5000-docs/memory-map.md
-;   ../kn5000-docs/boot-sequence.md
-;   ../kn5000-docs/display-subsystem.md
-;   ../kn5000-docs/cpu-subsystem.md
+; This code reuses shared components from ../kn5000-roms-disasm/
 ; =============================================================================
 
 	cpu 96c141		; TLCS-900/H target
 	page 0
 	maxmode on
 
-; Include hardware definitions
-	include "includes/sfr.inc"
-	include "includes/vga.inc"
-	include "includes/macros.inc"
+; =============================================================================
+; Include shared definitions from kn5000-roms-disasm
+; =============================================================================
+	include "sfr_tmp94c241.asm"
+	include "vga_constants.asm"
+	include "tmp94c241.inc"
+
+; Local macros not in the disasm repo
+	include "local_macros.inc"
 
 ; =============================================================================
 ; Memory Map Constants
 ; =============================================================================
 STACK_TOP		EQU 001000h	; Stack in internal RAM
-RAM_BASE		EQU 200000h	; External RAM start
-INTER_CPU_LATCH		EQU 120000h	; Inter-CPU communication
+OFFSCREEN_BUFFER_1	EQU 280000h	; Offscreen buffer (required by vga_init)
+
+; Screen dimensions
+SCREEN_WIDTH		EQU 320
+SCREEN_HEIGHT		EQU 240
+
+; Colors (palette indices)
+COLOR_BLACK		EQU 0
+COLOR_WHITE		EQU 1
+COLOR_DARK_BLUE		EQU 8
+
+; Serial port constants
+SC0MOD_8N1		EQU 069h	; 8-bit, no parity, 1 stop, baud gen
+BR0CR_38400		EQU 006h	; 38400 baud
 
 ; =============================================================================
 ; ROM Layout
 ; =============================================================================
-; Fill the first part of ROM with 0xFF (unprogrammed flash)
-; The actual code starts near the end where the reset vector points
-
 	org 0E00000h		; Program ROM base address
 
 ; Fill with 0xFF until code section
@@ -55,23 +65,36 @@ INTER_CPU_LATCH		EQU 120000h	; Inter-CPU communication
 ; =============================================================================
 	org 0EF0000h
 
+; Jump to Reset_Handler (VGA code is included first for macro definitions)
+	jp Reset_Handler
+
+; =============================================================================
+; Include shared VGA I/O and initialization routines
+; (defines Write_VGA_Register, VGA_Setup, and macros like VGA_SEQUENCER)
+; =============================================================================
+	include "vga_io.asm"
+	include "vga_init.asm"
+
 ; =============================================================================
 ; Entry Point - Called after hardware reset
 ; =============================================================================
 Reset_Handler:
-	; Disable watchdog immediately
-	ld (WDMOD), WDMOD_DISABLE
-	ld (WDCR), WDCR_DISABLE
+	; =========================================================================
+	; Include shared hardware initialization from kn5000-roms-disasm
+	; This initializes: watchdog, clock, ports, timers, memory controller, DRAM
+	; =========================================================================
+	include "boot_hw_init.asm"
 
-	; Set up stack pointer
+	; Set up stack pointer (after hardware init)
 	LDA_XWA_IMM24 STACK_TOP
 	ld XSP, XWA
 
-	; Initialize hardware
-	CALR Hardware_Init
+	; Initialize VGA display using shared code
+	CALR VGA_Setup
 
-	; Initialize VGA display
-	CALR VGA_Init
+	; The shared VGA_Setup leaves registers set for buffer init:
+	;   XWA = OFFSCREEN_BUFFER_1, BC = 0808h, DE = 38400
+	; We skip the offscreen buffer stuff and just clear video RAM directly
 
 	; Clear screen to dark blue
 	CALR Clear_Screen
@@ -85,6 +108,9 @@ Reset_Handler:
 	; Send message to computer interface
 	CALR Send_Serial_Message
 
+	; Turn screen on (sequencer clocking mode)
+	VGA_SEQUENCER 01h, 001h
+
 	; Enter infinite loop
 Main_Loop:
 	halt
@@ -95,89 +121,22 @@ Main_Loop:
 ; =============================================================================
 Default_Handler:
 	halt
-	jr Default_Handler	; Loop forever
+	jr Default_Handler
 
 ; =============================================================================
-; Hardware_Init - Initialize essential hardware
+; Clear_Screen - Fill screen with dark blue (color 8)
 ; =============================================================================
-Hardware_Init:
-	; Clock configuration
-	ld (CLKMOD), 004h
+Clear_Screen:
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	ld XBC, SCREEN_WIDTH * SCREEN_HEIGHT	; 76800 bytes
+	ld A, COLOR_DARK_BLUE
 
-	; Configure I/O ports for address/data bus
-	ld (P2FC), 0FFh		; Port 2 = data bus low
-	ld (P3FC), 0FFh		; Port 3 = data bus high
-	ld (P7), 0FFh		; Port 7 data
-	ld (P7FC), 01Fh		; Port 7 function
-	ld (P7CR), 000h		; Port 7 control
-
-	; Address bus ports
-	ld (PA), 0FEh
-	ld (PAFC), 008h
-	ld (PB), 0FFh
-	ld (PBFC), 01Fh
-	ld (PC), 0FFh
-	ld (PCFC), 0FFh
-	ld (PD), 0FFh
-	ld (PDFC), 0FFh
-	ld (PE), 0FFh
-	ld (PEFC), 0FFh
-	ld (PH), 0FFh
-	ld (PHFC), 0FFh
-
-	; Timer configuration (needed for serial baud rate)
-	ld (T01MOD), 01Dh
-	ld (T23MOD), 01Dh
-
-	; Memory controller - Block chip select configuration
-	ld (B0CSL), 011h
-	ld (B0CSH), 080h
-	ld (B1CSL), 033h
-	ld (B1CSH), 081h
-	ld (B2CSL), 011h
-	ld (B2CSH), 0C2h
-	ld (B3CSL), 022h
-	ld (B3CSH), 08Ah
-	ld (B4CSL), 011h
-	ld (B4CSH), 082h
-	ld (B5CSL), 022h
-	ld (B5CSH), 081h
-
-	; Memory start address registers
-	ld (MSAR0), 01Eh
-	ld (MSAR1), 010h
-	ld (MSAR2), 0C0h
-	ld (MSAR3), 000h
-	ld (MSAR4), 080h
-	ld (MSAR5), 000h
-
-	; Memory address mask registers
-	ld (MAMR0), 00Fh
-	ld (MAMR1), 03Fh
-	ld (MAMR2), 07Fh
-	ld (MAMR3), 01Fh
-	ld (MAMR4), 0FFh
-	ld (MAMR5), 0FFh
-
-	; DRAM initialization with timing delays
-	ld BC, 0400h
-.dram_pause1:
-	dec 1, BC
-	or BC, BC
-	jr NZ, .dram_pause1
-
-	ld (DRAM1REF), 081h	; Enable DRAM refresh
-
-	ld BC, 2000h
-.dram_pause2:
-	dec 1, BC
-	or BC, BC
-	jr NZ, .dram_pause2
-
-	ld (DRAM1REF), 071h
-	ld (DRAM1CRL), 08Bh
-	ld (DRAM1CRH), 058h
-	res 4, (PMEMCR)
+.clear_loop:
+	ld (XDE), A
+	inc 1, XDE
+	dec 1, XBC
+	or XBC, XBC		; Set Z flag based on full 32-bit value
+	jr NZ, .clear_loop
 
 	ret
 
@@ -200,18 +159,89 @@ Draw_Hello_World:
 	ret
 
 ; =============================================================================
+; Draw_String - Draw null-terminated string at screen position
+; Input: XHL = string pointer, XDE = screen position (VRAM address)
+; =============================================================================
+Draw_String:
+.draw_loop:
+	ld A, (XHL)
+	or A, A			; Check for null terminator
+	ret Z
+
+	push XDE
+	push XHL
+	CALR Draw_Char		; Draw character at (XDE), char in A
+	pop XHL
+	pop XDE
+
+	add XDE, 8		; Move to next character position
+	inc 1, XHL
+	jr .draw_loop
+
+; =============================================================================
+; Draw_Char - Draw a single 8x8 character
+; Input: A = ASCII character, XDE = screen position
+; =============================================================================
+Draw_Char:
+	; Calculate font data offset: (A - 32) * 8
+	sub A, 32		; ASCII offset
+	EXTZ_WA			; Zero-extend A to WA
+
+	; Multiply by 8 (shift left 3)
+	sla 1, WA
+	sla 1, WA
+	sla 1, WA
+
+	; Get font data address
+	LDA_XHL_IMM24 Font_8x8
+	add XHL, XWA
+
+	; Draw 8 rows
+	ld C, 8			; Row counter
+
+.row_loop:
+	ld A, (XHL)		; Get font row bitmap
+	push XDE
+	push XHL
+
+	; Draw 8 pixels
+	ld B, 8			; Column counter
+
+.pixel_loop:
+	bit 7, A		; Test MSB
+	jr Z, .skip_pixel
+
+	; Draw white pixel
+	push WA
+	ld (XDE), COLOR_WHITE
+	pop WA
+
+.skip_pixel:
+	inc 1, XDE
+	sla 1, A		; Shift to next bit
+	dec 1, B
+	or B, B
+	jr NZ, .pixel_loop
+
+	pop XHL
+	pop XDE
+
+	; Move to next row
+	add XDE, SCREEN_WIDTH
+	inc 1, XHL
+	dec 1, C
+	or C, C
+	jr NZ, .row_loop
+
+	ret
+
+; =============================================================================
 ; Serial_Init - Initialize SC0 for computer interface (38400 baud)
 ; =============================================================================
 Serial_Init:
-	; Configure serial mode: 8N1, baud rate generator, RX enabled
 	ld (SC0MOD), SC0MOD_8N1
-
-	; Set baud rate to 38400
 	ld (BR0CR), BR0CR_38400
-
-	; Clear control register (no interrupts)
 	ld (SC0CR), 000h
-
 	ret
 
 ; =============================================================================
@@ -246,11 +276,9 @@ Serial_Send_Byte:
 	dec 1, DE
 	or DE, DE
 	jr NZ, .wait_tx_empty
-	; Timeout - skip send
-	jr .send_done
+	jr .send_done		; Timeout - skip send
 
 .tx_ready:
-	; Send byte
 	ld (SC0BUF), A
 
 .send_done:
@@ -265,30 +293,218 @@ Str_HelloWorld:
 	db "Hello World", 0
 
 Str_ItIsWorking:
-	db "It is working!", 13, 10, 0	; Include CR+LF
+	db "It is working!", 13, 10, 0
 
 ; =============================================================================
-; Include VGA driver (display routines and font data)
+; Font Data - Simple 8x8 bitmap font (ASCII 32-127)
 ; =============================================================================
-	include "vga.asm"
+Font_8x8:
+	; Space (32)
+	db 000h, 000h, 000h, 000h, 000h, 000h, 000h, 000h
+	; ! (33)
+	db 018h, 018h, 018h, 018h, 018h, 000h, 018h, 000h
+	; " (34)
+	db 06Ch, 06Ch, 06Ch, 000h, 000h, 000h, 000h, 000h
+	; # (35)
+	db 06Ch, 06Ch, 0FEh, 06Ch, 0FEh, 06Ch, 06Ch, 000h
+	; $ (36)
+	db 018h, 03Eh, 060h, 03Ch, 006h, 07Ch, 018h, 000h
+	; % (37)
+	db 000h, 0C6h, 0CCh, 018h, 030h, 066h, 0C6h, 000h
+	; & (38)
+	db 038h, 06Ch, 038h, 076h, 0DCh, 0CCh, 076h, 000h
+	; ' (39)
+	db 018h, 018h, 030h, 000h, 000h, 000h, 000h, 000h
+	; ( (40)
+	db 00Ch, 018h, 030h, 030h, 030h, 018h, 00Ch, 000h
+	; ) (41)
+	db 030h, 018h, 00Ch, 00Ch, 00Ch, 018h, 030h, 000h
+	; * (42)
+	db 000h, 066h, 03Ch, 0FFh, 03Ch, 066h, 000h, 000h
+	; + (43)
+	db 000h, 018h, 018h, 07Eh, 018h, 018h, 000h, 000h
+	; , (44)
+	db 000h, 000h, 000h, 000h, 000h, 018h, 018h, 030h
+	; - (45)
+	db 000h, 000h, 000h, 07Eh, 000h, 000h, 000h, 000h
+	; . (46)
+	db 000h, 000h, 000h, 000h, 000h, 018h, 018h, 000h
+	; / (47)
+	db 006h, 00Ch, 018h, 030h, 060h, 0C0h, 080h, 000h
+	; 0 (48)
+	db 07Ch, 0C6h, 0CEh, 0D6h, 0E6h, 0C6h, 07Ch, 000h
+	; 1 (49)
+	db 018h, 038h, 018h, 018h, 018h, 018h, 07Eh, 000h
+	; 2 (50)
+	db 07Ch, 0C6h, 006h, 01Ch, 030h, 066h, 0FEh, 000h
+	; 3 (51)
+	db 07Ch, 0C6h, 006h, 03Ch, 006h, 0C6h, 07Ch, 000h
+	; 4 (52)
+	db 01Ch, 03Ch, 06Ch, 0CCh, 0FEh, 00Ch, 01Eh, 000h
+	; 5 (53)
+	db 0FEh, 0C0h, 0C0h, 0FCh, 006h, 0C6h, 07Ch, 000h
+	; 6 (54)
+	db 038h, 060h, 0C0h, 0FCh, 0C6h, 0C6h, 07Ch, 000h
+	; 7 (55)
+	db 0FEh, 0C6h, 00Ch, 018h, 030h, 030h, 030h, 000h
+	; 8 (56)
+	db 07Ch, 0C6h, 0C6h, 07Ch, 0C6h, 0C6h, 07Ch, 000h
+	; 9 (57)
+	db 07Ch, 0C6h, 0C6h, 07Eh, 006h, 00Ch, 078h, 000h
+	; : (58)
+	db 000h, 018h, 018h, 000h, 000h, 018h, 018h, 000h
+	; ; (59)
+	db 000h, 018h, 018h, 000h, 000h, 018h, 018h, 030h
+	; < (60)
+	db 00Ch, 018h, 030h, 060h, 030h, 018h, 00Ch, 000h
+	; = (61)
+	db 000h, 000h, 07Eh, 000h, 000h, 07Eh, 000h, 000h
+	; > (62)
+	db 030h, 018h, 00Ch, 006h, 00Ch, 018h, 030h, 000h
+	; ? (63)
+	db 07Ch, 0C6h, 00Ch, 018h, 018h, 000h, 018h, 000h
+	; @ (64)
+	db 07Ch, 0C6h, 0DEh, 0DEh, 0DEh, 0C0h, 078h, 000h
+	; A (65)
+	db 038h, 06Ch, 0C6h, 0FEh, 0C6h, 0C6h, 0C6h, 000h
+	; B (66)
+	db 0FCh, 066h, 066h, 07Ch, 066h, 066h, 0FCh, 000h
+	; C (67)
+	db 03Ch, 066h, 0C0h, 0C0h, 0C0h, 066h, 03Ch, 000h
+	; D (68)
+	db 0F8h, 06Ch, 066h, 066h, 066h, 06Ch, 0F8h, 000h
+	; E (69)
+	db 0FEh, 062h, 068h, 078h, 068h, 062h, 0FEh, 000h
+	; F (70)
+	db 0FEh, 062h, 068h, 078h, 068h, 060h, 0F0h, 000h
+	; G (71)
+	db 03Ch, 066h, 0C0h, 0C0h, 0CEh, 066h, 03Ah, 000h
+	; H (72)
+	db 0C6h, 0C6h, 0C6h, 0FEh, 0C6h, 0C6h, 0C6h, 000h
+	; I (73)
+	db 03Ch, 018h, 018h, 018h, 018h, 018h, 03Ch, 000h
+	; J (74)
+	db 01Eh, 00Ch, 00Ch, 00Ch, 0CCh, 0CCh, 078h, 000h
+	; K (75)
+	db 0E6h, 066h, 06Ch, 078h, 06Ch, 066h, 0E6h, 000h
+	; L (76)
+	db 0F0h, 060h, 060h, 060h, 062h, 066h, 0FEh, 000h
+	; M (77)
+	db 0C6h, 0EEh, 0FEh, 0FEh, 0D6h, 0C6h, 0C6h, 000h
+	; N (78)
+	db 0C6h, 0E6h, 0F6h, 0DEh, 0CEh, 0C6h, 0C6h, 000h
+	; O (79)
+	db 07Ch, 0C6h, 0C6h, 0C6h, 0C6h, 0C6h, 07Ch, 000h
+	; P (80)
+	db 0FCh, 066h, 066h, 07Ch, 060h, 060h, 0F0h, 000h
+	; Q (81)
+	db 07Ch, 0C6h, 0C6h, 0C6h, 0D6h, 07Ch, 00Eh, 000h
+	; R (82)
+	db 0FCh, 066h, 066h, 07Ch, 06Ch, 066h, 0E6h, 000h
+	; S (83)
+	db 03Ch, 066h, 030h, 018h, 00Ch, 066h, 03Ch, 000h
+	; T (84)
+	db 07Eh, 05Ah, 018h, 018h, 018h, 018h, 03Ch, 000h
+	; U (85)
+	db 0C6h, 0C6h, 0C6h, 0C6h, 0C6h, 0C6h, 07Ch, 000h
+	; V (86)
+	db 0C6h, 0C6h, 0C6h, 0C6h, 06Ch, 038h, 010h, 000h
+	; W (87)
+	db 0C6h, 0C6h, 0D6h, 0FEh, 0FEh, 0EEh, 0C6h, 000h
+	; X (88)
+	db 0C6h, 06Ch, 038h, 038h, 06Ch, 0C6h, 0C6h, 000h
+	; Y (89)
+	db 066h, 066h, 066h, 03Ch, 018h, 018h, 03Ch, 000h
+	; Z (90)
+	db 0FEh, 0C6h, 08Ch, 018h, 032h, 066h, 0FEh, 000h
+	; [ (91)
+	db 03Ch, 030h, 030h, 030h, 030h, 030h, 03Ch, 000h
+	; \ (92)
+	db 0C0h, 060h, 030h, 018h, 00Ch, 006h, 002h, 000h
+	; ] (93)
+	db 03Ch, 00Ch, 00Ch, 00Ch, 00Ch, 00Ch, 03Ch, 000h
+	; ^ (94)
+	db 010h, 038h, 06Ch, 0C6h, 000h, 000h, 000h, 000h
+	; _ (95)
+	db 000h, 000h, 000h, 000h, 000h, 000h, 000h, 0FFh
+	; ` (96)
+	db 030h, 018h, 00Ch, 000h, 000h, 000h, 000h, 000h
+	; a (97)
+	db 000h, 000h, 078h, 00Ch, 07Ch, 0CCh, 076h, 000h
+	; b (98)
+	db 0E0h, 060h, 07Ch, 066h, 066h, 066h, 0DCh, 000h
+	; c (99)
+	db 000h, 000h, 07Ch, 0C6h, 0C0h, 0C6h, 07Ch, 000h
+	; d (100)
+	db 01Ch, 00Ch, 07Ch, 0CCh, 0CCh, 0CCh, 076h, 000h
+	; e (101)
+	db 000h, 000h, 07Ch, 0C6h, 0FEh, 0C0h, 07Ch, 000h
+	; f (102)
+	db 038h, 06Ch, 064h, 0F0h, 060h, 060h, 0F0h, 000h
+	; g (103)
+	db 000h, 000h, 076h, 0CCh, 0CCh, 07Ch, 00Ch, 0F8h
+	; h (104)
+	db 0E0h, 060h, 06Ch, 076h, 066h, 066h, 0E6h, 000h
+	; i (105)
+	db 018h, 000h, 038h, 018h, 018h, 018h, 03Ch, 000h
+	; j (106)
+	db 006h, 000h, 00Eh, 006h, 006h, 066h, 066h, 03Ch
+	; k (107)
+	db 0E0h, 060h, 066h, 06Ch, 078h, 06Ch, 0E6h, 000h
+	; l (108)
+	db 038h, 018h, 018h, 018h, 018h, 018h, 03Ch, 000h
+	; m (109)
+	db 000h, 000h, 0ECh, 0FEh, 0D6h, 0D6h, 0D6h, 000h
+	; n (110)
+	db 000h, 000h, 0DCh, 066h, 066h, 066h, 066h, 000h
+	; o (111)
+	db 000h, 000h, 07Ch, 0C6h, 0C6h, 0C6h, 07Ch, 000h
+	; p (112)
+	db 000h, 000h, 0DCh, 066h, 066h, 07Ch, 060h, 0F0h
+	; q (113)
+	db 000h, 000h, 076h, 0CCh, 0CCh, 07Ch, 00Ch, 01Eh
+	; r (114)
+	db 000h, 000h, 0DCh, 076h, 060h, 060h, 0F0h, 000h
+	; s (115)
+	db 000h, 000h, 07Eh, 0C0h, 07Ch, 006h, 0FCh, 000h
+	; t (116)
+	db 030h, 030h, 0FCh, 030h, 030h, 036h, 01Ch, 000h
+	; u (117)
+	db 000h, 000h, 0CCh, 0CCh, 0CCh, 0CCh, 076h, 000h
+	; v (118)
+	db 000h, 000h, 0C6h, 0C6h, 0C6h, 06Ch, 038h, 000h
+	; w (119)
+	db 000h, 000h, 0C6h, 0D6h, 0D6h, 0FEh, 06Ch, 000h
+	; x (120)
+	db 000h, 000h, 0C6h, 06Ch, 038h, 06Ch, 0C6h, 000h
+	; y (121)
+	db 000h, 000h, 0C6h, 0C6h, 0C6h, 07Eh, 006h, 0FCh
+	; z (122)
+	db 000h, 000h, 0FEh, 0CCh, 018h, 032h, 0FEh, 000h
+	; { (123)
+	db 00Eh, 018h, 018h, 070h, 018h, 018h, 00Eh, 000h
+	; | (124)
+	db 018h, 018h, 018h, 000h, 018h, 018h, 018h, 000h
+	; } (125)
+	db 070h, 018h, 018h, 00Eh, 018h, 018h, 070h, 000h
+	; ~ (126)
+	db 076h, 0DCh, 000h, 000h, 000h, 000h, 000h, 000h
+	; DEL (127) - solid block
+	db 0FFh, 0FFh, 0FFh, 0FFh, 0FFh, 0FFh, 0FFh, 0FFh
 
 ; =============================================================================
 ; Reset Handler Location (0xFFFEE0)
 ; =============================================================================
-; The vector table at 0xFFFF00 points here. This is a jump trampoline
-; to the actual boot code.
-
 	org 0FFFEE0h
 
 Reset_Entry:
-	jp Reset_Handler	; Jump to actual boot code at 0xEF0000
+	jp Reset_Handler
 
 ; =============================================================================
 ; Fill gap between reset entry and vector table
 ; =============================================================================
 	org 0FFFEE4h
 
-	; Padding from 0xFFFEE4 to 0xFFFEFF (28 bytes)
 	rept 01Ch
 	db 0FFh
 	endm
@@ -296,19 +512,10 @@ Reset_Entry:
 ; =============================================================================
 ; Interrupt Vector Table (0xFFFF00 - 0xFFFFFF)
 ; =============================================================================
-; The CPU reads from this table on reset and interrupts.
-; Each entry is a 32-bit address (little-endian).
-;
-; Vector 0 (at 0xFFFF00): Reset - CPU reads this on power-on
-; Vectors 1-63: Interrupt handlers (we point them to a default handler)
-
 	org 0FFFF00h
 
 VECTOR_TABLE:
-	; Vector 0: Reset - points to Reset_Entry at 0xFFFEE0
-	dd 00FFFEE0h
-
-	; Vectors 1-7: Point to default handler (halt)
+	dd 00FFFEE0h		; Vector 0: Reset
 	dd Default_Handler	; Vector 1
 	dd Default_Handler	; Vector 2
 	dd Default_Handler	; Vector 3
@@ -317,8 +524,6 @@ VECTOR_TABLE:
 	dd Default_Handler	; Vector 6
 	dd Default_Handler	; Vector 7
 
-	; Vectors 8-63: Fill with default handler address
-	; Each vector is 4 bytes, we need 56 more vectors (8-63)
 	rept 56
 	dd Default_Handler
 	endm
