@@ -93,8 +93,8 @@ $(BUILD_DIR):
 # =============================================================================
 # Build main program ROM
 # =============================================================================
-$(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) | $(BUILD_DIR)
-	$(ASL) $(ASL_FLAGS) -i $(INCLUDE_DIR) -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
+$(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src/*.asm) | $(BUILD_DIR)
+	$(ASL) $(ASL_FLAGS) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
 
 $(MAIN_ROM): $(BUILD_DIR)/main.p
 	$(P2BIN) $< $@ -l 0xFF
