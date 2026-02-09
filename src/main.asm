@@ -157,7 +157,8 @@ Clear_Screen:
 ; =============================================================================
 Draw_Hexdump:
 	; --- Draw title (yellow, centered) ---
-	ld (TEXT_COLOR), COLOR_YELLOW
+	ld A, COLOR_YELLOW
+	ld (TEXT_COLOR), A
 	LDA_XHL_IMM24 Str_Title
 	LDA_XDE_IMM24 VIDEO_RAM_BASE
 	add XDE, 4 * SCREEN_WIDTH + 72	; Y=4, X=72
@@ -167,9 +168,12 @@ Draw_Hexdump:
 	CALR Draw_Border
 
 	; --- Initialize address buffer with Reset_Handler address ---
-	ld (ADDR_BUF), Reset_Handler & 0FFh
-	ld (ADDR_BUF + 1), (Reset_Handler >> 8) & 0FFh
-	ld (ADDR_BUF + 2), (Reset_Handler >> 16) & 0FFh
+	ld A, Reset_Handler & 0FFh
+	ld (ADDR_BUF), A
+	ld A, Reset_Handler >> 8 & 0FFh
+	ld (ADDR_BUF + 1), A
+	ld A, Reset_Handler >> 16 & 0FFh
+	ld (ADDR_BUF + 2), A
 
 	; --- Set up for data display ---
 	LDA_XHL_IMM24 Reset_Handler	; Source: boot code in ROM
@@ -183,8 +187,9 @@ Draw_Hexdump:
 	push XHL			; Save source pointer
 	push BC				; Save counters
 
-	; --- Draw address in cyan (3 bytes = 6 hex digits, tight) ---
-	ld (TEXT_COLOR), COLOR_CYAN
+	; --- Draw address in light gray (3 bytes = 6 hex digits, tight) ---
+	ld A, COLOR_LIGHT_GRAY
+	ld (TEXT_COLOR), A
 
 	; High byte of address (byte 2)
 	ld A, (ADDR_BUF + 2)
@@ -208,7 +213,8 @@ Draw_Hexdump:
 	add XDE, 16 + 8		; Advance past 2 chars + separator gap
 
 	; --- Draw 8 data bytes in white ---
-	ld (TEXT_COLOR), COLOR_WHITE
+	ld A, COLOR_WHITE
+	ld (TEXT_COLOR), A
 	pop BC				; Restore counters
 	pop XHL				; Restore source pointer
 	ld B, 8				; 8 bytes per line
