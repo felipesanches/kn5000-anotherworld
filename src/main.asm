@@ -1,10 +1,11 @@
 ; =============================================================================
-; main.asm - Custom KN5000 Boot ROM: Boot Code Hexdump
+; main.asm - Custom KN5000 Boot ROM: Hexdump Utility
 ; =============================================================================
 ; A minimal boot ROM for the Technics KN5000 that:
 ;   1. Initializes essential hardware (watchdog, memory, ports)
 ;   2. Initializes the VGA display controller
-;   3. Displays hex dump of boot code from Reset_Handler on screen
+;   3. Displays a hex dump viewer with title, bordered frame, colored
+;      address column, and data display of boot code
 ;   4. Sends "It is working!" to the serial port (computer interface)
 ;
 ; Target: TMP94C241F (TLCS-900/H2) @ 25 MHz
@@ -44,7 +45,14 @@ SCREEN_HEIGHT		EQU 240
 ; Colors (palette indices)
 COLOR_BLACK		EQU 0
 COLOR_WHITE		EQU 1
+COLOR_CYAN		EQU 2		; Address text
+COLOR_LIGHT_GRAY	EQU 3		; Borders/separator
+COLOR_YELLOW		EQU 4		; Title text
 COLOR_DARK_BLUE		EQU 8
+
+; RAM variables (internal RAM, above SFR region)
+TEXT_COLOR		EQU 000100h	; 1 byte: current drawing color
+ADDR_BUF		EQU 000101h	; 3 bytes: address display value (little-endian)
 
 ; Serial port constants
 SC0MOD_8N1		EQU 069h	; 8-bit, no parity, 1 stop, baud gen
@@ -100,7 +108,10 @@ Reset_Handler:
 	; Clear screen to dark blue
 	CALR Clear_Screen
 
-	; Draw hexdump of boot code
+	; Set up additional palette colors (cyan, light gray, yellow)
+	CALR Setup_Palette
+
+	; Draw hexdump of boot code with UI
 	CALR Draw_Hexdump
 
 	; Turn screen on (sequencer clocking mode)
@@ -140,21 +151,66 @@ Clear_Screen:
 	ret
 
 ; =============================================================================
-; Draw_Hexdump - Display hex dump of boot code from Reset_Handler
-; 8 bytes per line, 28 lines = 224 bytes
-; Centered: 64px left margin, 8px top margin
+; Draw_Hexdump - Display hex dump with title, border, and address column
+; 8 bytes per line, 27 lines = 216 bytes of boot code
 ; Input: none
-; Uses: XHL = source address, XDE = screen position, B = byte counter, C = line counter
 ; =============================================================================
 Draw_Hexdump:
+	; --- Draw title (yellow, centered) ---
+	ld (TEXT_COLOR), COLOR_YELLOW
+	LDA_XHL_IMM24 Str_Title
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	add XDE, 4 * SCREEN_WIDTH + 72	; Y=4, X=72
+	CALR Draw_String
+
+	; --- Draw border ---
+	CALR Draw_Border
+
+	; --- Initialize address buffer with Reset_Handler address ---
+	ld (ADDR_BUF), Reset_Handler & 0FFh
+	ld (ADDR_BUF + 1), (Reset_Handler >> 8) & 0FFh
+	ld (ADDR_BUF + 2), (Reset_Handler >> 16) & 0FFh
+
+	; --- Set up for data display ---
 	LDA_XHL_IMM24 Reset_Handler	; Source: boot code in ROM
 	LDA_XDE_IMM24 VIDEO_RAM_BASE
-	add XDE, 8 * SCREEN_WIDTH + 64	; Top-left: Y=8, X=64
+	add XDE, 17 * SCREEN_WIDTH + 36 ; Y=17, X=36 (inside border)
 
-	ld C, 28			; 28 lines
+	ld C, 27			; 27 lines
 
 .line_loop:
 	push XDE			; Save line start position
+	push XHL			; Save source pointer
+	push BC				; Save counters
+
+	; --- Draw address in cyan (3 bytes = 6 hex digits, tight) ---
+	ld (TEXT_COLOR), COLOR_CYAN
+
+	; High byte of address (byte 2)
+	ld A, (ADDR_BUF + 2)
+	push XDE
+	CALR Draw_Hex_Byte_Tight
+	pop XDE
+	add XDE, 16			; Advance past 2 chars
+
+	; Middle byte of address (byte 1)
+	ld A, (ADDR_BUF + 1)
+	push XDE
+	CALR Draw_Hex_Byte_Tight
+	pop XDE
+	add XDE, 16			; Advance past 2 chars
+
+	; Low byte of address (byte 0)
+	ld A, (ADDR_BUF)
+	push XDE
+	CALR Draw_Hex_Byte_Tight
+	pop XDE
+	add XDE, 16 + 8		; Advance past 2 chars + separator gap
+
+	; --- Draw 8 data bytes in white ---
+	ld (TEXT_COLOR), COLOR_WHITE
+	pop BC				; Restore counters
+	pop XHL				; Restore source pointer
 	ld B, 8				; 8 bytes per line
 
 .byte_loop:
@@ -170,6 +226,18 @@ Draw_Hexdump:
 	or B, B
 	jr NZ, .byte_loop
 
+	; --- Increment address buffer by 8 ---
+	ld A, (ADDR_BUF)
+	add A, 8
+	ld (ADDR_BUF), A
+	ld A, (ADDR_BUF + 1)
+	adc A, 0
+	ld (ADDR_BUF + 1), A
+	ld A, (ADDR_BUF + 2)
+	adc A, 0
+	ld (ADDR_BUF + 2), A
+
+	; --- Move to next line ---
 	pop XDE				; Restore line start
 	add XDE, 8 * SCREEN_WIDTH	; Move down one character row (8 pixels)
 	dec 1, C
@@ -206,6 +274,123 @@ Draw_Hex_Byte:
 	pop XDE
 	add XDE, 16			; Advance past char + space gap
 
+	ret
+
+; =============================================================================
+; Draw_Hex_Byte_Tight - Draw one byte as two hex digits (no trailing space)
+; Input: A = byte value, XDE = screen position
+; Output: XDE advanced by 16 pixels (2 char widths)
+; =============================================================================
+Draw_Hex_Byte_Tight:
+	push WA				; Save original byte
+
+	; High nibble
+	srl 1, A
+	srl 1, A
+	srl 1, A
+	srl 1, A
+	CALR Nibble_To_Ascii
+	push XDE
+	CALR Draw_Char
+	pop XDE
+	add XDE, 8			; Advance one char width
+
+	; Low nibble
+	pop WA				; Restore original byte
+	and A, 0Fh
+	CALR Nibble_To_Ascii
+	push XDE
+	CALR Draw_Char
+	pop XDE
+	add XDE, 8			; Advance one char width (no space gap)
+
+	ret
+
+; =============================================================================
+; Setup_Palette - Program VGA DAC entries 2-4 for UI colors
+; =============================================================================
+Setup_Palette:
+	; Start writing at palette index 2 (cyan)
+	VGA_WRITE VGA_DAC_ADDR_WRITE, COLOR_CYAN
+
+	; Cyan (R=0, G=0Fh, B=0Fh) - index 2
+	VGA_WRITE VGA_DAC_DATA, 0
+	VGA_WRITE VGA_DAC_DATA, 0Fh
+	VGA_WRITE VGA_DAC_DATA, 0Fh
+
+	; Light Gray (R=0Ah, G=0Ah, B=0Ah) - auto-increments to index 3
+	VGA_WRITE VGA_DAC_DATA, 0Ah
+	VGA_WRITE VGA_DAC_DATA, 0Ah
+	VGA_WRITE VGA_DAC_DATA, 0Ah
+
+	; Yellow (R=0Fh, G=0Fh, B=0) - auto-increments to index 4
+	VGA_WRITE VGA_DAC_DATA, 0Fh
+	VGA_WRITE VGA_DAC_DATA, 0Fh
+	VGA_WRITE VGA_DAC_DATA, 0
+
+	ret
+
+; =============================================================================
+; Draw_Border - Draw bordered frame with vertical separator
+; Box: (35,16) to (284,233), separator at X=88
+; =============================================================================
+Draw_Border:
+	ld A, COLOR_LIGHT_GRAY
+
+	; Top horizontal line: (35, 16), length 250
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	add XDE, 16 * SCREEN_WIDTH + 35
+	ld BC, 250
+	CALR Draw_Hline
+
+	; Bottom horizontal line: (35, 233), length 250
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	add XDE, 233 * SCREEN_WIDTH + 35
+	ld BC, 250
+	CALR Draw_Hline
+
+	; Left vertical line: (35, 16), height 218
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	add XDE, 16 * SCREEN_WIDTH + 35
+	ld BC, 218
+	CALR Draw_Vline
+
+	; Right vertical line: (284, 16), height 218
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	add XDE, 16 * SCREEN_WIDTH + 284
+	ld BC, 218
+	CALR Draw_Vline
+
+	; Separator vertical line: (88, 16), height 218
+	LDA_XDE_IMM24 VIDEO_RAM_BASE
+	add XDE, 16 * SCREEN_WIDTH + 88
+	ld BC, 218
+	CALR Draw_Vline
+
+	ret
+
+; =============================================================================
+; Draw_Hline - Draw horizontal line
+; Input: XDE = start VRAM address, BC = length, A = color
+; =============================================================================
+Draw_Hline:
+	ld (XDE), A
+	inc 1, XDE
+	dec 1, BC
+	or BC, BC
+	jr NZ, Draw_Hline
+	ret
+
+; =============================================================================
+; Draw_Vline - Draw vertical line
+; Input: XDE = start VRAM address, BC = height, A = color
+; =============================================================================
+Draw_Vline:
+	ld (XDE), A
+	add XDE, SCREEN_WIDTH
+	dec 1, BC
+	or BC, BC
+	jr NZ, Draw_Vline
 	ret
 
 ; =============================================================================
@@ -276,9 +461,10 @@ Draw_Char:
 	bit 7, A		; Test MSB
 	jr Z, .skip_pixel
 
-	; Draw white pixel
+	; Draw pixel in current text color
 	push WA
-	ld (XDE), COLOR_WHITE
+	ld A, (TEXT_COLOR)
+	ld (XDE), A
 	pop WA
 
 .skip_pixel:
@@ -354,7 +540,10 @@ Serial_Send_Byte:
 ; =============================================================================
 ; Data Section
 ; =============================================================================
-Str_ItIsWorking:				; [0xEF0C04]
+Str_Title:
+	db "KN5000 hexdump utility", 0
+
+Str_ItIsWorking:
 	db "It is working!", 13, 10, 0
 
 ; =============================================================================
