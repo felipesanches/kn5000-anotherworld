@@ -80,8 +80,8 @@ BR0CR_38400		EQU 006h	; 38400 baud
 ; =============================================================================
 Reset_Handler:
 	; =========================================================================
-	; Include shared hardware initialization from kn5000-roms-disasm
-	; This initializes: watchdog, clock, ports, timers, memory controller, DRAM
+	; Minimal hardware initialization (local, trimmed from original)
+	; Initializes: watchdog, clock, ports, memory controller, DRAM
 	; =========================================================================
 	include "boot_hw_init.asm"
 
