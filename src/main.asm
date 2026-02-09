@@ -105,11 +105,9 @@ Reset_Handler:
 	; Turn screen on (sequencer clocking mode)
 	VGA_SEQUENCER 01h, 001h
 
-	; Initialize serial port
-	CALR Serial_Init
-
-	; Send message to computer interface
-	CALR Send_Serial_Message
+	; TODO: Re-enable serial port code after VGA troubleshooting
+	; CALR Serial_Init
+	; CALR Send_Serial_Message
 
 	; Enter infinite loop
 Main_Loop:						; [0xEF0B36]
