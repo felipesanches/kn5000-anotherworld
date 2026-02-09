@@ -1,10 +1,10 @@
 ; =============================================================================
-; main.asm - Custom KN5000 Boot ROM: Hello World
+; main.asm - Custom KN5000 Boot ROM: Boot Code Hexdump
 ; =============================================================================
 ; A minimal boot ROM for the Technics KN5000 that:
 ;   1. Initializes essential hardware (watchdog, memory, ports)
 ;   2. Initializes the VGA display controller
-;   3. Draws "Hello World" text on screen
+;   3. Displays hex dump of boot code from Reset_Handler on screen
 ;   4. Sends "It is working!" to the serial port (computer interface)
 ;
 ; Target: TMP94C241F (TLCS-900/H2) @ 25 MHz
@@ -100,8 +100,8 @@ Reset_Handler:
 	; Clear screen to dark blue
 	CALR Clear_Screen
 
-	; Draw "Hello World" message
-	CALR Draw_Hello_World
+	; Draw hexdump of boot code
+	CALR Draw_Hexdump
 
 	; Turn screen on (sequencer clocking mode)
 	VGA_SEQUENCER 01h, 001h
@@ -140,21 +140,86 @@ Clear_Screen:
 	ret
 
 ; =============================================================================
-; Draw_Hello_World - Draw "Hello World" text centered on screen  [0xEF0B53]
+; Draw_Hexdump - Display hex dump of boot code from Reset_Handler
+; 8 bytes per line, 28 lines = 224 bytes
+; Centered: 64px left margin, 8px top margin
+; Input: none
+; Uses: XHL = source address, XDE = screen position, B = byte counter, C = line counter
 ; =============================================================================
-Draw_Hello_World:
-	; Calculate screen position: center of screen
-	; X = (320 - 11*8) / 2 = 116
-	; Y = (240 - 8) / 2 = 116
-	; Offset = Y * 320 + X = 116 * 320 + 116 = 37236
-
+Draw_Hexdump:
+	LDA_XHL_IMM24 Reset_Handler	; Source: boot code in ROM
 	LDA_XDE_IMM24 VIDEO_RAM_BASE
-	add XDE, 37236		; Center position
+	add XDE, 8 * SCREEN_WIDTH + 64	; Top-left: Y=8, X=64
 
-	; Draw the string
-	LDA_XHL_IMM24 Str_HelloWorld
-	CALR Draw_String
+	ld C, 28			; 28 lines
 
+.line_loop:
+	push XDE			; Save line start position
+	ld B, 8				; 8 bytes per line
+
+.byte_loop:
+	push XHL
+	push BC
+	ld A, (XHL)			; Read byte from ROM
+	CALR Draw_Hex_Byte		; Draw "XX " and advance XDE by 24
+	pop BC
+	pop XHL
+
+	inc 1, XHL			; Next source byte
+	dec 1, B
+	or B, B
+	jr NZ, .byte_loop
+
+	pop XDE				; Restore line start
+	add XDE, 8 * SCREEN_WIDTH	; Move down one character row (8 pixels)
+	dec 1, C
+	or C, C
+	jr NZ, .line_loop
+
+	ret
+
+; =============================================================================
+; Draw_Hex_Byte - Draw one byte as two hex digits plus space gap
+; Input: A = byte value, XDE = screen position
+; Output: XDE advanced by 24 pixels (3 char widths)
+; =============================================================================
+Draw_Hex_Byte:
+	push WA				; Save original byte
+
+	; High nibble
+	srl 1, A
+	srl 1, A
+	srl 1, A
+	srl 1, A
+	CALR Nibble_To_Ascii
+	push XDE
+	CALR Draw_Char
+	pop XDE
+	add XDE, 8			; Advance one char width
+
+	; Low nibble
+	pop WA				; Restore original byte
+	and A, 0Fh
+	CALR Nibble_To_Ascii
+	push XDE
+	CALR Draw_Char
+	pop XDE
+	add XDE, 16			; Advance past char + space gap
+
+	ret
+
+; =============================================================================
+; Nibble_To_Ascii - Convert 0-15 to ASCII '0'-'9' or 'A'-'F'
+; Input: A = nibble (0-15)
+; Output: A = ASCII character
+; =============================================================================
+Nibble_To_Ascii:
+	cp A, 10
+	jr C, .digit
+	add A, 'A' - 10
+	ret
+.digit:
+	add A, '0'
 	ret
 
 ; =============================================================================
@@ -289,9 +354,6 @@ Serial_Send_Byte:
 ; =============================================================================
 ; Data Section
 ; =============================================================================
-Str_HelloWorld:					; [0xEF0BF8]
-	db "Hello World", 0
-
 Str_ItIsWorking:				; [0xEF0C04]
 	db "It is working!", 13, 10, 0
 
