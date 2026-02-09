@@ -12,6 +12,12 @@ LDA_XHL_IMM24 MACRO addr
 	db 033h
 	ENDM
 
+; EXTZ_XWA - Zero-extend WA to XWA (clear upper 16 bits, keep WA)
+; Encoding: e8 12 (2 bytes)
+EXTZ_XWA MACRO
+	db 0e8h, 012h			; extz XWA
+	ENDM
+
 ; LDA_XBC_IMM24 - Load 24-bit effective address into XBC
 ; Encoding: f2 LL MM HH 31
 LDA_XBC_IMM24 MACRO addr

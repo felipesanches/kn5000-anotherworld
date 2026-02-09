@@ -184,7 +184,8 @@ Draw_String:
 Draw_Char:
 	; Calculate font data offset: (A - 32) * 8
 	sub A, 32		; ASCII offset
-	EXTZ_WA			; Zero-extend A to WA
+	EXTZ_WA			; Zero-extend A to WA (clears W)
+	EXTZ_XWA		; Zero-extend WA to XWA (clears upper 16 bits)
 
 	; Multiply by 8 (shift left 3)
 	sla 1, WA
