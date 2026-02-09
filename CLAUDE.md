@@ -25,12 +25,12 @@ make check    # Verify tools and original ROMs are available
 ```
 
 **Requirements:**
-- ASL Macro Assembler at `../tools/asl/asl`
+- ASL Macro Assembler at `../../tools/asl/asl`
 - Original KN5000 ROMs at `/mnt/shared/kn5000_original_roms/kn5000/`
 
 **Output:**
 - Build artifacts: `out/`
-- MAME ROM set: `/mnt/shared/custom_kn5000_roms/helloworld/kn5000/`
+- MAME ROM set: `/mnt/shared/custom_kn5000_roms/anotherworld/kn5000/`
 
 ## Architecture
 
@@ -51,7 +51,7 @@ The ROM initializes at reset vector 0xFFFEE0, then:
 
 These sibling repositories contain essential reference material. **Do not modify them; all changes go in this repo only.**
 
-### Hardware Documentation: `../kn5000-docs/`
+### Hardware Documentation: `../../kn5000-docs/`
 | Topic | File | Key Information |
 |-------|------|-----------------|
 | Memory Map | `memory-map.md` | ROM/RAM addresses, VRAM at 0x1A0000, VGA at 0x170000 |
@@ -61,7 +61,7 @@ These sibling repositories contain essential reference material. **Do not modify
 | Serial | `serial-debugging-journey.md` | SC0/SC1 protocols, baud rates |
 | Inter-CPU | `inter-cpu-protocol.md` | Main/Sub CPU communication via 0x120000 latch |
 
-### Original ROM Disassembly: `../kn5000-roms-disasm/`
+### Original ROM Disassembly: `../../kn5000-roms-disasm/`
 | Component | File | Contains |
 |-----------|------|----------|
 | Main CPU Program | `maincpu/kn5000_v10_program.asm` | Full 2MB disassembly, UI/MIDI routines |
@@ -73,7 +73,7 @@ These sibling repositories contain essential reference material. **Do not modify
 | Sub CPU Boot | `subcpu/boot/kn5000_subcpu_boot.asm` | Sub CPU initialization |
 | Symbols | `symbols/maincpu_symbols_reference.txt` | 39,125 named addresses |
 
-### Assembler: `../tools/asl/`
+### Assembler: `../../tools/asl/`
 - `asl` - ASL Macro Assembler 1.42 Beta
 - `p2bin` - Converts .p intermediate files to raw binary ROM
 
@@ -114,7 +114,7 @@ LDA_XWA_IMM24 addr    ; Load 24-bit address into XWA
 ## Expanding This ROM
 
 To add new features, study the corresponding routines in the disassembly:
-- **Keyboard scanning:** `../kn5000-roms-disasm/maincpu/cpanel_routines.asm`
-- **Floppy disk:** `../kn5000-roms-disasm/maincpu/fdc_routines.asm`
+- **Keyboard scanning:** `../../kn5000-roms-disasm/maincpu/cpanel_routines.asm`
+- **Floppy disk:** `../../kn5000-roms-disasm/maincpu/fdc_routines.asm`
 - **Sound generation:** Requires Sub CPU payload via inter-CPU protocol
-- **MIDI:** `../kn5000-roms-disasm/maincpu/midi_serial_routines.asm`
+- **MIDI:** `../../kn5000-roms-disasm/maincpu/midi_serial_routines.asm`

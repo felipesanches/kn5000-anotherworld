@@ -8,6 +8,9 @@ build/
 *.map
 *.log
 
+# Exceptions for checked-in data files
+!src/hardcoded_data/*.rom
+
 # Editor files
 *~
 *.swp

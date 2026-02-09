@@ -18,10 +18,10 @@
 # =============================================================================
 
 # Tool paths (relative to project root)
-ASL_PATH := ../tools/asl
+ASL_PATH := ../../tools/asl
 ASL := $(ASL_PATH)/asl
 P2BIN := $(ASL_PATH)/p2bin
-UNIDASM := ../tools/unidasm
+UNIDASM := ../../tools/unidasm
 
 # Assembler flags
 # -L generates listing file, -olist specifies listing filename
@@ -35,7 +35,7 @@ MAIN_SRC := src/main.asm
 INCLUDE_DIR := src/includes
 
 # Shared code from disasm repository
-DISASM_REPO := ../kn5000-roms-disasm
+DISASM_REPO := ../../kn5000-roms-disasm
 
 # Output files
 MAIN_ROM := $(BUILD_DIR)/custom_program.rom
@@ -51,7 +51,7 @@ ROM_SIZE := 2097152
 ORIGINAL_ROMS := /mnt/shared/kn5000_original_roms/kn5000
 
 # Output ROM set location (MAME-ready)
-ROMSET_BASE := /mnt/shared/custom_kn5000_roms/helloworld
+ROMSET_BASE := /mnt/shared/custom_kn5000_roms/anotherworld
 ROMSET_DIR := $(ROMSET_BASE)/kn5000
 
 # Files to copy from original ROM set (all required for MAME kn5000 driver)
