@@ -76,7 +76,7 @@ BR0CR_38400		EQU 006h	; 38400 baud
 	include "vga_init.asm"
 
 ; =============================================================================
-; Entry Point - Called after hardware reset
+; Entry Point - Called after hardware reset                      [0xEF09C5]
 ; =============================================================================
 Reset_Handler:
 	; =========================================================================
@@ -102,29 +102,29 @@ Reset_Handler:
 	; Draw "Hello World" message
 	CALR Draw_Hello_World
 
+	; Turn screen on (sequencer clocking mode)
+	VGA_SEQUENCER 01h, 001h
+
 	; Initialize serial port
 	CALR Serial_Init
 
 	; Send message to computer interface
 	CALR Send_Serial_Message
 
-	; Turn screen on (sequencer clocking mode)
-	VGA_SEQUENCER 01h, 001h
-
 	; Enter infinite loop
-Main_Loop:
+Main_Loop:						; [0xEF0B36]
 	halt
 	jr Main_Loop
 
 ; =============================================================================
-; Default_Handler - Default interrupt handler for unused vectors
+; Default_Handler - Default interrupt handler for unused vectors [0xEF0B39]
 ; =============================================================================
 Default_Handler:
 	halt
 	jr Default_Handler
 
 ; =============================================================================
-; Clear_Screen - Fill screen with dark blue (color 8)
+; Clear_Screen - Fill screen with dark blue (color 8)            [0xEF0B3C]
 ; =============================================================================
 Clear_Screen:
 	LDA_XDE_IMM24 VIDEO_RAM_BASE
@@ -141,7 +141,7 @@ Clear_Screen:
 	ret
 
 ; =============================================================================
-; Draw_Hello_World - Draw "Hello World" text centered on screen
+; Draw_Hello_World - Draw "Hello World" text centered on screen  [0xEF0B53]
 ; =============================================================================
 Draw_Hello_World:
 	; Calculate screen position: center of screen
@@ -159,7 +159,7 @@ Draw_Hello_World:
 	ret
 
 ; =============================================================================
-; Draw_String - Draw null-terminated string at screen position
+; Draw_String - Draw null-terminated string at screen position   [0xEF0B67]
 ; Input: XHL = string pointer, XDE = screen position (VRAM address)
 ; =============================================================================
 Draw_String:
@@ -179,7 +179,7 @@ Draw_String:
 	jr .draw_loop
 
 ; =============================================================================
-; Draw_Char - Draw a single 8x8 character
+; Draw_Char - Draw a single 8x8 character                        [0xEF0B7E]
 ; Input: A = ASCII character, XDE = screen position
 ; =============================================================================
 Draw_Char:
@@ -236,7 +236,7 @@ Draw_Char:
 	ret
 
 ; =============================================================================
-; Serial_Init - Initialize SC0 for computer interface (38400 baud)
+; Serial_Init - Initialize SC0 for computer interface (38400)    [0xEF0BC1]
 ; =============================================================================
 Serial_Init:
 	ld (SC0MOD), SC0MOD_8N1
@@ -245,7 +245,7 @@ Serial_Init:
 	ret
 
 ; =============================================================================
-; Send_Serial_Message - Send "It is working!" to serial port
+; Send_Serial_Message - Send "It is working!" to serial port     [0xEF0BCB]
 ; =============================================================================
 Send_Serial_Message:
 	LDA_XHL_IMM24 Str_ItIsWorking
@@ -260,7 +260,7 @@ Send_Serial_Message:
 	jr .send_loop
 
 ; =============================================================================
-; Serial_Send_Byte - Send single byte via SC0
+; Serial_Send_Byte - Send single byte via SC0                    [0xEF0BDD]
 ; Input: A = byte to send
 ; =============================================================================
 Serial_Send_Byte:
@@ -289,10 +289,10 @@ Serial_Send_Byte:
 ; =============================================================================
 ; Data Section
 ; =============================================================================
-Str_HelloWorld:
+Str_HelloWorld:					; [0xEF0BF8]
 	db "Hello World", 0
 
-Str_ItIsWorking:
+Str_ItIsWorking:				; [0xEF0C04]
 	db "It is working!", 13, 10, 0
 
 ; =============================================================================
@@ -301,7 +301,7 @@ Str_ItIsWorking:
 	include "font_8x8.asm"
 
 ; =============================================================================
-; Reset Handler Location (0xFFFEE0)
+; Reset Handler Location                                         [0xFFFEE0]
 ; =============================================================================
 	org 0FFFEE0h
 
@@ -318,7 +318,7 @@ Reset_Entry:
 	endm
 
 ; =============================================================================
-; Interrupt Vector Table (0xFFFF00 - 0xFFFFFF)
+; Interrupt Vector Table                                         [0xFFFF00]
 ; =============================================================================
 	org 0FFFF00h
 
