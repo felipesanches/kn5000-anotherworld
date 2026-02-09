@@ -5,6 +5,7 @@ build/
 *.rom
 *.bin
 *.lst
+*.map
 *.log
 
 # Editor files

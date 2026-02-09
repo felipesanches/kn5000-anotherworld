@@ -24,7 +24,8 @@ P2BIN := $(ASL_PATH)/p2bin
 UNIDASM := ../tools/unidasm
 
 # Assembler flags
-ASL_FLAGS := -w -q
+# -L generates listing file, -olist specifies listing filename
+ASL_FLAGS := -w -q -L
 
 # Build output directory
 BUILD_DIR := out
@@ -38,7 +39,7 @@ DISASM_REPO := ../kn5000-roms-disasm
 
 # Output files
 MAIN_ROM := $(BUILD_DIR)/custom_program.rom
-MAIN_DISASM := $(BUILD_DIR)/custom_program.lst
+MAIN_DISASM := $(BUILD_DIR)/custom_program.disasm
 
 # ROM size (2MB for program ROM)
 ROM_SIZE := 2097152
@@ -82,6 +83,8 @@ all: romset
 .PHONY: build
 build: $(BUILD_DIR) $(MAIN_ROM) $(MAIN_DISASM)
 	@echo "Build complete: $(MAIN_ROM)"
+	@echo "Symbols used:   $(SYMBOLS_USED)"
+	@echo "Symbols unused: $(SYMBOLS_UNUSED)"
 	@echo "Disassembly:    $(MAIN_DISASM)"
 
 # =============================================================================
@@ -93,8 +96,30 @@ $(BUILD_DIR):
 # =============================================================================
 # Build main program ROM
 # =============================================================================
+# Symbol/listing file output (ASL listing with symbol table)
+LISTING_FILE := $(BUILD_DIR)/main.listing
+SYMBOLS_USED := $(BUILD_DIR)/symbols.used
+SYMBOLS_UNUSED := $(BUILD_DIR)/symbols.unused
+
 $(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src/*.asm) | $(BUILD_DIR)
-	$(ASL) $(ASL_FLAGS) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
+	$(ASL) $(ASL_FLAGS) -olist $(LISTING_FILE) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
+	@# Extract symbol table from listing, split into used and unused
+	@grep -E "^[ *]?[A-Za-z_][A-Za-z0-9_.]* :" $(LISTING_FILE) | \
+		sed 's/ *| */\n/g' | \
+		grep -E " :" | \
+		grep -v "^$$" | \
+		sed 's/^ *//' | \
+		grep -v "^\*" | \
+		sort > $(SYMBOLS_USED)
+	@grep -E "^[ *]?[A-Za-z_][A-Za-z0-9_.]* :" $(LISTING_FILE) | \
+		sed 's/ *| */\n/g' | \
+		grep -E " :" | \
+		grep -v "^$$" | \
+		sed 's/^ *//' | \
+		grep "^\*" | \
+		sed 's/^\*//' | \
+		sort > $(SYMBOLS_UNUSED)
+	@echo "Symbols: $$(wc -l < $(SYMBOLS_USED)) used, $$(wc -l < $(SYMBOLS_UNUSED)) unused"
 
 $(MAIN_ROM): $(BUILD_DIR)/main.p
 	$(P2BIN) $< $@ -l 0xFF
