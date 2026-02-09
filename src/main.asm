@@ -74,6 +74,7 @@ BR0CR_38400		EQU 006h	; 38400 baud
 ; =============================================================================
 	include "vga_io.asm"
 	include "vga_init.asm"
+	ret			; VGA_Setup has no ret (designed for inline use)
 
 ; =============================================================================
 ; Entry Point - Called after hardware reset                      [0xEF09C5]
