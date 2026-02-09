@@ -50,9 +50,9 @@ COLOR_LIGHT_GRAY	EQU 3		; Borders/separator
 COLOR_YELLOW		EQU 4		; Title text
 COLOR_DARK_BLUE		EQU 8
 
-; RAM variables (internal RAM, above SFR region)
-TEXT_COLOR		EQU 000100h	; 1 byte: current drawing color
-ADDR_BUF		EQU 000101h	; 3 bytes: address display value (little-endian)
+; RAM variables (internal RAM, above Extended SFR region at 0x100-0x1FF)
+TEXT_COLOR		EQU 000200h	; 1 byte: current drawing color
+ADDR_BUF		EQU 000201h	; 3 bytes: address display value (little-endian)
 
 ; Serial port constants
 SC0MOD_8N1		EQU 069h	; 8-bit, no parity, 1 stop, baud gen
