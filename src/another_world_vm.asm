@@ -40,6 +40,21 @@ PAGE_BITMAP_1 EQU 250000h
 PAGE_BITMAP_2 EQU 260000h
 PAGE_BITMAP_3 EQU 270000h
 
+; VM variable indices (used by the game engine)
+VM_VARIABLE_RANDOM_SEED		EQU 03Ch
+VM_VARIABLE_LAST_KEYCHAR	EQU 0C5h
+VM_VARIABLE_HERO_POS_UP_DOWN	EQU 0E5h
+VM_VARIABLE_HERO_POS_JUMP_DOWN	EQU 0DCh
+VM_VARIABLE_HERO_POS_LEFT_RIGHT	EQU 0E9h
+VM_VARIABLE_HERO_POS_MASK	EQU 0FAh
+VM_VARIABLE_HERO_ACTION		EQU 0FBh
+VM_VARIABLE_HERO_ACTION_POS_MASK EQU 0FBh
+VM_VARIABLE_SCROLL_Y		EQU 0F9h
+
+; Game part IDs
+GAME_PART_INTRO			EQU 03E80h
+NUM_MEM_LIST			EQU 091h
+
 CALC_LINE_XMAX_AND_XMIN:
 	; int16_t xmax = MAX(x1, x2);
 	LD WA, (X1)
@@ -87,33 +102,76 @@ drawLineN_loop:
 	RET
 
 drawLineP:
-	; TODO: Implement-me!
-	jp drawLineN ; THIS IS INCORRECT!
+	; Copy pixels from PAGE_BITMAP_0 to curPagePtr1
+	PUSH XIX
+	PUSH XIY
+	PUSH XHL
 
-	; Inputs:
-	; C = color
 	CALL CALC_LINE_XMAX_AND_XMIN
 
-	; for (int16_t x=xmin; x<=xmax; x++)
-	; {
-	; 	color = m_page_bitmaps[0].pix(m_hliney, x);
-	; 	m_curPagePtr1->pix(m_hliney, x) = color;
-	; }
+	; Destination: CUR_LINE + LINE_XMIN (in curPagePtr1)
+	LD XIX, (CUR_LINE)
+	ADDW (CUR_LINE_LOW), 320
+	ADCW (CUR_LINE_HIGH), 0
+	LD HL, (LINE_XMIN)
+	EXTS XHL
+	ADD XIX, XHL
+
+	; Source: PAGE_BITMAP_0 + HLINEY*320 + LINE_XMIN
+	LD XIY, PAGE_BITMAP_0
+	LD XWA, 0
+	LD WA, (HLINEY)
+	LD DE, 320
+	MUL XWA, DE
+	ADD XIY, XWA
+	LD XHL, 0
+	LD HL, (LINE_XMIN)
+	EXTS XHL
+	ADD XIY, XHL
+
+	; Loop: copy xmax-xmin+1 pixels
+	LD HL, (LINE_XMAX)
+	SUB HL, (LINE_XMIN)
+
+drawLineP_loop:
+	LD C, (XIY)			; color = page_bitmap_0[y][x]
+	LDB (XIX), C			; curPagePtr1[y][x] = color
+	INC XIX
+	INC XIY
+	DJNZ HL, drawLineP_loop
+
+	POP XHL
+	POP XIY
+	POP XIX
 	RET
 
 drawLineBlend:
-	; TODO: Implement-me!
-	jp drawLineN ; THIS IS INCORRECT!
+	; Blend: read existing pixel, apply (color & 7) | 8
+	PUSH XIX
+	PUSH XHL
 
-	; Inputs:
-	; C = color
 	CALL CALC_LINE_XMAX_AND_XMIN
 
-	; for (int16_t x=xmin; x<=xmax; x++)
-	; {
-	;	color = m_curPagePtr1->pix(m_hliney, x);
-	;	m_curPagePtr1->pix(m_hliney, x) = (color & 0x7) | 0x8;
-	; }
+	; curPagePtr1 scanline pointer
+	LD XIX, (CUR_LINE)
+	ADDW (CUR_LINE_LOW), 320
+	ADCW (CUR_LINE_HIGH), 0
+	LD HL, (LINE_XMIN)
+	EXTS XHL
+	ADD XIX, XHL
+	LD HL, (LINE_XMAX)
+	SUB HL, (LINE_XMIN)
+
+drawLineBlend_loop:
+	LD C, (XIX)			; color = curPagePtr1[y][x]
+	ANDB C, 07h			; color &= 0x07
+	ORB C, 08h			; color |= 0x08
+	LDB (XIX), C			; curPagePtr1[y][x] = blended color
+	INC XIX
+	DJNZ HL, drawLineBlend_loop
+
+	POP XHL
+	POP XIX
 	RET
 
 drawPoint:
@@ -194,13 +252,58 @@ VIDEO_START:
 	LD (CUR_PAGE_PTR_3), XIX
 	RET
 
+; initForPart: Reset all threads and prepare for a new game part
+; Input: WA = partId
+initForPart:
+	LD (CURRENT_PART_ID), WA
+
+	; Reset VM state
+	LD XIX, VM_STACK
+	LD (VM_STACK_POINTER), XIX
+
+	; Reset all threads: inactive and unfrozen
+	LD IX, 0
+_initForPart_loop:
+	PUSH IX
+	SLA 2, IX
+	EXTZ XIX
+	ADD XIX, THREADS_DATA
+	LDW (XIX + PC_OFFSET), INACTIVE_THREAD
+	LDW (XIX + REQUESTED_PC_OFFSET), NO_REQUEST
+	POP IX
+
+	PUSH IX
+	SLA 1, IX
+	EXTZ XIX
+	ADD XIX, VM_IS_CHANNEL_ACTIVE
+	LD (XIX + CURRENT_STATE), NOT_FROZEN
+	LD (XIX + REQUESTED_STATE), NO_STATE_REQUEST
+	POP IX
+
+	INC IX
+	CP IX, 64
+	JP NE, _initForPart_loop
+
+	; Start thread 0 at PC=0
+	LDW (THREADS_DATA + PC_OFFSET), 0
+
+	; Set variable 0xE4 = 0x14 (as per reference)
+	LD A, 0E4h
+	LD DE, 014h
+	CALL _write_vm_var
+
+	; Note: Full part switching would require bank-switching bytecode,
+	; palettes, and video data. Only intro resources are available.
+	RET
+
+
 GAME_RESET:
 	CALL VIDEO_START
 	LDB (CURRENT_THREAD), 0
 	LDW (VM_PC), 0
 	LD XIX, VM_STACK
 	LD (VM_STACK_POINTER), XIX
-	
+
 	; All threads are initially disabled and unfrozen
 	LD IX, 0
 _setup_threads__loop:
@@ -217,16 +320,28 @@ _setup_threads__loop:
 	SLA 1, IX
 	EXTZ XIX
 	ADD XIX, VM_IS_CHANNEL_ACTIVE
-	LD (XIX + CURRENT_STATE), NOT_FROZEN 
+	LD (XIX + CURRENT_STATE), NOT_FROZEN
 	LD (XIX + REQUESTED_STATE), NO_STATE_REQUEST
 	POP IX
 
 	INC IX
 	CP IX, 64
 	JP NE, _setup_threads__loop
-	
-	; TODO: write_vm_variable(VM_VARIABLE_RANDOM_SEED, time(0) );
-	
+
+	; Initialize VM_VARIABLE_RANDOM_SEED with a fixed seed (no RTC available)
+	LD A, VM_VARIABLE_RANDOM_SEED
+	LD DE, 1234h			; Fixed seed value
+	CALL _write_vm_var
+
+	; VM_HACK_INIT_VAR_54_WITH_81: Required for Interplay logo display
+	LD A, 054h
+	LD DE, 0081h
+	CALL _write_vm_var
+
+	; Initialize part tracking
+	LDW (REQUESTED_NEXT_PART), 0
+	LDW (CURRENT_PART_ID), GAME_PART_INTRO
+
 	RET
 
 ENTRY:
@@ -745,9 +860,9 @@ OFFSET_BIT15_NOT_SET:
 
 
 LOAD_SCREEN:
-; todo: ACTUALLY SELECT BITMAP VIA screen_id
-
-	LD XDE, PAGE_BITMAP_0 + 20*320	; vga memory, skipping the first 20 lines because the image has 320x200 resolution and the screen has 320x240
+; Input: XHL = pointer to screen bitmap data (320x200 pixels)
+; Copies bitmap data to PAGE_BITMAP_0
+	LD XDE, PAGE_BITMAP_0
 	LD XBC, 320 * 200 / 2		; bitmap data length in 16-bit words (320x200 pixels)
 	LDIRW
 	RET
@@ -905,19 +1020,48 @@ PAGEID_OTHER_VALUE:
 	RET
 
 
+; _read_vm_var: Read vm_variable[A] into DE
+; Input: A = variable index (0-255)
+; Output: DE = variable value (16-bit signed)
+; Clobbers: XIY, XWA
+_read_vm_var:
+	LD W, 0
+	SLA 1, WA
+	EXTZ XWA
+	LD XIY, VM_VARIABLES
+	ADD XIY, XWA
+	LD DE, (XIY)
+	RET
+
+; _write_vm_var: Write DE to vm_variable[A]
+; Input: A = variable index (0-255), DE = value
+; Clobbers: XIY, XWA
+_write_vm_var:
+	LD W, 0
+	SLA 1, WA
+	EXTZ XWA
+	LD XIY, VM_VARIABLES
+	ADD XIY, XWA
+	LD (XIY), DE
+	RET
+
+
 INPUT_UPDATE_PLAYER:
-	; Implement-me!
+	; Stub: initialize input-related VM variables to neutral values
+	; Full input via control panel serial is a future enhancement
 	RET
 
 
 CHECK_THREAD_REQUESTS:
 
-; TODO: Check if a part switch has been requested.
-;	if (m_requestedNextPart != 0)
-;	{
-;		initForPart(m_requestedNextPart);
-;		m_requestedNextPart = 0;
-;	}
+	; Check if a part switch has been requested
+	LD WA, (REQUESTED_NEXT_PART)
+	CP WA, 0
+	JP EQ, _no_part_switch
+	; Part switch requested - call initForPart
+	CALL initForPart
+	LDW (REQUESTED_NEXT_PART), 0
+_no_part_switch:
 
 	LD A, 0
 _check_thread_reqs__loop:
@@ -1033,6 +1177,12 @@ _OPCODE_0x80:
 	LD W, A
 	LD A, (XIX)
 	INC XIX
+
+	; Save bytecode position before replacing XIX with video data pointer
+	LD XDE, XIX
+	SUB XDE, INTRO_BYTECODE
+	LD (VM_PC), DE
+
 	SLA 1, WA
 	EXTZ XWA
 	LD XIX, INTRO_VIDEO_1
@@ -1041,7 +1191,7 @@ _OPCODE_0x80:
 	LD E, (XIX)
 	INC XIX
 	EXTZ DE		; x-coord
-	
+
 	LD B, (XIX)
 	INC XIX
 	EXTZ BC
@@ -1053,16 +1203,16 @@ _OPCODE_0x80:
 ;			y = 199;
 ;		}
 	CP HL, 199
-	JP UGE, _do_nothing
+	JP UGE, _0x80_y_ok
 	ADD DE, HL
 	SUB DE, 199
 	ADD HL, 199
-_do_nothing:
+_0x80_y_ok:
 
 	LD BC, 0FF40h
 	CALL readAndDrawPolygon
 
-	JP _end_of_EXECUTE_INSTRUCTION
+	JP _after_PC_update
 
 OPCODE_BIT_7_NOT_SET:
 	BIT 6, A	; if (opcode & 0x40)
@@ -1070,59 +1220,131 @@ OPCODE_BIT_7_NOT_SET:
 
 	; ====  VIDEO instruction (0x40) ====
 _OPCODE_0x40:
-;
-;		int16_t x, y;
-;		uint16_t offset = fetch_word() * 2;
-;		x = fetch_byte();
-;
-;		m_useVideo2 = false;
-;
-;		if (!(opcode & 0x20))
-;		{
-;			if (!(opcode & 0x10))
-;				x = (x << 8) | fetch_byte();
-;			else
-;				x = read_vm_variable(x);
-;		}
-;		else
-;		{
-;		    if (opcode & 0x10)
-;		        x += 0x100;
-;		}
-;
-;		y = fetch_byte();
-;
-;		if (!(opcode & 8))
-;		{
-;			if (!(opcode & 4))
-;				y = (y << 8) | fetch_byte();
-;			else
-;				y = read_vm_variable(y);
-;		}
-;
-;		uint16_t zoom = 0x40;
-;
-;		switch (opcode & 0x03)
-;		{
-;			case 0:
-;				zoom = 0x40;
-;				break;
-;			case 1:
-;				zoom = read_vm_variable(fetch_byte());
-;				break;
-;			case 2:
-;				fetch_byte();
-;				break;
-;			case 3:
-;				m_useVideo2 = true;
-;				zoom = 0x40;
-;				break;
-;		}
-;
-;		((another_world_vm_state*) owner())->setDataBuffer(m_useVideo2 ? VIDEO_2 : CINEMATIC, offset);
-;		((another_world_vm_state*) owner())->readAndDrawPolygon(COLOR_BLACK, zoom, VMPoint(x, y));
+	; A = opcode (bit 6 set), save for bit testing
+	LD B, A
 
-	JP _end_of_EXECUTE_INSTRUCTION
+	; offset = fetch_word() * 2 (big-endian)
+	LD WA, (XIX)
+	EX W, A				; byte-swap
+	SLA 1, WA			; offset *= 2
+	INC 2, XIX
+	PUSH WA				; save offset [stack: offset]
+
+	; x = fetch_byte()
+	LD A, (XIX)
+	INC XIX
+	LD D, 0
+	LD E, A				; DE = x (byte value)
+
+	; X addressing mode based on opcode bits 5,4
+	BIT 5, B
+	JP NZ, _0x40_x_bit5set
+
+	; bit 5 clear: extended x
+	BIT 4, B
+	JP NZ, _0x40_x_var
+	; x = (x << 8) | fetch_byte() - 16-bit immediate
+	LD D, E
+	LD E, (XIX)
+	INC XIX
+	JP _0x40_x_done
+
+_0x40_x_var:
+	; x = read_vm_variable(x) - A still has x
+	CALL _read_vm_var	; DE = vm_var[x]
+	JP _0x40_x_done
+
+_0x40_x_bit5set:
+	; bit 5 set
+	BIT 4, B
+	JP Z, _0x40_x_done
+	; x += 0x100
+	ADD DE, 100h
+
+_0x40_x_done:
+	; DE = x
+	PUSH DE				; save x [stack: x, offset]
+
+	; y = fetch_byte()
+	LD A, (XIX)
+	INC XIX
+	LD H, 0
+	LD L, A				; HL = y (byte value)
+
+	; Y addressing mode based on opcode bits 3,2
+	BIT 3, B
+	JP NZ, _0x40_y_done
+
+	BIT 2, B
+	JP NZ, _0x40_y_var
+	; y = (y << 8) | fetch_byte() - 16-bit immediate
+	LD H, L
+	LD L, (XIX)
+	INC XIX
+	JP _0x40_y_done
+
+_0x40_y_var:
+	; y = read_vm_variable(y) - A still has y
+	CALL _read_vm_var	; DE = vm_var[y]
+	LD HL, DE			; HL = y
+
+_0x40_y_done:
+	; HL = y
+	PUSH HL				; save y [stack: y, x, offset]
+
+	; Zoom mode based on opcode bits 1,0
+	LD C, 40h			; default zoom
+	LD A, B
+	AND A, 3
+
+	CP A, 0
+	JP EQ, _0x40_zoom_done
+
+	CP A, 1
+	JP NE, _0x40_zoom_not_1
+	; zoom = read_vm_variable(fetch_byte())
+	LD A, (XIX)
+	INC XIX
+	CALL _read_vm_var	; DE = vm_var[A]
+	LD C, E				; zoom = low byte of variable
+	JP _0x40_zoom_done
+
+_0x40_zoom_not_1:
+	CP A, 2
+	JP NE, _0x40_zoom_case3
+	; fetch_byte() and discard
+	INC XIX
+	JP _0x40_zoom_done
+
+_0x40_zoom_case3:
+	; case 3: m_useVideo2 = true, zoom = 0x40
+	; TODO: select INTRO_VIDEO_2 when available
+
+_0x40_zoom_done:
+	; C = zoom
+
+	; Save bytecode position (all variable-length bytes consumed)
+	LD XDE, XIX
+	SUB XDE, INTRO_BYTECODE
+	LD (VM_PC), DE
+
+	; Restore parameters from stack
+	POP HL				; HL = y
+	POP DE				; DE = x
+	POP WA				; WA = offset
+
+	; Set up polygon data pointer
+	EXTZ XWA
+	LD XIX, INTRO_VIDEO_1
+	ADD XIX, XWA
+
+	; B = color (0xFF = BLACK), C = zoom (already set)
+	LD B, 0FFh
+
+	; DE = x, HL = y, BC = color|zoom, XIX = data pointer
+	CALL readAndDrawPolygon
+
+	JP _after_PC_update
 
 OPCODE_BIT_6_NOT_SET:
 
@@ -1133,13 +1355,16 @@ OPCODE_BIT_6_NOT_SET:
 	LD WA, 0
 	LD A, (XIX)		; uint8_t variableId = fetch_byte();
 	INC XIX
-	LD DE, (XIX)	; int16_t value = fetch_word();
-	INC 2, XIX
+	; Calculate destination pointer first
 	LD XIY, VM_VARIABLES
 	SLA 1, WA
 	EXTZ XWA
 	ADD XIY, XWA
-	LD (XIY), DE	; write_vm_variable(variableId, value);
+	; Now fetch the 16-bit value (big-endian bytecode)
+	LD WA, (XIX)	; int16_t value = fetch_word();
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+	LD (XIY), WA	; write_vm_variable(variableId, value);
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_MOVCONST:
 
@@ -1150,7 +1375,7 @@ INSTRUCTION_IS_NOT_MOVCONST:
 	LD WA, 0
 	LD A, (XIX)		; uint8_t dstVariableId = fetch_byte();
 	INC XIX
-	PUSH WA
+	PUSH WA			; save dstVariableId
 	LD WA, 0
 	LD A, (XIX)		; uint8_t srcVariableId = fetch_byte();
 	INC XIX
@@ -1159,8 +1384,13 @@ INSTRUCTION_IS_NOT_MOVCONST:
 	EXTZ XWA
 	ADD XIY, XWA
 	LD DE, (XIY)	; value = read_vm_variable(srcVariableId);
-	POP WA
-	LD (XIY), DE	; write_vm_variable(dstVariableId, value);	
+	; Recalculate XIY for destination variable
+	POP WA			; restore dstVariableId
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	LD (XIY), DE	; write_vm_variable(dstVariableId, value);
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_MOV:
 
@@ -1171,7 +1401,7 @@ INSTRUCTION_IS_NOT_MOV:
 	LD WA, 0
 	LD A, (XIX)		; uint8_t dstVariableId = fetch_byte();
 	INC XIX
-	PUSH WA
+	PUSH WA			; save dstVariableId
 	LD WA, 0
 	LD A, (XIX)		; uint8_t srcVariableId = fetch_byte();
 	INC XIX
@@ -1179,9 +1409,14 @@ INSTRUCTION_IS_NOT_MOV:
 	SLA 1, WA
 	EXTZ XWA
 	ADD XIY, XWA
-	LD DE, (XIY)	; value = read_vm_variable(srcVariableId);
-	POP WA
-	LD (XIY), DE	; write_vm_variable(dstVariableId, value);	
+	LD DE, (XIY)	; srcValue = read_vm_variable(srcVariableId);
+	; Recalculate XIY for destination variable
+	POP WA			; restore dstVariableId
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	ADDW (XIY), DE	; vm_variable[dst] += srcValue;
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_ADD:
 
@@ -1192,13 +1427,16 @@ INSTRUCTION_IS_NOT_ADD:
 	LD WA, 0
 	LD A, (XIX)		; uint8_t variableId = fetch_byte();
 	INC XIX
+	; Calculate variable pointer first
 	LD XIY, VM_VARIABLES
 	SLA 1, WA
 	EXTZ XWA
 	ADD XIY, XWA
-	LD WA, (XIX)	; int16_t value = fetch_byte();
+	; Fetch 16-bit constant (big-endian bytecode)
+	LD WA, (XIX)	; int16_t value = fetch_word();
+	EX W, A			; byte-swap: bytecode is big-endian
 	INC 2, XIX
-	ADDW (XIY), WA	; vm_variable += value;	
+	ADDW (XIY), WA	; vm_variable += value;
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_ADD_CONST:
 
@@ -1256,7 +1494,7 @@ INSTRUCTION_IS_NOT_RET:
 	LD (XWA + REQUESTED_PC_OFFSET), DE
 _pausethread_after_setting_request:
 	CALL NEXT_THREAD
-	JP _end_of_EXECUTE_INSTRUCTION
+	JP _after_PC_update
 INSTRUCTION_IS_NOT_PAUSE_THREAD:
 
 
@@ -1292,18 +1530,23 @@ INSTRUCTION_IS_NOT_SET_VECT:
 	; ====  DJNZ instruction  ====
 	CP A, 9
 	JP NE, INSTRUCTION_IS_NOT_DJNZ
-	ld WA, 0
+	LD WA, 0
 	LD A, (XIX)	; byte variableId
 	INC XIX
-	LDW BC, (XIX)	; word address
-	INC 2, XIX
+	; Calculate variable pointer first
 	LD XIY, VM_VARIABLES
 	SLA 1, WA
 	EXTZ XWA
 	ADD XIY, XWA
+	; Fetch jump address (big-endian bytecode)
+	LD WA, (XIX)	; word address
+	EX W, A			; byte-swap: bytecode is big-endian
+	LD BC, WA
+	INC 2, XIX
+	; Decrement variable and branch if non-zero
 	LD DE, (XIY)
 	DEC DE
-	LD (XIY), DE	; write_vm_variable(variableId, value);
+	LD (XIY), DE	; write_vm_variable(variableId, --value);
 	CP DE, 0
 	JP Z, _end_of_EXECUTE_INSTRUCTION
 	LD (VM_PC), BC
@@ -1315,21 +1558,110 @@ INSTRUCTION_IS_NOT_DJNZ:
 	; ====  COND_JUMP instruction  ====
 	CP A, 0Ah
 	JP NE, INSTRUCTION_IS_NOT_COND_JUMP
-	; Implement-me!
-	INC 5, XIX ;
-	;	uint8_t subopcode = fetch_byte();
-	;	uint8_t v = fetch_byte();
-	;	int16_t b = read_vm_variable(v);
-	;	uint8_t c = fetch_byte();
+
+	LD B, (XIX)		; uint8_t subopcode = fetch_byte();
+	INC XIX
+
+	LD A, (XIX)		; uint8_t v = fetch_byte();
+	INC XIX
+	CALL _read_vm_var
+	PUSH DE			; save b = read_vm_variable(v) on stack
+
+	LD A, (XIX)		; uint8_t c = fetch_byte();
+	INC XIX
+
+	; Determine operand 'a' based on subopcode bits
+	BIT 7, B
+	JP Z, _condJmp_not_var
+	; bit 7 set: a = read_vm_variable(c)
+	CALL _read_vm_var	; A still has c; DE = vm_var[c]
+	JP _condJmp_have_a
+_condJmp_not_var:
+	BIT 6, B
+	JP Z, _condJmp_byte_literal
+	; bit 6 set: a = (c << 8) | fetch_byte()  (16-bit immediate)
+	LD D, A
+	LD E, (XIX)		; fetch extra low byte
+	INC XIX
+	JP _condJmp_have_a
+_condJmp_byte_literal:
+	; neither bit set: a = c (sign-extended byte)
+	LD E, A
+	LD D, 0
+	; Sign-extend: if bit 7 of E is set, D = 0xFF
+	BIT 7, E
+	JP Z, _condJmp_have_a
+	LD D, 0FFh
+_condJmp_have_a:
+	; DE = a (RHS), (XSP) = b (LHS), B = subopcode
+	POP HL			; HL = b (LHS)
+
+	; Save comparison type (subopcode & 7) before clobbering B
+	LD A, B
+	AND A, 7
+	PUSH WA			; save comparison type on stack
+
+	; Fetch the jump target word (big-endian, always consumed)
+	LD WA, (XIX)
+	EX W, A			; byte-swap: bytecode is big-endian
+	LD BC, WA		; BC = jump offset
+	INC 2, XIX
+
+	; Restore comparison type
+	POP WA			; A = comparison type
+
+	; Dispatch comparison: b (HL) vs a (DE)
+	CP A, 0			; case 0: eq (b == a)
+	JP NE, _condJmp_not_eq
+	CP HL, DE
+	JP EQ, _condJmp_taken
+	JP _condJmp_not_taken
+_condJmp_not_eq:
+	CP A, 1			; case 1: ne (b != a)
+	JP NE, _condJmp_not_ne
+	CP HL, DE
+	JP NE, _condJmp_taken
+	JP _condJmp_not_taken
+_condJmp_not_ne:
+	CP A, 2			; case 2: gt (b > a)
+	JP NE, _condJmp_not_gt
+	CP HL, DE
+	JP GT, _condJmp_taken
+	JP _condJmp_not_taken
+_condJmp_not_gt:
+	CP A, 3			; case 3: ge (b >= a)
+	JP NE, _condJmp_not_ge
+	CP HL, DE
+	JP GE, _condJmp_taken
+	JP _condJmp_not_taken
+_condJmp_not_ge:
+	CP A, 4			; case 4: lt (b < a)
+	JP NE, _condJmp_not_lt
+	CP HL, DE
+	JP LT, _condJmp_taken
+	JP _condJmp_not_taken
+_condJmp_not_lt:
+	; case 5: le (b <= a) - default for any remaining
+	CP HL, DE
+	JP LE, _condJmp_taken
+
+_condJmp_not_taken:
 	JP _end_of_EXECUTE_INSTRUCTION
+
+_condJmp_taken:
+	LD (VM_PC), BC
+	JP _after_PC_update
+
 INSTRUCTION_IS_NOT_COND_JUMP:
 
 
 	; ====  SET_PALETTE instruction  ====
 	CP A, 0Bh
 	JP NE, INSTRUCTION_IS_NOT_SET_PALETTE
-	LD WA, (XIX)	; word paletteId
-	SRA 8, WA
+	LD WA, (XIX)	; word paletteId = fetch_word()
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+	SRA 8, WA		; paletteId >>= 8
 	EXTZ XWA
 	CALL SETUP_PALETTE
 	JP _end_of_EXECUTE_INSTRUCTION
@@ -1339,7 +1671,56 @@ INSTRUCTION_IS_NOT_SET_PALETTE:
 	; ====  RESET_THREAD instruction  ====
 	CP A, 0Ch
 	JP NE, INSTRUCTION_IS_NOT_RESET_THREAD
-	; Implement-me!
+	LD B, (XIX)		; uint8_t first = fetch_byte();
+	INC XIX
+	LD C, (XIX)		; uint8_t last = fetch_byte();
+	INC XIX
+	LD D, (XIX)		; uint8_t type = fetch_byte();
+	INC XIX
+	; Clamp last to [0, 63]
+	AND C, 3Fh
+
+	CP D, 0			; type 0: freeze threads
+	JP NE, _resetThread_not_freeze
+_resetThread_freeze_loop:
+	LD WA, 0
+	LD A, B
+	SLA 1, WA
+	EXTZ XWA
+	ADD XWA, VM_IS_CHANNEL_ACTIVE
+	LD (XWA + REQUESTED_STATE), FROZEN
+	INC B
+	CP B, C
+	JP ULE, _resetThread_freeze_loop
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_resetThread_not_freeze:
+	CP D, 1			; type 1: unfreeze threads
+	JP NE, _resetThread_not_unfreeze
+_resetThread_unfreeze_loop:
+	LD WA, 0
+	LD A, B
+	SLA 1, WA
+	EXTZ XWA
+	ADD XWA, VM_IS_CHANNEL_ACTIVE
+	LD (XWA + REQUESTED_STATE), NOT_FROZEN
+	INC B
+	CP B, C
+	JP ULE, _resetThread_unfreeze_loop
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_resetThread_not_unfreeze:
+	; type 2: delete threads (set requested_PC = DELETE_THIS_THREAD)
+_resetThread_delete_loop:
+	LD WA, 0
+	LD A, B
+	SLA 2, WA
+	EXTZ XWA
+	ADD XWA, THREADS_DATA
+	LDW (XWA + REQUESTED_PC_OFFSET), DELETE_THIS_THREAD
+	INC B
+	CP B, C
+	JP ULE, _resetThread_delete_loop
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_RESET_THREAD:
 
@@ -1379,15 +1760,115 @@ INSTRUCTION_IS_NOT_FILL_VIDEO_PAGE:
 	; ====  COPY_VIDEO_PAGE instruction  ====
 	CP A, 0Fh
 	JP NE, INSTRUCTION_IS_NOT_COPY_VIDEO_PAGE
-	;  FIXME: This is an incomplete implementation!
-	LD A, (XIX)		; byte srcPageId
+	LD B, (XIX)		; byte srcPageId
 	INC XIX
+	LD C, (XIX)		; byte dstPageId
+	INC XIX
+
+	; Get destination page pointer
+	LD A, C
+	CALL GET_PAGE_PTR
+	PUSH XWA		; save dst pointer on stack
+
+	; Check for simple copy: srcPageId >= 0xFE
+	CP B, 0FEh
+	JP UGE, _copypage_simple
+
+	; Check scroll mode: (srcPageId & 0xBF) has bit 7 set?
+	LD A, B
+	AND A, 0BFh
+	BIT 7, A
+	JP Z, _copypage_simple_masked
+
+	; === Scroll mode ===
+	; Actual source page = srcPageId & 3
+	AND A, 3
+	CALL GET_PAGE_PTR
+	LD XDE, XWA		; XDE = src page base
+
+	; Read vscroll from VM_VARIABLE_SCROLL_Y
+	PUSH XDE		; save src base
+	LD A, VM_VARIABLE_SCROLL_Y
+	CALL _read_vm_var	; DE = vscroll (16-bit signed)
+	LD HL, DE		; HL = vscroll
+	POP XDE			; restore src base
+
+	; Validate: -199 <= vscroll <= 199
+	CP HL, -199
+	JP LT, _copypage_scroll_skip
+	CP HL, 199
+	JP GT, _copypage_scroll_skip
+
+	; Compute h, src_y0, dest_y0
+	LD BC, 200		; h = screen height
+	POP XWA			; XWA = dst base
+	PUSH XWA		; re-push for later pop
+
+	CP HL, 0
+	JP GE, _copypage_vscroll_positive
+
+	; vscroll < 0: h += vscroll, src_y0 = -vscroll
+	ADD BC, HL		; h += vscroll (vscroll is negative)
+	LD WA, 0
+	SUB WA, HL		; WA = -vscroll = src_y0
+	; Advance src pointer by src_y0 * 320
+	PUSH BC
+	LD BC, 320
+	EXTZ XWA
+	MUL XWA, BC
+	ADD XDE, XWA	; src += src_y0 * 320
+	POP BC
+	JP _copypage_do_scroll
+
+_copypage_vscroll_positive:
+	; vscroll >= 0: h -= vscroll, dest_y0 = vscroll
+	SUB BC, HL		; h -= vscroll
+	LD WA, HL		; WA = vscroll = dest_y0
+	; Advance dst pointer by dest_y0 * 320
+	POP XHL			; XHL = dst base (from stack)
+	PUSH BC
+	LD BC, 320
+	EXTZ XWA
+	MUL XWA, BC
+	ADD XHL, XWA	; dst += dest_y0 * 320
+	POP BC
+	PUSH XHL		; re-push adjusted dst
+
+_copypage_do_scroll:
+	; Copy h scanlines (BC = h, XDE = src, stack top = dst)
+	POP XHL			; XHL = dst pointer
+	; Convert h scanlines to dword count: h * 320 / 4 = h * 80
+	LD WA, BC		; WA = h
+	EXTZ XWA
+	LD BC, 80
+	MUL XWA, BC		; XWA = h * 80
+	LD BC, WA		; BC = dword count
+_copypage_scroll_loop:
+	LD XWA, (XDE)
+	LD (XHL), XWA
+	INC 4, XDE
+	INC 4, XHL
+	DJNZ BC, _copypage_scroll_loop
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_copypage_scroll_skip:
+	POP XWA			; clean up stack (dst pointer)
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_copypage_simple_masked:
+	; srcPageId after masking still doesn't have bit 7 set - use masked value
 	CALL GET_PAGE_PTR
 	LD XDE, XWA
-	LD A, (XIX)		; byte DstPageId
-	INC XIX
+	JP _copypage_do_simple
+
+_copypage_simple:
+	; Simple copy: get src page from original srcPageId
+	LD A, B
 	CALL GET_PAGE_PTR
-	LD XHL, XWA
+	LD XDE, XWA
+
+_copypage_do_simple:
+	POP XHL			; XHL = dst page pointer (from stack)
 	LD BC, 320 * 200 / 4
 _copy_videopage_loop:
 	LD XWA, (XDE)
@@ -1404,7 +1885,24 @@ INSTRUCTION_IS_NOT_COPY_VIDEO_PAGE:
 	JP NE, INSTRUCTION_IS_NOT_BLIT_FRAMEBUFFER
 	LD A, (XIX)		; byte pageId
 	INC XIX
+
+	; VM_HACK_SWITCH_FROM_INTRO_TO_LAKE:
+	; If currentPart == INTRO and vm_var[0x67] == 1, set vm_var[0xDC] = 0x21
+	PUSH WA			; save pageId
+	LD WA, (CURRENT_PART_ID)
+	CP WA, GAME_PART_INTRO
+	JP NE, _blit_no_hack
+	LD A, 067h
+	CALL _read_vm_var	; DE = vm_var[0x67]
+	CP DE, 1
+	JP NE, _blit_no_hack
+	LD A, 0DCh
+	LD DE, 021h
+	CALL _write_vm_var
+_blit_no_hack:
+	POP WA			; restore pageId (A = pageId)
 	CALL UPDATE_DISPLAY
+	CALL PAUSE			; Frame timing delay
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_BLIT_FRAMEBUFFER:
 
@@ -1426,7 +1924,19 @@ INSTRUCTION_IS_NOT_KILL_THREAD:
 	; ====  DRAW_STRING instruction  ====
 	CP A, 12h
 	JP NE, INSTRUCTION_IS_NOT_DRAW_STRING
-	; Implement-me!
+	; word stringId, byte x, byte y, byte color
+	LD WA, (XIX)	; stringId (big-endian)
+	EX W, A
+	INC 2, XIX
+	LD D, 0
+	LD E, (XIX)		; x
+	INC XIX
+	LD H, 0
+	LD L, (XIX)		; y
+	INC XIX
+	LD B, (XIX)		; color
+	INC XIX
+	CALL DRAW_STRING
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_DRAW_STRING:
 
@@ -1434,7 +1944,20 @@ INSTRUCTION_IS_NOT_DRAW_STRING:
 	; ====  SUB instruction  ====
 	CP A, 13h
 	JP NE, INSTRUCTION_IS_NOT_SUB
-	; Implement-me!
+	; vm_variable[dst] -= vm_variable[src]
+	LD WA, 0
+	LD A, (XIX)		; uint8_t dstVariableId = fetch_byte();
+	INC XIX
+	PUSH WA			; save dstVariableId
+	LD A, (XIX)		; uint8_t srcVariableId = fetch_byte();
+	INC XIX
+	CALL _read_vm_var	; DE = vm_variable[src]
+	POP WA			; restore dstVariableId
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	SUBW (XIY), DE	; vm_variable[dst] -= srcValue;
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_SUB:
 
@@ -1442,7 +1965,18 @@ INSTRUCTION_IS_NOT_SUB:
 	; ====  AND instruction  ====
 	CP A, 14h
 	JP NE, INSTRUCTION_IS_NOT_AND
-	; Implement-me!
+	; vm_variable[id] &= value
+	LD WA, 0
+	LD A, (XIX)		; uint8_t variableId = fetch_byte();
+	INC XIX
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	LD WA, (XIX)	; int16_t value = fetch_word();
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+	AND (XIY), WA	; vm_variable[id] &= value;
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_AND:
 
@@ -1450,7 +1984,18 @@ INSTRUCTION_IS_NOT_AND:
 	; ====  OR instruction  ====
 	CP A, 15h
 	JP NE, INSTRUCTION_IS_NOT_OR
-	; Implement-me!
+	; vm_variable[id] |= value
+	LD WA, 0
+	LD A, (XIX)		; uint8_t variableId = fetch_byte();
+	INC XIX
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	LD WA, (XIX)	; int16_t value = fetch_word();
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+	OR (XIY), WA	; vm_variable[id] |= value;
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_OR:
 
@@ -1458,7 +2003,27 @@ INSTRUCTION_IS_NOT_OR:
 	; ====  SHL instruction  ====
 	CP A, 16h
 	JP NE, INSTRUCTION_IS_NOT_SHL
-	; Implement-me!
+	; vm_variable[id] <<= amount
+	LD WA, 0
+	LD A, (XIX)		; uint8_t variableId = fetch_byte();
+	INC XIX
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	LD WA, (XIX)	; uint16_t shiftAmount = fetch_word();
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+	LD DE, (XIY)
+	; Shift DE left by A positions (shift amount in low byte)
+	CP A, 0
+	JP Z, _shl_done
+_shl_loop:
+	SLA 1, DE
+	DEC A
+	JP NZ, _shl_loop
+_shl_done:
+	LD (XIY), DE
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_SHL:
 
@@ -1466,7 +2031,27 @@ INSTRUCTION_IS_NOT_SHL:
 	; ====  SHR instruction  ====
 	CP A, 17h
 	JP NE, INSTRUCTION_IS_NOT_SHR
-	; Implement-me!
+	; vm_variable[id] >>= amount
+	LD WA, 0
+	LD A, (XIX)		; uint8_t variableId = fetch_byte();
+	INC XIX
+	LD XIY, VM_VARIABLES
+	SLA 1, WA
+	EXTZ XWA
+	ADD XIY, XWA
+	LD WA, (XIX)	; uint16_t shiftAmount = fetch_word();
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+	LD DE, (XIY)
+	; Shift DE right by A positions (shift amount in low byte)
+	CP A, 0
+	JP Z, _shr_done
+_shr_loop:
+	SRA 1, DE
+	DEC A
+	JP NZ, _shr_loop
+_shr_done:
+	LD (XIY), DE
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_SHR:
 
@@ -1484,8 +2069,36 @@ INSTRUCTION_IS_NOT_PLAY_SOUND:
 	; ====  LOAD instruction  ====
 	CP A, 19h
 	JP NE, INSTRUCTION_IS_NOT_LOAD
-	; Implement-me!
-	INC 2, XIX		; word resourceId;
+	LD WA, (XIX)	; uint16_t resourceId = fetch_word()
+	EX W, A			; byte-swap: bytecode is big-endian
+	INC 2, XIX
+
+	; resourceId == 0: stop sound (no-op, we don't have sound)
+	CP WA, 0
+	JP EQ, _end_of_EXECUTE_INSTRUCTION
+
+	; resourceId > 0x91: part switch request
+	CP WA, NUM_MEM_LIST
+	JP ULE, _load_check_screen
+	LD (REQUESTED_NEXT_PART), WA
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_load_check_screen:
+	; Check if resourceId matches a known screen bitmap resource
+	; screen_resource_indexes = {0x49, 0x53} (available resources)
+	CP WA, 049h
+	JP NE, _load_not_0x49
+	LD XHL, SCREEN_BITMAP_0x49
+	CALL LOAD_SCREEN
+	JP _end_of_EXECUTE_INSTRUCTION
+_load_not_0x49:
+	CP WA, 053h
+	JP NE, _load_unknown
+	LD XHL, SCREEN_BITMAP_0x53
+	CALL LOAD_SCREEN
+	JP _end_of_EXECUTE_INSTRUCTION
+_load_unknown:
+	; Unknown resource - ignore
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_LOAD:
 
@@ -1526,6 +2139,16 @@ INTRO_PALETTES:
 
 INTRO_VIDEO_1:
 	binclude "resources/resource-0x19.bin"
+
+INTRO_VIDEO_2:
+	binclude "resources/resource-0x1a.bin"
+
+; Screen bitmap resources
+SCREEN_BITMAP_0x49:
+	binclude "resources/resource-0x49.bin"
+
+SCREEN_BITMAP_0x53:
+	binclude "resources/resource-0x53.bin"
 
 BITMAP_1:
 	binclude "another_world_logo.bin"

@@ -86,6 +86,9 @@ CUR_PAGE_PTR_3: DD ?
 
 STRING_X0: DW ?
 
+REQUESTED_NEXT_PART: DW ?		; Part switch request (0 = no request)
+CURRENT_PART_ID: DW ?			; Current game part ID
+
 ; =============================================================================
 ; Main CPU ROM Layout
 ; =============================================================================
