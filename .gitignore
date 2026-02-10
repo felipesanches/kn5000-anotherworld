@@ -8,6 +8,9 @@ build/
 *.map
 *.log
 
+# Game resources (extracted separately, not checked in)
+src/resources/
+
 # Exceptions for checked-in data files
 !src/hardcoded_data/*.rom
 
