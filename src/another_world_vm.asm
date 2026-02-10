@@ -1036,15 +1036,27 @@ PAGEID_NOT_FF:
 	RET
 
 PAGEID_NOT_FE:
-	CP A, 3
-	JP UGT, PAGEID_OTHER_VALUE
-	AND WA, 3   ; 10000h bytes per page = enough for 320x200 pixels
-	LD QWA, WA
-	LD WA, 0
-	ADD XWA, PAGE_BITMAP_0
+	CP A, 0
+	JP NE, _not_page0
+	LD XWA, PAGE_BITMAP_0
 	RET
-
-PAGEID_OTHER_VALUE:
+_not_page0:
+	CP A, 1
+	JP NE, _not_page1
+	LD XWA, PAGE_BITMAP_1
+	RET
+_not_page1:
+	CP A, 2
+	JP NE, _not_page2
+	LD XWA, PAGE_BITMAP_2
+	RET
+_not_page2:
+	CP A, 3
+	JP NE, _not_page3
+	LD XWA, PAGE_BITMAP_3
+	RET
+_not_page3:
+	; Any other page ID defaults to page 0
 	LD XWA, PAGE_BITMAP_0
 	RET
 
