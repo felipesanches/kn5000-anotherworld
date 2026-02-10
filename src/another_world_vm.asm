@@ -20,22 +20,13 @@
 ; using the scripts provided at:
 ; https://github.com/felipesanches/AnotherWorld_VMTools
 ;
-	cpu	96c141	; Actual CPU is 94c241f
-	page	0
-	maxmode	on
-
-	ORG 0200000h
-
-VM_VARIABLES:	DW	256 DUP (?)
-
-THREADS_DATA:	DW	64*2 DUP (?)  ; For each of the 64 threads:
+; === EQU Constants (shared) ===
 PC_OFFSET			EQU 0  ; 16 bits
 REQUESTED_PC_OFFSET	EQU 2  ; 16 bits
 INACTIVE_THREAD		EQU 0FFFFh
 DELETE_THIS_THREAD	EQU 0FFFEh
 NO_REQUEST 			EQU 0FFFFh
 
-VM_IS_CHANNEL_ACTIVE:	DB	64*2 DUP (?)   ; For each of the 64 threads:
 CURRENT_STATE	EQU 0  ; boolean stored as a byte
 REQUESTED_STATE	EQU 1  ; boolean stored as a byte
 
@@ -43,69 +34,11 @@ FROZEN	EQU 0
 NOT_FROZEN EQU 1
 NO_STATE_REQUEST EQU 0FFh
 
-CURRENT_THREAD: DB ?
-PC:				DW ?
-VM_STACK_POINTER: DD ?
-VM_STACK: DW 256 DUP (?)
-
-POLYGON_NUM_POINTS:	DB ?
-POLYGON_BBOX_W:		DW ?					; uint16_t
-POLYGON_BBOX_H:		DW ?					; uint16_t
-POLYGON_POINTS:		DW	50 DUP (?, ?, ?)
-POLYGON_XMIN:	DW ?						; int16_t
-POLYGON_XMAX:	DW ?						; int16_t
-POLYGON_YMIN:	DW ?						; int16_t
-POLYGON_YMAX:	DW ?						; int16_t
-HLINEY:		DW ?							; int16_t
-CUR_LINE:			; uint32_t
-CUR_LINE_LOW:	DW ?
-CUR_LINE_HIGH:	DW ?
-
-CPT1:				; uint32_t
-CPT1_LOW:	DW ?
-CPT1_HIGH:	DW ?
-
-CPT2:				; uint32_t
-CPT2_LOW:	DW ?
-CPT2_HIGH:	DW ?
-
-STEP1:				; int32_t
-STEP1_LOW:	DW ?
-STEP1_HIGH:	DW ?
-
-STEP2:				; int32_t
-STEP2_LOW:	DW ?
-STEP2_HIGH:	DW ?
-
-; int16_t x1, x2;
-X1:			DW ?
-X2:			DW ?
-
-; 	uint16_t h;
-POLYGON_H:	DW ?
-DX:			DW ?	; int16_t
-
-;	int16_t xmax, xmin
-LINE_XMIN:	DW ?
-LINE_XMAX:	DW ?
-CUR_PAGE_PTR_1: DD ?
-CUR_PAGE_PTR_2: DD ?
-CUR_PAGE_PTR_3: DD ?
-
-STRING_X0: DW ?
-
-	ORG 0280000h
-
-EXTENSION_HEADER:
-	db 'XAPR'
-	dd POINTERS
-	JP ENTRY
-POINTERS:
-	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE 
-	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE 
-	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE 
-	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE 
-	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE 
+; These off-screen video pages are stored in external RAM:
+PAGE_BITMAP_0 EQU 240000h
+PAGE_BITMAP_1 EQU 250000h
+PAGE_BITMAP_2 EQU 260000h
+PAGE_BITMAP_3 EQU 270000h
 
 CALC_LINE_XMAX_AND_XMIN:
 	; int16_t xmax = MAX(x1, x2);
@@ -264,7 +197,7 @@ VIDEO_START:
 GAME_RESET:
 	CALL VIDEO_START
 	LDB (CURRENT_THREAD), 0
-	LDW (PC), 0
+	LDW (VM_PC), 0
 	LD XIX, VM_STACK
 	LD (VM_STACK_POINTER), XIX
 	
@@ -972,14 +905,6 @@ PAGEID_OTHER_VALUE:
 	RET
 
 
-; These off-screen video pages are stored
-; on the SRAM of the HDAE5000 extension card:
-
-PAGE_BITMAP_0 EQU 240000h
-PAGE_BITMAP_1 EQU 250000h
-PAGE_BITMAP_2 EQU 260000h
-PAGE_BITMAP_3 EQU 270000h
-
 INPUT_UPDATE_PLAYER:
 	; Implement-me!
 	RET
@@ -1083,7 +1008,7 @@ _exit_do_loop:
 	EXTZ XWA
 	ADD XWA, THREADS_DATA
 	LD DE, (XWA + PC_OFFSET) 	;	PC = current->PC;
-	LD (PC), DE
+	LD (VM_PC), DE
 	RET
 
 
@@ -1091,7 +1016,7 @@ EXECUTE_INSTRUCTION:
 	PUSH XIX
 	PUSH XIY
 
-	LD IX, (PC)
+	LD IX, (VM_PC)
 	EXTZ XIX
 	ADD XIX, INTRO_BYTECODE			; FIXME
 
@@ -1285,12 +1210,12 @@ INSTRUCTION_IS_NOT_ADD_CONST:
 	EX W, A
 	INC 2, XIX
 	LD XIY, (VM_STACK_POINTER)
-	LD DE, (PC)
+	LD DE, (VM_PC)
 	INC 3, DE
 	LD (XIY), DE		; push current program counter to VM stack
 	INC 2, XIY
 	LD (VM_STACK_POINTER), XIY
-	LD (PC), WA
+	LD (VM_PC), WA
 	JP _after_PC_update
 INSTRUCTION_IS_NOT_CALL:
 
@@ -1302,7 +1227,7 @@ INSTRUCTION_IS_NOT_CALL:
 	DEC 2, XIY
 	LD WA, (XIY)		; pop return address from VM stack
 	LD (VM_STACK_POINTER), XIY
-	LD (PC), WA
+	LD (VM_PC), WA
 	JP _after_PC_update
 INSTRUCTION_IS_NOT_RET:
 
@@ -1340,7 +1265,7 @@ INSTRUCTION_IS_NOT_PAUSE_THREAD:
 	JP NE, INSTRUCTION_IS_NOT_JUMP
 	LD WA, (XIX)	; word jump_address;
 	EX W, A
-	LD (PC), WA
+	LD (VM_PC), WA
 	JP _after_PC_update
 INSTRUCTION_IS_NOT_JUMP:
 
@@ -1381,7 +1306,7 @@ INSTRUCTION_IS_NOT_SET_VECT:
 	LD (XIY), DE	; write_vm_variable(variableId, value);
 	CP DE, 0
 	JP Z, _end_of_EXECUTE_INSTRUCTION
-	LD (PC), BC
+	LD (VM_PC), BC
 	JP _after_PC_update
 
 INSTRUCTION_IS_NOT_DJNZ:
@@ -1577,7 +1502,7 @@ INSTRUCTION_IS_NOT_PLAY_MUSIC:
 		
 _end_of_EXECUTE_INSTRUCTION:
 	SUB XIX, INTRO_BYTECODE
-	LD (PC), IX
+	LD (VM_PC), IX
 _after_PC_update:
 	POP XIY
 	POP XIX
@@ -1606,6 +1531,3 @@ BITMAP_1:
 	binclude "another_world_logo.bin"
 BITMAP_2:
 	binclude "other_bitmap.bin"
-	
-	org 02fffffh
-	db 0ffh

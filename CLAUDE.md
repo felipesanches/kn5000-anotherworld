@@ -15,7 +15,9 @@ Custom ROM development for the **Technics KN5000** arranger keyboard. ROMs can b
 ## Build Commands
 
 ```bash
-make          # Build ROM and create MAME ROM set (default)
+make          # Build maincpu ROM and create MAME ROM set (default)
+make maincpu  # Build as standalone main CPU ROM (2MB, for MAME testing)
+make extension# Build as HDAE5000 extension board ROM (512KB)
 make build    # Build custom ROM only (out/custom_program.rom)
 make romset   # Create complete MAME ROM set
 make test     # Run in MAME emulator
@@ -24,9 +26,12 @@ make distclean# Remove everything including ROM set
 make check    # Verify tools and original ROMs are available
 ```
 
+**Dual-target build:** Uses `ifdef TARGET_MAINCPU` / `ifdef TARGET_EXTENSION` conditional assembly in `src/main.asm`. The VM code in `src/another_world_vm.asm` is shared between both targets.
+
 **Requirements:**
 - ASL Macro Assembler at `../../tools/asl/asl`
 - Original KN5000 ROMs at `/mnt/shared/kn5000_original_roms/kn5000/`
+- Game resources in `src/resources/` and `src/` (see README for extraction)
 
 **Output:**
 - Build artifacts: `out/`
@@ -34,18 +39,20 @@ make check    # Verify tools and original ROMs are available
 
 ## Architecture
 
-The ROM initializes at reset vector 0xFFFEE0, then:
+**Maincpu target** initializes at reset vector 0xFFFEE0, then:
 1. Disables watchdog, sets up stack
 2. Configures memory controller and DRAM
 3. Initializes VGA display (320x240, 8bpp palette mode)
-4. Draws graphics to framebuffer at 0x1A0000
-5. Configures SC0 serial port for computer interface
+4. Jumps to VM ENTRY point
+
+**Extension target** is loaded by the KN5000 firmware via the XAPR header and jumps directly to the VM ENTRY point.
+
+Both targets share RAM at 0x200000 and page buffers at 0x240000-0x270000.
 
 **Key source files:**
-- `src/main.asm` - Boot code, hardware init, display/serial routines
-- `src/includes/sfr.inc` - CPU Special Function Register definitions
-- `src/includes/vga.inc` - VGA controller register definitions
-- `src/includes/macros.inc` - TLCS-900 instruction macros for ASL
+- `src/main.asm` - Unified platform wrapper (conditional assembly for maincpu/extension)
+- `src/another_world_vm.asm` - Another World bytecode VM (shared between targets)
+- `src/includes/local_macros.inc` - TLCS-900 instruction macros for ASL
 
 ## Reference Repositories (Read-Only)
 
@@ -110,6 +117,18 @@ LDA_XWA_IMM24 addr    ; Load 24-bit address into XWA
 2. Configure memory controller (MSAR/MAMR registers)
 3. Initialize DRAM with timing delays
 4. Set stack pointer to internal RAM
+
+## Mandatory Policy: Conversation Logs
+
+**Every Claude Code session that makes changes to this project MUST save its full conversation transcript before committing.** This is a mandatory policy for this project.
+
+Procedure:
+1. At the end of each session (before or alongside the commit), copy the current conversation JSONL file from `~/.claude/projects/-home-fsanches-devel-custom-kn5000-roms/` to `logs/`
+2. Name the log file: `YYYY-MM-DD_short-description.jsonl`
+3. If there was a separate planning session, save that too with a `_planning` suffix
+4. Include the log files in the commit
+
+Log directory: `logs/`
 
 ## Expanding This ROM
 

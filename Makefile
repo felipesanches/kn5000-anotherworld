@@ -41,8 +41,20 @@ DISASM_REPO := ../../kn5000-roms-disasm
 MAIN_ROM := $(BUILD_DIR)/custom_program.rom
 MAIN_DISASM := $(BUILD_DIR)/custom_program.disasm
 
-# ROM size (2MB for program ROM)
-ROM_SIZE := 2097152
+# =============================================================================
+# Target selection: maincpu (default) or extension
+# =============================================================================
+TARGET ?= maincpu
+
+ifeq ($(TARGET),maincpu)
+  ASL_EXTRA := -D TARGET_MAINCPU
+  P2BIN_RANGE := -r 0xE00000-0xFFFFFF
+  ROM_SIZE := 2097152
+else ifeq ($(TARGET),extension)
+  ASL_EXTRA := -D TARGET_EXTENSION
+  P2BIN_RANGE := -r 0x280000-0x2FFFFF
+  ROM_SIZE := 524288
+endif
 
 # =============================================================================
 # MAME ROM Set Configuration
@@ -73,9 +85,19 @@ PROGRAM_ROM_NAME := kn5000_v10_program.rom
 .PHONY: all
 all: romset
 	@echo ""
-	@echo "Build complete!"
+	@echo "Build complete! (TARGET=$(TARGET))"
 	@echo "ROM set ready at: $(ROMSET_DIR)/"
 	@echo "Test with: make test"
+
+# =============================================================================
+# Convenience targets for specific build modes
+# =============================================================================
+.PHONY: maincpu extension
+maincpu:
+	$(MAKE) all TARGET=maincpu
+
+extension:
+	$(MAKE) all TARGET=extension
 
 # =============================================================================
 # Build custom ROM only (no ROM set creation)
@@ -102,7 +124,7 @@ SYMBOLS_USED := $(BUILD_DIR)/symbols.used
 SYMBOLS_UNUSED := $(BUILD_DIR)/symbols.unused
 
 $(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src/*.asm) | $(BUILD_DIR)
-	$(ASL) $(ASL_FLAGS) -olist $(LISTING_FILE) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
+	$(ASL) $(ASL_FLAGS) $(ASL_EXTRA) -olist $(LISTING_FILE) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
 	@# Extract symbol table from listing, split into used and unused
 	@grep -E "^[ *]?[A-Za-z_][A-Za-z0-9_.]* :" $(LISTING_FILE) | \
 		sed 's/ *| */\n/g' | \
@@ -122,7 +144,7 @@ $(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src
 	@echo "Symbols: $$(wc -l < $(SYMBOLS_USED)) used, $$(wc -l < $(SYMBOLS_UNUSED)) unused"
 
 $(MAIN_ROM): $(BUILD_DIR)/main.p
-	$(P2BIN) $< $@ -l 0xFF
+	$(P2BIN) $< $@ $(P2BIN_RANGE) -l 0xFF
 	@# Verify ROM size
 	@SIZE=$$(stat -c%s "$@" 2>/dev/null || stat -f%z "$@" 2>/dev/null); \
 	if [ "$$SIZE" -lt $(ROM_SIZE) ]; then \
@@ -247,17 +269,23 @@ check:
 # =============================================================================
 .PHONY: help
 help:
-	@echo "KN5000 Custom ROM Build System"
+	@echo "KN5000 Custom ROM Build System (Another World VM)"
 	@echo ""
-	@echo "Targets:"
-	@echo "  make          - Build ROM and create MAME ROM set (default)"
-	@echo "  make build    - Build custom ROM only"
+	@echo "Build targets:"
+	@echo "  make          - Build maincpu ROM and create MAME ROM set (default)"
+	@echo "  make maincpu  - Build as standalone main CPU ROM (2MB, for MAME)"
+	@echo "  make extension- Build as HDAE5000 extension board ROM (512KB)"
+	@echo "  make build    - Build custom ROM only (current TARGET)"
+	@echo ""
+	@echo "Other targets:"
 	@echo "  make romset   - Create complete MAME ROM set"
 	@echo "  make test     - Run in MAME emulator"
 	@echo "  make clean    - Remove build artifacts (preserves ROM set)"
 	@echo "  make distclean- Remove everything including ROM set"
 	@echo "  make check    - Verify build tools and original ROMs"
 	@echo "  make help     - Show this help"
+	@echo ""
+	@echo "Current TARGET: $(TARGET)"
 	@echo ""
 	@echo "Output locations:"
 	@echo "  Build:   $(BUILD_DIR)/"
