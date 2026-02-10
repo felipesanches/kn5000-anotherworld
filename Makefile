@@ -116,6 +116,26 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # =============================================================================
+# Generate bitmap assets from game resources
+# =============================================================================
+ASSET_FILES := src/another_world_logo.bin src/other_bitmap.bin
+
+.PHONY: assets
+assets: src/resources/resource-0x49.bin src/resources/resource-0x53.bin
+	touch src/another_world_logo.bin
+	touch src/other_bitmap.bin
+	python src/resources_to_images.py src/resources/resource-0x53.bin src/another_world_logo.bin
+	python src/resources_to_images.py src/resources/resource-0x49.bin src/other_bitmap.bin
+
+src/another_world_logo.bin: src/resources/resource-0x53.bin src/resources_to_images.py
+	touch src/another_world_logo.bin
+	python src/resources_to_images.py src/resources/resource-0x53.bin src/another_world_logo.bin
+
+src/other_bitmap.bin: src/resources/resource-0x49.bin src/resources_to_images.py
+	touch src/other_bitmap.bin
+	python src/resources_to_images.py src/resources/resource-0x49.bin src/other_bitmap.bin
+
+# =============================================================================
 # Build main program ROM
 # =============================================================================
 # Symbol/listing file output (ASL listing with symbol table)
@@ -123,7 +143,7 @@ LISTING_FILE := $(BUILD_DIR)/main.listing
 SYMBOLS_USED := $(BUILD_DIR)/symbols.used
 SYMBOLS_UNUSED := $(BUILD_DIR)/symbols.unused
 
-$(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src/*.asm) | $(BUILD_DIR)
+$(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src/*.asm) $(ASSET_FILES) | $(BUILD_DIR)
 	$(ASL) $(ASL_FLAGS) $(ASL_EXTRA) -olist $(LISTING_FILE) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
 	@# Extract symbol table from listing, split into used and unused
 	@grep -E "^[ *]?[A-Za-z_][A-Za-z0-9_.]* :" $(LISTING_FILE) | \
@@ -191,6 +211,7 @@ romset: $(MAIN_ROM)
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -f $(ASSET_FILES)
 	@echo "Clean complete (ROM set at $(ROMSET_DIR) preserved)"
 
 # Full clean including ROM set
