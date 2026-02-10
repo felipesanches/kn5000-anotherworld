@@ -364,6 +364,8 @@ _setup_threads__loop:
 ENTRY:
 	EI 06 ; DISABLE INTERRUPTS
 
+	; Diagnostics removed - MN89304 DAC confirmed as 4-bit (0-15)
+
 	CALL GAME_RESET
 
 MAIN_LOOP:
@@ -904,35 +906,42 @@ SETUP_PALETTE:
 	ADD XHL, XWA		; XHL = palette data pointer
 
 	; Set VGA DAC write index to 0
-	LD A, 0
-	LD XDE, 01703c8h	; VGA 3c8 port (select color palette index)
-	LD (XDE), A
+	; (Write_VGA_Register preserves XHL, XIX, XIY, BC)
+	LDW WA, 3c8h
+	LDW BC, 0
+	CALR Write_VGA_Register
 
-	LD BC, 16			; 16 colors per palette
-	LD XDE, 01703c9h	; VGA 3c9 port (R, G, B data)
+	PUSH XIX
+	LD XIX, 16			; loop counter (XIX preserved by Write_VGA_Register)
 
 PALETTE_LOOP:
 	; red: low nibble of byte 0
 	LD A, (XHL)
 	AND A, 0Fh
-	SLA 2, A			; scale 4-bit (0-15) to 6-bit (0-60) for VGA DAC
-	LD (XDE), A
+	LD C, A				; MN89304 DAC is 4-bit (0-15), no scaling needed
+	LDW WA, 3c9h
+	CALR Write_VGA_Register
 	INC XHL
 
 	; green: high nibble of byte 1
 	LD A, (XHL)
 	SRL 4, A			; logical shift right to extract high nibble
-	SLA 2, A			; scale 4-bit to 6-bit for VGA DAC
-	LD (XDE), A
+	LD C, A
+	LDW WA, 3c9h
+	CALR Write_VGA_Register
 
 	; blue: low nibble of byte 1
 	LD A, (XHL)
 	AND A, 0Fh
-	SLA 2, A			; scale 4-bit to 6-bit for VGA DAC
-	LD (XDE), A
+	LD C, A
+	LDW WA, 3c9h
+	CALR Write_VGA_Register
 	INC XHL
 
-	DJNZ BC, PALETTE_LOOP
+	DEC 1, XIX
+	CP IX, 0
+	JP NE, PALETTE_LOOP
+	POP XIX
 	RET
 
 
@@ -1710,10 +1719,11 @@ INSTRUCTION_IS_NOT_COND_JUMP:
 	; ====  SET_PALETTE instruction  ====
 	CP A, 0Bh
 	JP NE, INSTRUCTION_IS_NOT_SET_PALETTE
-	LD WA, (XIX)	; word paletteId = fetch_word()
-	EX W, A			; byte-swap: bytecode is big-endian
-	INC 2, XIX
-	SRA 8, WA		; paletteId >>= 8
+	; Reference: m_currentPaletteId = fetchWord() >> 8
+	; The palette index is the first byte of the big-endian word
+	LD WA, 0
+	LD A, (XIX)		; palette index = first byte of word
+	INC 2, XIX		; skip 2-byte word
 	EXTZ XWA
 	CALL SETUP_PALETTE
 	JP _end_of_EXECUTE_INSTRUCTION
