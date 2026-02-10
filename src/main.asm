@@ -90,6 +90,7 @@ LINE_XMAX:	DW ?
 CUR_PAGE_PTR_1: DD ?
 CUR_PAGE_PTR_2: DD ?
 CUR_PAGE_PTR_3: DD ?
+CUR_VIDEO_DATA: DD ?			; Pointer to current video polygon data (VIDEO_1 or VIDEO_2)
 
 STRING_X0: DW ?
 

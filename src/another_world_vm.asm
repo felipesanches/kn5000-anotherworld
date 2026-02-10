@@ -183,10 +183,12 @@ drawLineBlend_loop:
 
 drawPoint:
 	PUSH XIX
+	PUSH DE				; save x
 	LD XWA, 0
 	LD WA, HL			; XWA = y (zero-extended 32-bit)
 	LD DE, 320
 	MUL XWA, DE			; XWA = y * 320
+	POP DE				; restore x
 	EXTZ XDE			; zero-extend x to 32-bit
 	ADD XWA, XDE			; XWA = y*320 + x
 	LD XIX, (CUR_PAGE_PTR_1)
@@ -258,6 +260,8 @@ VIDEO_START:
 	LD (CUR_PAGE_PTR_2), XIX
 	LD XIX, PAGE_BITMAP_1
 	LD (CUR_PAGE_PTR_3), XIX
+	LD XIX, INTRO_VIDEO_1
+	LD (CUR_VIDEO_DATA), XIX
 	RET
 
 ; initForPart: Reset all threads and prepare for a new game part
@@ -457,7 +461,8 @@ readVertices:
 	LD DE, 0
 	LD E, C
 	MUL XWA, DE			; *= ZOOM
-	SRAW 6, WA			; /= default_zoom (40h)
+	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	LD (POLYGON_BBOX_W), WA
 
 	LD WA, 0
@@ -466,7 +471,8 @@ readVertices:
 	LD DE, 0
 	LD E, C
 	MUL XWA, DE			; *= ZOOM
-	SRAW 6, WA			; /= default_zoom (40h)
+	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	LD (POLYGON_BBOX_H), WA
 
 	LD B, (XIX)
@@ -483,7 +489,8 @@ READ_THE_COORDINATES:
 	LD A, (XIX)
 	INC XIX
 	MUL XWA, DE			; *= ZOOM
-	SRAW 6, WA			; /= default_zoom (40h)
+	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	LD (XIY), WA
 	INC 2, XIY
 
@@ -491,7 +498,8 @@ READ_THE_COORDINATES:
 	LD A, (XIX)
 	INC XIX
 	MUL XWA, DE			; *= ZOOM
-	SRAW 6, WA			; /= default_zoom (40h)
+	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	LD (XIY), WA
 	INC 2, XIY
 
@@ -798,7 +806,8 @@ readAndDrawPolygonHierarchy:
 	INC XIX
 	LD HL, (XSP + 6)
 	MUL XWA, DE			; PT.X *= ZOOM
-	SRA 6, WA			; PT.X /= default_zoom (40h)
+	SRL 2, XWA			; PT.X /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	SUB HL, WA
 	LD (XSP + 6), HL
 
@@ -808,7 +817,8 @@ readAndDrawPolygonHierarchy:
 	INC XIX
 	LD HL, (XSP + 4)
 	MUL XWA, DE			; PT.Y *= ZOOM
-	SRA 6, WA			; PT.Y /= default_zoom (40h)
+	SRL 2, XWA			; PT.Y /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	SUB HL, WA
 	LD (XSP + 4), HL
 
@@ -831,7 +841,8 @@ children_loop:
 	INC XIX
 	LD HL, (XSP + 2)
 	MUL XWA, DE			; PO.X *= ZOOM
-	SRA 6, WA			; PO.X /= default_zoom (40h)
+	SRL 2, XWA			; PO.X /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	ADD HL, WA
 	LD (XSP + 2), HL
 	
@@ -841,7 +852,8 @@ children_loop:
 	INC XIX
 	LD HL, (XSP)
 	MUL XWA, DE			; PO.Y *= ZOOM
-	SRA 6, WA			; PO.Y /= default_zoom (40h)
+	SRL 2, XWA			; PO.Y /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 4, XWA
 	ADD HL, WA
 	LD (XSP), HL
 
@@ -857,10 +869,11 @@ children_loop:
 OFFSET_BIT15_NOT_SET:
 
 	PUSH XIX			;	 uint16_t backup = m_data_offset;
-	LD XIX, 0
-	LD IX, (XSP + 0Ah) ;offset
-	SLA 1, IX		 ; m_data_offset = (offset & 0x7FFF) * 2;
-	ADD XIX, INTRO_VIDEO_1
+	LD XIX, (CUR_VIDEO_DATA)
+	LD WA, (XSP + 0Ah) ;offset
+	SLA 1, WA		 ; m_data_offset = (offset & 0x7FFF) * 2;
+	EXTZ XWA
+	ADD XIX, XWA
 	
 	LD HL, DE
 	; here L is the computer new color
@@ -1390,7 +1403,8 @@ _0x40_zoom_not_1:
 
 _0x40_zoom_case3:
 	; case 3: m_useVideo2 = true, zoom = 0x40
-	; TODO: select INTRO_VIDEO_2 when available
+	LD XIX, INTRO_VIDEO_2
+	LD (CUR_VIDEO_DATA), XIX
 
 _0x40_zoom_done:
 	; C = zoom
@@ -1407,7 +1421,7 @@ _0x40_zoom_done:
 
 	; Set up polygon data pointer
 	EXTZ XWA
-	LD XIX, INTRO_VIDEO_1
+	LD XIX, (CUR_VIDEO_DATA)
 	ADD XIX, XWA
 
 	; B = color (0xFF = BLACK), C = zoom (already set)
@@ -1415,6 +1429,10 @@ _0x40_zoom_done:
 
 	; DE = x, HL = y, BC = color|zoom, XIX = data pointer
 	CALL readAndDrawPolygon
+
+	; Reset video data pointer to default (VIDEO_1)
+	LD XIX, INTRO_VIDEO_1
+	LD (CUR_VIDEO_DATA), XIX
 
 	JP _after_PC_update
 
