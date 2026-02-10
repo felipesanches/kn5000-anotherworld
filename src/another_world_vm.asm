@@ -891,18 +891,15 @@ LOAD_SCREEN:
 	RET
 
 SETUP_PALETTE:
-	; WA: palette word from bytecode (W = palette index, A = unused)
-	; Reference: m_currentPaletteId = fetchWord() >> 8
+	; WA: palette index (0-63), already extracted by caller (opcode 0x0B does SRA 8)
+	; XWA: zero-extended by caller (EXTZ XWA)
 	; Palette format: 2 bytes per color, 0x0RGB (4 bits per channel)
 	; Byte 0: 0000_RRRR (low nibble = red)
 	; Byte 1: GGGG_BBBB (high nibble = green, low nibble = blue)
 
-	; Extract palette index from upper byte
-	LD A, W				; A = palette index (upper byte of fetched word)
-	LD W, 0				; WA = palette index (16-bit, 0-63)
+	; Compute byte offset: palette_index * 32
 	SLA 1, WA			; * 2
 	SLA 4, WA			; * 16 → total * 32 (each palette = 16 colors × 2 bytes)
-	EXTZ XWA			; zero-extend to 32 bits for address math
 	LD XHL, INTRO_PALETTES
 	ADD XHL, XWA		; XHL = palette data pointer
 
