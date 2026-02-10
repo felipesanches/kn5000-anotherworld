@@ -25,9 +25,16 @@
 	include "local_macros.inc"
 
 ; =============================================================================
-; RAM Section (shared - both targets use external RAM at 0x200000)
+; RAM Section (target-specific base address)
 ; =============================================================================
+; MAINCPU:   Uses 1MB DRAM at 0x000000-0x0FFFFF (stack in 0x000-0xFFF)
+; EXTENSION: Uses 512KB extension board SRAM at 0x200000-0x27FFFF
+	ifdef TARGET_MAINCPU
+	ORG 010000h
+	endif
+	ifdef TARGET_EXTENSION
 	ORG 0200000h
+	endif
 
 VM_VARIABLES:	DW	256 DUP (?)
 
@@ -95,7 +102,7 @@ CURRENT_PART_ID: DW ?			; Current game part ID
 	ifdef TARGET_MAINCPU
 
 STACK_TOP		EQU 001000h	; Stack in internal RAM
-OFFSCREEN_BUFFER_1	EQU 280000h	; Offscreen buffer (required by vga_init)
+OFFSCREEN_BUFFER_1	EQU 060000h	; Offscreen buffer (required by vga_init, in DRAM)
 
 	ORG 0E00000h
 

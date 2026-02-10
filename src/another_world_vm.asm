@@ -35,10 +35,20 @@ NOT_FROZEN EQU 1
 NO_STATE_REQUEST EQU 0FFh
 
 ; These off-screen video pages are stored in external RAM:
+; MAINCPU: in DRAM at 0x020000-0x05FFFF
+; EXTENSION: in extension board SRAM at 0x240000-0x27FFFF
+	ifdef TARGET_MAINCPU
+PAGE_BITMAP_0 EQU 020000h
+PAGE_BITMAP_1 EQU 030000h
+PAGE_BITMAP_2 EQU 040000h
+PAGE_BITMAP_3 EQU 050000h
+	endif
+	ifdef TARGET_EXTENSION
 PAGE_BITMAP_0 EQU 240000h
 PAGE_BITMAP_1 EQU 250000h
 PAGE_BITMAP_2 EQU 260000h
 PAGE_BITMAP_3 EQU 270000h
+	endif
 
 ; VM variable indices (used by the game engine)
 VM_VARIABLE_RANDOM_SEED		EQU 03Ch
@@ -84,8 +94,6 @@ drawLineN:
 	; for (int16_t x=xmin; x<=xmax; x++)
 	; 	m_curPagePtr1->pix(m_hliney, x) = color;
 	LD XIX, (CUR_LINE)
-	ADDW (CUR_LINE_LOW), 320
-	ADCW (CUR_LINE_HIGH), 0
 	LD HL, (LINE_XMIN)
 	EXTS XHL
 	ADD XIX, XHL
@@ -111,8 +119,6 @@ drawLineP:
 
 	; Destination: CUR_LINE + LINE_XMIN (in curPagePtr1)
 	LD XIX, (CUR_LINE)
-	ADDW (CUR_LINE_LOW), 320
-	ADCW (CUR_LINE_HIGH), 0
 	LD HL, (LINE_XMIN)
 	EXTS XHL
 	ADD XIX, XHL
@@ -154,8 +160,6 @@ drawLineBlend:
 
 	; curPagePtr1 scanline pointer
 	LD XIX, (CUR_LINE)
-	ADDW (CUR_LINE_LOW), 320
-	ADCW (CUR_LINE_HIGH), 0
 	LD HL, (LINE_XMIN)
 	EXTS XHL
 	ADD XIX, XHL
@@ -299,6 +303,16 @@ _initForPart_loop:
 
 GAME_RESET:
 	CALL VIDEO_START
+
+	; Zero all VM variables (256 x 16-bit = 512 bytes)
+	LD XDE, VM_VARIABLES
+	LD WA, 0
+	LD BC, 256
+_zero_vars_loop:
+	LD (XDE), WA
+	INC 2, XDE
+	DJNZ BC, _zero_vars_loop
+
 	LDB (CURRENT_THREAD), 0
 	LDW (VM_PC), 0
 	LD XIX, VM_STACK
@@ -328,6 +342,9 @@ _setup_threads__loop:
 	CP IX, 64
 	JP NE, _setup_threads__loop
 
+	; Start thread 0 at PC=0 (matching initForPart behavior)
+	LDW (THREADS_DATA + PC_OFFSET), 0
+
 	; Initialize VM_VARIABLE_RANDOM_SEED with a fixed seed (no RTC available)
 	LD A, VM_VARIABLE_RANDOM_SEED
 	LD DE, 1234h			; Fixed seed value
@@ -346,12 +363,11 @@ _setup_threads__loop:
 
 ENTRY:
 	EI 06 ; DISABLE INTERRUPTS
+
 	CALL GAME_RESET
 
 MAIN_LOOP:
-
 	CALL EXECUTE_INSTRUCTION
-
 	JP MAIN_LOOP
 
 LONG_PAUSE:
@@ -623,11 +639,13 @@ POLYGON_RASTER_LOOP:
 	LD XHL, STEP2
 	CALL calcStep
 
+	; CUR_LINE = CUR_PAGE_PTR_1 + HLINEY * 320 (signed multiply for negative HLINEY)
+	LD WA, (HLINEY)
+	EXTS XWA			; sign-extend HLINEY to 32 bits
+	LD DE, 320
+	MULS XWA, DE		; XWA = HLINEY * 320 (signed)
 	LD XIX, (CUR_PAGE_PTR_1)
-	LD XHL, 0
-	LD HL, (HLINEY)
-	MUL XHL, 320
-	ADD XIX, XHL
+	ADD XIX, XWA
 	LD (CUR_LINE), XIX
 
 	POP XIY
@@ -676,20 +694,25 @@ X2_LESS_THAN_SCREEN_W:
 	CALL (XHL) ; drawfunc
 
 AFTER_DRAWFUNC_CALL:
-	
+
 	LD WA, (STEP1_LOW)
 	ADD (CPT1_LOW), WA
 	LD WA, (STEP1_HIGH)
 	ADC (CPT1_HIGH), WA	; 	cpt1 += step1;
-	
+
 	LD WA, (STEP2_LOW)
 	ADD (CPT2_LOW), WA
 	LD WA, (STEP2_HIGH)
 	ADC (CPT2_HIGH), WA	; 	cpt2 += step2;
 
 	INCW (HLINEY)
+
+	; Advance CUR_LINE by 320 unconditionally (even for skipped scanlines)
+	ADDW (CUR_LINE_LOW), 320
+	ADCW (CUR_LINE_HIGH), 0
+
 	CPW (HLINEY), 199
-	JP UGT, POLYGON_RASTER_LOOP	; if (m_hliney > 199) return;
+	JP GT, POLYGON_RASTER_LOOP	; if (m_hliney > 199) return; (signed comparison)
 
 	DECW (POLYGON_H)
 	JP NZ, FOR_H_LOOP
@@ -854,7 +877,7 @@ OFFSET_BIT15_NOT_SET:
 	POP XIX				; m_data_offset = backup;
 	POP DE		; restore zoom
 
-	INC 6, XSP ; local vars offset, po.x, po.y
+	ADD XSP, 6 ; local vars offset, po.x, po.y (INC only supports 1,2,4,8)
 	DJNZ BC, children_loop
 	RET
 
@@ -869,31 +892,37 @@ LOAD_SCREEN:
 
 SETUP_PALETTE:
 	; XWA: paletteID
+	; Palette format: 2 bytes per color, 0x0RGB (4 bits per channel)
+	; Byte 0: 0000_RRRR (low nibble = red)
+	; Byte 1: GGGG_BBBB (high nibble = green, low nibble = blue)
 	LD BC,0
-	LD XDE, 01703c8h		; VGA 3c8 port (select color palette index
+	LD XDE, 01703c8h		; VGA 3c8 port (select color palette index)
 	LD (XDE), C
 
-	LD BC, 2*16							; data length: 16 colors, 4 bits per component
-	LD XDE, 01703c9h					; VGA 3c9 port (for setting the color palette values: r, g and b)
+	LD BC, 16							; 16 colors per palette
+	LD XDE, 01703c9h					; VGA 3c9 port (R, G, B data)
 	LD XHL, INTRO_PALETTES
 	SLA 5, XWA
 	ADD XHL, XWA
 
 PALETTE_LOOP:
-	; red
+	; red: low nibble of byte 0
 	LD A, (XHL)
-	ANDB A, 0Fh
+	AND A, 0Fh
+	SLA 2, A			; scale 4-bit (0-15) to 6-bit (0-60) for VGA DAC
 	LD (XDE), A
 	INC XHL
 
-	; green
+	; green: high nibble of byte 1
 	LD A, (XHL)
-	ANDB A, 0Fh
+	SRL 4, A			; logical shift right to extract high nibble
+	SLA 2, A			; scale 4-bit to 6-bit for VGA DAC
 	LD (XDE), A
 
-	; blue
+	; blue: low nibble of byte 1
 	LD A, (XHL)
-	SRA 4, A
+	AND A, 0Fh
+	SLA 2, A			; scale 4-bit to 6-bit for VGA DAC
 	LD (XDE), A
 	INC XHL
 
@@ -1177,25 +1206,36 @@ _OPCODE_0x80:
 	LD W, A
 	LD A, (XIX)
 	INC XIX
+	PUSH WA				; save offset_raw = (opcode << 8) | low_byte
 
-	; Save bytecode position before replacing XIX with video data pointer
+	; Read x from bytecode (XIX still points to bytecode stream)
+	LD D, 0
+	LD E, (XIX)			; x = fetch_byte()
+	INC XIX
+	PUSH DE				; save x
+
+	; Read y from bytecode
+	LD A, (XIX)			; y = fetch_byte()
+	INC XIX
+	LD H, 0
+	LD L, A				; HL = y
+
+	; Save bytecode position (past all 4 consumed bytes: opcode, offset_lo, x, y)
+	PUSH HL				; save y
 	LD XDE, XIX
 	SUB XDE, INTRO_BYTECODE
 	LD (VM_PC), DE
+	POP HL				; restore y
 
-	SLA 1, WA
+	; Restore x
+	POP DE				; DE = x
+
+	; Compute offset and set up video data pointer
+	POP WA				; WA = offset_raw
+	SLA 1, WA			; offset *= 2
 	EXTZ XWA
 	LD XIX, INTRO_VIDEO_1
 	ADD XIX, XWA
-
-	LD E, (XIX)
-	INC XIX
-	EXTZ DE		; x-coord
-
-	LD B, (XIX)
-	INC XIX
-	EXTZ BC
-	LD HL, BC	; y-coord
 
 ;		if (y > 199)
 ;		{
@@ -1203,10 +1243,11 @@ _OPCODE_0x80:
 ;			y = 199;
 ;		}
 	CP HL, 199
-	JP UGE, _0x80_y_ok
+	JP ULE, _0x80_y_ok	; if y <= 199, skip (normal case)
+	; y > 199: adjust coordinates
 	ADD DE, HL
-	SUB DE, 199
-	ADD HL, 199
+	SUB DE, 199			; x += (y - 199)
+	LD HL, 199			; y = 199
 _0x80_y_ok:
 
 	LD BC, 0FF40h
@@ -1449,7 +1490,7 @@ INSTRUCTION_IS_NOT_ADD_CONST:
 	INC 2, XIX
 	LD XIY, (VM_STACK_POINTER)
 	LD DE, (VM_PC)
-	INC 3, DE
+	ADD DE, 3			; return address = PC + 3 (INC only supports 1,2,4,8)
 	LD (XIY), DE		; push current program counter to VM stack
 	INC 2, XIY
 	LD (VM_STACK_POINTER), XIY
@@ -1478,9 +1519,6 @@ INSTRUCTION_IS_NOT_RET:
 	SLA 2, WA
 	EXTZ XWA
 	ADD XWA, THREADS_DATA
-
-    LD DE, 0FFFFh ; HACK!!!!!!
-	LD (XWA + PC_OFFSET), DE ; HACK!!!!!!
 
 	LD DE, (XWA + REQUESTED_PC_OFFSET)
 	CP DE, NO_REQUEST
@@ -1585,13 +1623,9 @@ _condJmp_not_var:
 	INC XIX
 	JP _condJmp_have_a
 _condJmp_byte_literal:
-	; neither bit set: a = c (sign-extended byte)
+	; neither bit set: a = c (zero-extended byte, per reference)
 	LD E, A
 	LD D, 0
-	; Sign-extend: if bit 7 of E is set, D = 0xFF
-	BIT 7, E
-	JP Z, _condJmp_have_a
-	LD D, 0FFh
 _condJmp_have_a:
 	; DE = a (RHS), (XSP) = b (LHS), B = subopcode
 	POP HL			; HL = b (LHS)
@@ -2061,7 +2095,7 @@ INSTRUCTION_IS_NOT_SHR:
 	JP NE, INSTRUCTION_IS_NOT_PLAY_SOUND
 	; Implement-me!
 	; Note: We currently do not understand the Technics KN5000 sound hardware.
-	INC 5, XIX		; word resourceId; byte freq; byte vol; byte channel;	
+	ADD XIX, 5		; word resourceId; byte freq; byte vol; byte channel (INC only supports 1,2,4,8)
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_PLAY_SOUND:
 
@@ -2108,7 +2142,7 @@ INSTRUCTION_IS_NOT_LOAD:
 	JP NE, INSTRUCTION_IS_NOT_PLAY_MUSIC
 	; Implement-me!
 	; Note: We currently do not understand the Technics KN5000 sound hardware.
-	INC 5, XIX		; word resNum; word delay; byte pos;
+	ADD XIX, 5		; word resNum; word delay; byte pos (INC only supports 1,2,4,8)
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_PLAY_MUSIC:
 
