@@ -99,6 +99,7 @@ drawLineN:
 	ADD XIX, XHL
 	LD HL, (LINE_XMAX)
 	SUB HL, (LINE_XMIN)
+	INC HL				; inclusive range: xmax-xmin+1 pixels
 
 drawLineN_loop:
 	LDB (XIX), C
@@ -138,6 +139,7 @@ drawLineP:
 	; Loop: copy xmax-xmin+1 pixels
 	LD HL, (LINE_XMAX)
 	SUB HL, (LINE_XMIN)
+	INC HL				; inclusive range: xmax-xmin+1 pixels
 
 drawLineP_loop:
 	LD C, (XIY)			; color = page_bitmap_0[y][x]
@@ -165,6 +167,7 @@ drawLineBlend:
 	ADD XIX, XHL
 	LD HL, (LINE_XMAX)
 	SUB HL, (LINE_XMIN)
+	INC HL				; inclusive range: xmax-xmin+1 pixels
 
 drawLineBlend_loop:
 	LD C, (XIX)			; color = curPagePtr1[y][x]
@@ -180,14 +183,15 @@ drawLineBlend_loop:
 
 drawPoint:
 	PUSH XIX
-	LD WA, 0
-	LD WA, HL
-	MUL XWA, 320
-	; FIXME: do we need to zero the upper 16 bits of XDE here?
-	ADD XWA, XDE
-	LD XIX, 01a0000h
+	LD XWA, 0
+	LD WA, HL			; XWA = y (zero-extended 32-bit)
+	LD DE, 320
+	MUL XWA, DE			; XWA = y * 320
+	EXTZ XDE			; zero-extend x to 32-bit
+	ADD XWA, XDE			; XWA = y*320 + x
+	LD XIX, (CUR_PAGE_PTR_1)
 	ADD XIX, XWA
-	LD (XIX), BC
+	LDB (XIX), C			; write 1 byte (color)
 	POP XIX
 	RET
 
@@ -714,7 +718,7 @@ AFTER_DRAWFUNC_CALL:
 	ADCW (CUR_LINE_HIGH), 0
 
 	CPW (HLINEY), 199
-	JP GT, POLYGON_RASTER_LOOP	; if (m_hliney > 199) return; (signed comparison)
+	JP GT, end_of_fillPolygon	; if (m_hliney > 199) return; (exit polygon)
 
 	DECW (POLYGON_H)
 	JP NZ, FOR_H_LOOP
