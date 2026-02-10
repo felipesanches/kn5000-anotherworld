@@ -891,19 +891,28 @@ LOAD_SCREEN:
 	RET
 
 SETUP_PALETTE:
-	; XWA: paletteID
+	; WA: palette word from bytecode (W = palette index, A = unused)
+	; Reference: m_currentPaletteId = fetchWord() >> 8
 	; Palette format: 2 bytes per color, 0x0RGB (4 bits per channel)
 	; Byte 0: 0000_RRRR (low nibble = red)
 	; Byte 1: GGGG_BBBB (high nibble = green, low nibble = blue)
-	LD BC,0
-	LD XDE, 01703c8h		; VGA 3c8 port (select color palette index)
-	LD (XDE), C
 
-	LD BC, 16							; 16 colors per palette
-	LD XDE, 01703c9h					; VGA 3c9 port (R, G, B data)
+	; Extract palette index from upper byte
+	LD A, W				; A = palette index (upper byte of fetched word)
+	LD W, 0				; WA = palette index (16-bit, 0-63)
+	SLA 1, WA			; * 2
+	SLA 4, WA			; * 16 → total * 32 (each palette = 16 colors × 2 bytes)
+	EXTZ XWA			; zero-extend to 32 bits for address math
 	LD XHL, INTRO_PALETTES
-	SLA 5, XWA
-	ADD XHL, XWA
+	ADD XHL, XWA		; XHL = palette data pointer
+
+	; Set VGA DAC write index to 0
+	LD A, 0
+	LD XDE, 01703c8h	; VGA 3c8 port (select color palette index)
+	LD (XDE), A
+
+	LD BC, 16			; 16 colors per palette
+	LD XDE, 01703c9h	; VGA 3c9 port (R, G, B data)
 
 PALETTE_LOOP:
 	; red: low nibble of byte 0
