@@ -47,7 +47,9 @@ make check    # Verify tools and original ROMs are available
 
 **Extension target** is loaded by the KN5000 firmware via the XAPR header and jumps directly to the VM ENTRY point.
 
-Both targets share RAM at 0x200000 and page buffers at 0x240000-0x270000.
+**Memory layout differs by target:**
+- **Maincpu:** RAM at 0x010000, page buffers at 0x020000-0x050000, offscreen at 0x060000 (in 1MB DRAM)
+- **Extension:** RAM at 0x200000, page buffers at 0x240000-0x270000 (in 512KB extension SRAM)
 
 **Key source files:**
 - `src/main.asm` - Unified platform wrapper (conditional assembly for maincpu/extension)
@@ -79,6 +81,7 @@ These sibling repositories contain essential reference material. **Do not modify
 | MIDI Serial | `maincpu/midi_serial_routines.asm` | SC0 TX/RX handlers |
 | Sub CPU Boot | `subcpu/boot/kn5000_subcpu_boot.asm` | Sub CPU initialization |
 | Symbols | `symbols/maincpu_symbols_reference.txt` | 39,125 named addresses |
+| AW VM HLE | `mame_driver/src/devices/cpu/anotherworld/` | Reference C++ implementation of all opcodes |
 
 ### Assembler: `../../tools/asl/`
 - `asl` - ASL Macro Assembler 1.42 Beta
@@ -117,6 +120,57 @@ LDA_XWA_IMM24 addr    ; Load 24-bit address into XWA
 2. Configure memory controller (MSAR/MAMR registers)
 3. Initialize DRAM with timing delays
 4. Set stack pointer to internal RAM
+
+## Another World VM Architecture
+
+The VM interprets big-endian bytecode (Amiga/68k origin) on a little-endian TLCS-900 CPU.
+
+**Bytecode execution:**
+- `XIX` register points to current bytecode position during instruction execution
+- `_end_of_EXECUTE_INSTRUCTION` recomputes `VM_PC` from `XIX` offset — XIX must point to bytecode
+- `_after_PC_update` skips VM_PC recomputation — use when VM_PC was already set (JMP, CALL, RET, NEXT_THREAD)
+- Opcodes that replace XIX with non-bytecode pointers (0x80, 0x40 video) must save VM_PC BEFORE the replacement and use `_after_PC_update`
+
+**Thread model:**
+- 64 threads, each with a PC slot in `THREADS_DATA` and activation state in `VM_IS_CHANNEL_ACTIVE`
+- `pauseThread` saves requested_PC; `NEXT_THREAD` scans for next active thread
+- `CHECK_THREAD_REQUESTS` commits requested_PC → PC at frame boundaries
+- `INACTIVE_THREAD` (0xFFFE) marks unused thread slots
+
+**Video pages:**
+- 4 page buffers (320x240 @ 8bpp = 76,800 bytes each)
+- Page IDs: 0-3 map directly; 0xFF = current back buffer; 0xFE = current front buffer
+- `GET_PAGE_PTR` resolves page ID → 24-bit address
+
+**Endianness:** All `fetch_word()` operations must byte-swap with `EX W, A` after reading via `LD WA, (XIX)`.
+
+**Helper functions:**
+- `_read_vm_var`: Input A=index, Output DE=value (clobbers XIY/XWA)
+- `_write_vm_var`: Input A=index, DE=value (clobbers XIY/XWA)
+
+**Reference implementation:** MAME HLE at `../../kn5000-roms-disasm/mame_driver/src/devices/cpu/anotherworld/`
+
+**Resources (intro/part 1):**
+- Bytecode: `src/resources/resource-0x18.bin`
+- Palettes: `src/resources/resource-0x17.bin` (16 colors/palette, 2 bytes/color, 0x0RGB format)
+- Video polygons: `src/resources/resource-0x19.bin` (video1), `resource-0x1a.bin` (video2)
+- Screen bitmaps: `src/resources/resource-0x49.bin`, `resource-0x53.bin`
+
+## TLCS-900 Pitfalls (Learned from Debugging)
+
+**INC instruction encoding:** Only supports values 1, 2, 4, 8 (encoded in 2-bit field). ASL assembler silently accepts any value but encodes raw bits. MAME treats the 3-bit field literally (`value ? value : 8`), so `INC 3` "works" in MAME but is **undefined on real TMP94C241F**. Always use `ADD` for non-power-of-2 increments.
+
+**Register clobbering:**
+- `LD BC, WA` clobbers B — save B to stack first if needed later
+- `POP WA` restores both W and A — don't follow with `LD A, W` (overwrites restored A)
+- `LDIRW` uses XHL=src, XDE=dst, XBC=word_count (not XIX/XIY)
+
+**Signed vs unsigned shifts:** `SRA` (arithmetic shift right) sign-extends; `SRL` (logical shift right) zero-fills. Use `SRL` for unsigned nibble extraction (e.g., extracting high nibble of a byte).
+
+**AW palette → VGA DAC conversion:**
+- AW format: 2 bytes/color, `0x0RGB`. Byte 0 low nibble = R, byte 1 high nibble = G, byte 1 low nibble = B
+- VGA DAC expects 6-bit values (0-63) in R, G, B order; AW uses 4-bit (0-15)
+- Must `SLA 2, A` to scale each channel from 4-bit to 6-bit
 
 ## Mandatory Policy: Conversation Logs
 
