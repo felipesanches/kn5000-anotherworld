@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Another World on KN5000 — Project Documentation</title>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a26;
+  --border: #2a2a3a;
+  --text: #c8c8d8;
+  --text-dim: #808098;
+  --accent: #6e8cef;
+  --accent-dim: #3a4a7a;
+  --green: #5ab87a;
+  --orange: #d8a040;
+  --red: #c85050;
+  --purple: #a070c0;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.container {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+h1 {
+  font-size: 24px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-bottom: 32px;
+}
+.subtitle a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.subtitle a:hover {
+  text-decoration: underline;
+}
+h2 {
+  font-size: 16px;
+  color: var(--green);
+  font-weight: 600;
+  margin: 32px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+p {
+  margin-bottom: 12px;
+  color: var(--text-dim);
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+  display: block;
+}
+.card:hover {
+  border-color: var(--accent-dim);
+  background: var(--surface2);
+}
+.card .label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.card .label.plan { color: var(--orange); }
+.card .label.review { color: var(--purple); }
+.card .label.reference { color: var(--green); }
+.card .label.log { color: var(--accent); }
+.card .title {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.card .desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.card.full-width {
+  grid-column: 1 / -1;
+}
+.timeline {
+  margin: 12px 0;
+  border-left: 2px solid var(--border);
+  padding-left: 20px;
+}
+.timeline-entry {
+  margin-bottom: 14px;
+  position: relative;
+}
+.timeline-entry::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.timeline-entry.milestone::before {
+  background: var(--green);
+}
+.timeline-entry .date {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.timeline-entry .commit {
+  font-size: 12px;
+  color: var(--text);
+}
+.timeline-entry .hash {
+  color: var(--accent-dim);
+  font-size: 11px;
+}
+.specs {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 4px 16px;
+  font-size: 12px;
+  margin: 12px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.specs dt {
+  color: var(--text-dim);
+  text-align: right;
+}
+.specs dd {
+  color: var(--text);
+}
+code {
+  background: rgba(110, 140, 239, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Another World on KN5000</h1>
+<p class="subtitle">
+  A port of Eric Chahi's Another World bytecode VM to the Technics KN5000 arranger keyboard.<br>
+  <a href="https://github.com/felipesanches/kn5000-anotherworld">github.com/felipesanches/kn5000-anotherworld</a>
+</p>
+
+<dl class="specs">
+  <dt>Target CPU</dt>    <dd>TMP94C241F (TLCS-900/H2) @ 16 MHz (MAME) / 25 MHz (real)</dd>
+  <dt>Display</dt>        <dd>MN89304 VGA LCD controller, 320x240 @ 8bpp</dd>
+  <dt>Assembler</dt>      <dd>ASL Macro Assembler (<code>cpu 96c141</code>)</dd>
+  <dt>VM origin</dt>      <dd>Big-endian Amiga/68k bytecode on little-endian TLCS-900</dd>
+  <dt>Status</dt>         <dd>Intro plays fully: polygons, palette, text, timer-based frame pacing</dd>
+</dl>
+
+<h2>Plans &amp; Design Documents</h2>
+<div class="card-grid">
+  <a class="card" href="polygon-rendering-fix-plan.md">
+    <div class="label plan">Plan</div>
+    <div class="title">Polygon Rendering Fix</div>
+    <div class="desc">Fix drawLine off-by-one, fillPolygon overflow, and drawPoint corruption that caused blank screens.</div>
+  </a>
+  <a class="card" href="zoom-fix-plan.md">
+    <div class="label plan">Plan</div>
+    <div class="title">Zoom Rendering Fix</div>
+    <div class="desc">Fix case 2/3 opcode handling and 16-bit zoom truncation causing Lester to shrink/grow incorrectly.</div>
+  </a>
+  <a class="card" href="timer-frame-timing-plan.md">
+    <div class="label plan">Plan</div>
+    <div class="title">Timer-Based Frame Timing</div>
+    <div class="desc">Replace busy-wait loop with T0/T1 cascade timer, prescaler fix, and overrun detection.</div>
+  </a>
+  <a class="card" href="timer-frame-timing.md">
+    <div class="label reference">Reference</div>
+    <div class="title">Timer Configuration Details</div>
+    <div class="desc">Hardware timer setup, MAME vs datasheet differences, prescaler divisions, ISR design.</div>
+  </a>
+</div>
+
+<h2>Code Reviews</h2>
+<div class="card-grid">
+  <a class="card" href="code-review-2026-02-09.md">
+    <div class="label review">Review</div>
+    <div class="title">VM Opcodes vs MAME HLE</div>
+    <div class="desc">Feb 9 &mdash; Systematic comparison of all opcodes against the reference MAME HLE implementation. Found 20 issues.</div>
+  </a>
+  <a class="card" href="code-review-2026-02-10.md">
+    <div class="label review">Review</div>
+    <div class="title">Polygon Rendering Glitches</div>
+    <div class="desc">Feb 10 &mdash; Deep review of drawPoint, fillPolygon, readVertices, calcStep against Fabien Sanglard's reference.</div>
+  </a>
+  <a class="card" href="debug-progress-2026-02-10.md">
+    <div class="label review">Review</div>
+    <div class="title">Grey Screen Investigation</div>
+    <div class="desc">Feb 10 &mdash; Discovered the grey screen was correct behavior (4-bit DAC). Led to palette and rendering fixes.</div>
+  </a>
+</div>
+
+<h2>Development Log</h2>
+<p>Full conversation transcripts from all Claude Code sessions, rendered as a browsable viewer.</p>
+<div class="card-grid">
+  <a class="card full-width" href="../logs/index.html">
+    <div class="label log">Viewer</div>
+    <div class="title">Conversation Log Viewer</div>
+    <div class="desc">10 sessions covering the full development from initial setup through working intro. Includes tool calls, thinking traces, and all user/assistant messages verbatim.</div>
+  </a>
+</div>
+
+<h2>Commit Timeline</h2>
+<div class="timeline">
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 9, 2026</div>
+    <div class="commit">Initial commit: KN5000 Hello World custom boot ROM</div>
+    <div class="hash">6caf1d1</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 9</div>
+    <div class="commit">Add MAME ROM set generation, VGA refactor, interrupt vector table</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 9</div>
+    <div class="commit">Fix VGA_Setup, font lookup, boot hexdump display</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 9</div>
+    <div class="commit">Set up Another World VM project with dual-target build</div>
+    <div class="hash">3458463 + b7cb21a</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 9</div>
+    <div class="commit">Add asset build pipeline for bitmap resources</div>
+    <div class="hash">496159e</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 9</div>
+    <div class="commit">Fix all 20 VM issues from code review</div>
+    <div class="hash">1679d39</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 10</div>
+    <div class="commit">Fix palette, polygon raster, thread init, DRAM layout</div>
+    <div class="hash">eac6f81</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 10</div>
+    <div class="commit">Fix GET_PAGE_PTR, SETUP_PALETTE index extraction, palette 0 black screen</div>
+    <div class="hash">fe3b36f .. 45ef21a</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 10</div>
+    <div class="commit">Fix palette colors: MN89304 DAC is 4-bit, not 6-bit</div>
+    <div class="hash">a8a13ec</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 10</div>
+    <div class="commit">Fix polygon rendering: drawLine, fillPolygon, drawPoint</div>
+    <div class="hash">6dd5c62 + 4565a8c</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 10</div>
+    <div class="commit">Add timer-based frame timing with prescaler fix</div>
+    <div class="hash">558e3d5</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 10</div>
+    <div class="commit">Fix polygon zoom: 16-bit zoom, case 2/3 opcode handling</div>
+    <div class="hash">3d65a8e</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 10</div>
+    <div class="commit">Fix VM freeze in text scenes: save/restore XIX in DRAW_STRING</div>
+    <div class="hash">bd01da6</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 10</div>
+    <div class="commit">Entire intro plays perfectly</div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
