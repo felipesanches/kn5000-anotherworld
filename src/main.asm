@@ -7,7 +7,7 @@
 ;
 ; Build: make maincpu  OR  make extension
 ;
-; Target: TMP94C241F (TLCS-900/H2) @ 25 MHz
+; Target: TMP94C241F (TLCS-900/H2) @ 16 MHz
 ; =============================================================================
 
 	cpu 96c141		; TLCS-900/H target

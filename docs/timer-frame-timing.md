@@ -71,17 +71,17 @@ RAM variables for diagnostics:
 - `LAST_FRAME_TICKS` (word): elapsed ticks of last frame
 - `FRAME_START_TICKS` (dword): tick count at frame start
 
-## MAME vs Real Hardware Differences
+## MAME vs Datasheet Differences
 
-| Aspect | MAME | Real TMP94C241F |
-|--------|------|-----------------|
-| CPU clock | 16 MHz (2x8 MHz XTAL) | 25 MHz (per CLKMOD=0x04) |
+The CPU clock is 16 MHz (2x8 MHz XTAL). Some MAME register behaviors differ from the TMP94C241F datasheet:
+
+| Aspect | MAME | Datasheet |
+|--------|------|-----------|
 | Prescaler enable | T16RUN bit 7 only | T01MOD bit 0 (PRRUN) and/or T16RUN bit 7 |
 | Prescaler divisions | T1=÷8, T4=÷32, T16=÷128 | T1=÷4, T4=÷16, T16=÷64 |
 | T01MOD bit layout | bits[1:0]=T0CLK | bit0=PRRUN, bits[2:1]=T0CLK |
-| TICKS_PER_SLICE | 250 (for 20ms) | ~49 (at 25 MHz with fc/64) |
 
-Current code targets MAME. For real hardware, TICKS_PER_SLICE would need recalculation, and the T01MOD bit 0 PRRUN may suffice without T16RUN.
+Current code targets MAME. For real hardware, the T01MOD bit 0 PRRUN may suffice without T16RUN.
 
 ## Bugs Found During Implementation
 

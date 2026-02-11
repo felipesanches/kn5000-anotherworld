@@ -38,9 +38,9 @@ SET 1, (T8RUN)          ; Start T0+T1
 LD (INTET01), 0C0h      ; bits [7:5] = 110 = level 6, INTT0 disabled
 ```
 
-**Tick rate at 25 MHz:** fSYS/32 = 781,250 Hz → ÷10 (T0) → ÷16 (T1) = **4,882.8 Hz** (~204.8 µs per tick).
+**Tick rate at 16 MHz:** fSYS/8 = 2,000,000 Hz → ÷10 (T0) → ÷16 (T1) = **12,500 Hz** (80 µs per tick).
 
-**20ms = ~98 ticks.** Pre-computed constant: `TICKS_PER_SLICE EQU 98`
+**20ms = 250 ticks.** Pre-computed constant: `TICKS_PER_SLICE EQU 250`
 
 ## Step 2: Interrupt Handler and Vector Table (`src/main.asm`)
 

@@ -22,7 +22,7 @@
 	LD (WDCR), 0b1h
 
 	; === System Clock Setup ===
-	LD (CLKMOD), 004h			; High-speed (25 MHz)
+	LD (CLKMOD), 004h			; High-speed (16 MHz)
 
 	; === Data Bus Ports Setup (P2, P3, P7) ===
 	; REVIEW: May be needed for external bus access to VGA/VRAM

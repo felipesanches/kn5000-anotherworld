@@ -8,7 +8,7 @@ Custom ROM development for the **Technics KN5000** arranger keyboard. ROMs can b
 
 **Target Hardware:**
 - CPU: Toshiba TMP94C241F (TLCS-900/H2), 32-bit CISC
-  - Real hardware: 25 MHz; **MAME kn5000 driver: 16 MHz** (2 x 8 MHz XTAL)
+  - 16 MHz (2 x 8 MHz XTAL)
 - Display: MN89304 VGA-compatible LCD controller, 320x240 @ 8bpp
 - Serial: SC0 for MIDI/Computer Interface, SC1 for Control Panel
 - Memory: 2MB Program ROM at 0xE00000-0xFFFFFF, 512KB VRAM at 0x1A0000
