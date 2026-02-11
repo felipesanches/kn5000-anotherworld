@@ -1227,6 +1227,13 @@ _no_part_switch:
 _check_thread_reqs__loop:
 
 	; thread->state = thread->requested_state;
+	; After applying, clear requested_state to NOT_FROZEN.
+	; This matches the reference HLE where requested_state is a bool
+	; and "= NO_REQUEST" (0xFFFF) truncates to true (UNFROZEN).
+	; Effect: FREEZE is one-shot (lasts one frame, then auto-unfreezes).
+	; This is critical for the death handler which FREEZEs all threads
+	; then sets up threads 0 and 60 — without auto-unfreeze, they
+	; stay frozen and the password display never runs.
 	PUSH WA
 	SLA 1, WA
 	EXTZ XWA
@@ -1235,6 +1242,7 @@ _check_thread_reqs__loop:
 	CP E, NO_STATE_REQUEST
 	JP EQ, _no_state_request
 	LD (XWA + CURRENT_STATE), E
+	LD (XWA + REQUESTED_STATE), NOT_FROZEN	; clear request (auto-unfreeze)
 _no_state_request:
 	POP WA
 
