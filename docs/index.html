@@ -202,6 +202,54 @@ p {
   max-height: 90vh;
   border-radius: 8px;
 }
+.next-steps {
+  margin: 12px 0;
+}
+.step {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 2px 12px;
+}
+.step-title {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+.step-status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  height: fit-content;
+  text-align: center;
+}
+.step-status.stub {
+  background: rgba(200, 80, 80, 0.15);
+  color: var(--red);
+}
+.step-status.partial {
+  background: rgba(216, 160, 64, 0.15);
+  color: var(--orange);
+}
+.step-status.todo {
+  background: rgba(110, 140, 239, 0.15);
+  color: var(--accent);
+}
+.step-desc {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-top: 4px;
+}
 code {
   background: rgba(110, 140, 239, 0.1);
   padding: 1px 5px;
@@ -374,6 +422,42 @@ code {
   <div class="timeline-entry milestone">
     <div class="date">Feb 10</div>
     <div class="commit">Entire intro plays perfectly</div>
+  </div>
+</div>
+
+<h2>Next Steps</h2>
+<p>The intro sequence plays fully, but several features are needed to play the complete game.</p>
+
+<div class="next-steps">
+  <div class="step">
+    <div class="step-title">Input handling</div>
+    <div class="step-status stub">Stub</div>
+    <div class="step-desc">Currently returns neutral values. Needs to read the KN5000 control panel buttons via the SC1 serial port and map them to VM input variables (left, right, up, down, action).</div>
+  </div>
+  <div class="step">
+    <div class="step-title">Sound &amp; music</div>
+    <div class="step-status stub">Stub</div>
+    <div class="step-desc">Opcodes 0x18 (playSound) and 0x1A (playMusic) consume their bytecode arguments but produce no output. The KN5000 sound hardware (sub CPU + DSP) is not yet understood well enough to drive it directly.</div>
+  </div>
+  <div class="step">
+    <div class="step-title">Part switching</div>
+    <div class="step-status partial">Partial</div>
+    <div class="step-desc">Infrastructure exists (REQUESTED_NEXT_PART, initForPart), but bytecode/palette/video base addresses are hardcoded to intro resources. Needs bank-switching logic to load resources for all 9 game parts.</div>
+  </div>
+  <div class="step">
+    <div class="step-title">Resource extraction</div>
+    <div class="step-status todo">Todo</div>
+    <div class="step-desc">Only intro resources (0x17-0x1A, 0x49, 0x53) are included. The remaining parts' bytecode, palettes, and video data need to be extracted from the original game files.</div>
+  </div>
+  <div class="step">
+    <div class="step-title">Remove VM hacks</div>
+    <div class="step-status partial">Partial</div>
+    <div class="step-desc">Two workarounds remain: var[0x54]=0x81 for the Interplay logo, and forced hero position during intro-to-lake transition. These should become unnecessary once full part switching works.</div>
+  </div>
+  <div class="step">
+    <div class="step-title">Real hardware testing</div>
+    <div class="step-status todo">Todo</div>
+    <div class="step-desc">All development has been in MAME. The extension board target builds but hasn't been tested on a real KN5000. Timer prescaler behavior and INC instruction encoding may differ.</div>
   </div>
 </div>
 
