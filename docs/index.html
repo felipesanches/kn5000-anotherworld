@@ -158,6 +158,50 @@ p {
 .specs dd {
   color: var(--text);
 }
+.screenshots {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+.screenshots figure {
+  margin: 0;
+}
+.screenshots img {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: transform 0.2s, border-color 0.2s;
+  cursor: pointer;
+}
+.screenshots img:hover {
+  transform: scale(1.03);
+  border-color: var(--accent-dim);
+}
+.screenshots figcaption {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 6px;
+}
+.lightbox {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.9);
+  z-index: 100;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox.active {
+  display: flex;
+}
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+}
 code {
   background: rgba(110, 140, 239, 0.1);
   padding: 1px 5px;
@@ -178,6 +222,27 @@ code {
   <a href="https://github.com/felipesanches/kn5000-anotherworld">github.com/felipesanches/kn5000-anotherworld</a>
 </p>
 
+<h2>Screenshots</h2>
+<p>Running in MAME 0.285 with the KN5000 driver.</p>
+<div class="screenshots">
+  <figure>
+    <img src="screenshot-lab.png" alt="Lester in the lab" onclick="openLightbox(this)">
+    <figcaption>The laboratory — particle accelerator experiment</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshot-ferrari.png" alt="Ferrari cutscene" onclick="openLightbox(this)">
+    <figcaption>Opening cutscene — arriving at the lab</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshot-lester.png" alt="Lester walking" onclick="openLightbox(this)">
+    <figcaption>Lester walking — polygon zoom rendering</figcaption>
+  </figure>
+</div>
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lightbox-img" src="" alt="">
+</div>
+
+<h2>Hardware</h2>
 <dl class="specs">
   <dt>Target CPU</dt>    <dd>TMP94C241F (TLCS-900/H2) @ 16 MHz (MAME) / 25 MHz (real)</dd>
   <dt>Display</dt>        <dd>MN89304 VGA LCD controller, 320x240 @ 8bpp</dd>
@@ -232,7 +297,7 @@ code {
 <h2>Development Log</h2>
 <p>Full conversation transcripts from all Claude Code sessions, rendered as a browsable viewer.</p>
 <div class="card-grid">
-  <a class="card full-width" href="../logs/index.html">
+  <a class="card full-width" href="logs.html">
     <div class="label log">Viewer</div>
     <div class="title">Conversation Log Viewer</div>
     <div class="desc">10 sessions covering the full development from initial setup through working intro. Includes tool calls, thinking traces, and all user/assistant messages verbatim.</div>
@@ -311,5 +376,17 @@ code {
 </div>
 
 </div>
+<script>
+function openLightbox(img) {
+  document.getElementById('lightbox-img').src = img.src;
+  document.getElementById('lightbox').classList.add('active');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('active');
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeLightbox();
+});
+</script>
 </body>
 </html>
