@@ -15,6 +15,9 @@ src/resources/
 # Exceptions for checked-in data files
 !src/hardcoded_data/*.rom
 
+# Python
+__pycache__/
+
 # Editor files
 *~
 *.swp
