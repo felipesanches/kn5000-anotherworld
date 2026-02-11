@@ -94,91 +94,111 @@ def read_memlist(path):
 
 
 def unpack(src, dst_size):
-    """Decompress Another World packed data.
+    """Decompress Another World packed data (ByteKiller format).
 
-    The compression format uses a backward-writing scheme with
-    bit-level control for literal bytes and back-references.
+    Faithfully implements the algorithm from the reference:
+    https://github.com/fabiensanglard/Another-World-Bytecode-Interpreter/blob/master/src/bank.cpp
+
+    The format uses backward-writing with bit-level control:
+    - 00: literal bytes (count = getCode(3) + 1)
+    - 01: back-reference (offset = getCode(8), count = 2)
+    - 1 + getCode(2)=0: back-ref (offset = getCode(9), count = 3)
+    - 1 + getCode(2)=1: back-ref (offset = getCode(10), count = 4)
+    - 1 + getCode(2)=2: back-ref (offset = getCode(12), count = getCode(8) + 1)
+    - 1 + getCode(2)=3: literal bytes (count = getCode(8) + 9)
     """
     if len(src) < 12:
         return src[:dst_size]
 
-    # Read trailer (last 12 bytes)
+    # Read trailer (last 12 bytes, big-endian)
     end = len(src)
-    data_size = struct.unpack('>I', src[end-4:end])[0]
+    datasize = struct.unpack('>I', src[end-4:end])[0]
     crc = struct.unpack('>I', src[end-8:end-4])[0]
     chk = struct.unpack('>I', src[end-12:end-8])[0]
+    crc ^= chk  # Initial CRC accumulation
 
     dst = bytearray(dst_size)
-    src_pos = end - 12
-    dst_pos = dst_size - 1
-    bits = chk
+    src_pos = end - 12  # Next word read position (pre-decrement)
+    dst_pos = dst_size - 1  # Output position (backward)
 
-    def next_bit():
-        nonlocal bits, crc, src_pos
-        carry = bits & 1
-        bits >>= 1
-        if bits == 0:
+    def rcr(cf):
+        """Rotate-carry-right: extract LSB, shift right, set MSB if carry in."""
+        nonlocal chk
+        rcf = chk & 1
+        chk = (chk >> 1) & 0x7FFFFFFF
+        if cf:
+            chk |= 0x80000000
+        return rcf
+
+    def next_chunk():
+        """Extract next control bit from the compressed stream."""
+        nonlocal chk, crc, src_pos
+        cf = rcr(False)
+        if chk == 0:
             src_pos -= 4
             if src_pos >= 0:
-                bits = struct.unpack('>I', src[src_pos:src_pos+4])[0]
+                chk = struct.unpack('>I', src[src_pos:src_pos+4])[0]
             else:
-                bits = 0
-            crc ^= bits
-            carry = bits & 1
-            bits = (bits >> 1) | 0x80000000
-        return carry
+                chk = 0
+            crc ^= chk
+            cf = rcr(True)
+        return cf
 
-    def get_bits(n):
-        val = 0
-        for _ in range(n):
-            val = (val << 1) | next_bit()
-        return val
+    def get_code(num_bits):
+        """Read num_bits from the stream, MSB first."""
+        c = 0
+        for _ in range(num_bits):
+            c = (c << 1) | (1 if next_chunk() else 0)
+        return c
 
-    def copy_from_dst(offset, count):
-        nonlocal dst_pos
+    def dec_literals(num_bits, add_count):
+        """Read literal bytes directly from the stream."""
+        nonlocal datasize, dst_pos
+        count = get_code(num_bits) + add_count + 1
+        datasize -= count
         for _ in range(count):
-            if dst_pos >= 0 and dst_pos + offset < dst_size:
+            if dst_pos >= 0:
+                dst[dst_pos] = get_code(8) & 0xFF
+            dst_pos -= 1
+
+    def dec_backref(num_bits, size):
+        """Copy bytes from already-decompressed output (back-reference)."""
+        nonlocal datasize, dst_pos
+        offset = get_code(num_bits)
+        count = size + 1
+        datasize -= count
+        for _ in range(count):
+            if 0 <= dst_pos < dst_size and 0 <= dst_pos + offset < dst_size:
                 dst[dst_pos] = dst[dst_pos + offset]
             dst_pos -= 1
 
-    while dst_pos >= 0:
-        if next_bit():  # Bit = 1: back-reference
-            if next_bit():  # 11: long copy
-                length = get_bits(2)
-                if length == 0:
-                    # 1100: copy 1 byte from distance
-                    length = 1
-                    offset = get_bits(8)
-                elif length == 1:
-                    # 1101
-                    length = 2
-                    offset = get_bits(8)
-                elif length == 2:
-                    # 1110
-                    length = get_bits(8) + 1
-                    offset = get_bits(12)
-                else:
-                    # 1111
-                    length = get_bits(8) + 9
-                    offset = get_bits(12)
-                copy_from_dst(offset + 1, length)
-            else:  # 10: short copy
-                offset = get_bits(8)
-                length = 2
-                copy_from_dst(offset + 1, length)
-        else:  # Bit = 0: literal byte
-            if dst_pos >= 0:
-                dst[dst_pos] = get_bits(8)
-                dst_pos -= 1
+    while datasize > 0:
+        if not next_chunk():  # bit=0
+            if not next_chunk():  # bits=00 → short literal run
+                dec_literals(3, 0)  # count = getCode(3) + 1, range 1-8
+            else:  # bits=01 → short back-reference
+                dec_backref(8, 1)  # offset = getCode(8), count = 2
+        else:  # bit=1
+            c = get_code(2)
+            if c == 3:  # bits=1,11 → long literal run
+                dec_literals(8, 8)  # count = getCode(8) + 9, range 9-264
+            elif c < 2:  # bits=1,00 or 1,01 → medium back-reference
+                dec_backref(c + 9, c + 2)  # offset = getCode(9or10), count = 3or4
+            else:  # c==2, bits=1,10 → long back-reference
+                size = get_code(8)
+                dec_backref(12, size)  # offset = getCode(12), count = getCode(8)+1
+
+    if crc != 0:
+        print(f"  Warning: CRC mismatch after decompression", file=sys.stderr)
 
     return bytes(dst)
 
 
 def find_bank_file(game_dir, bank_id):
-    """Find a bank file, trying different case conventions."""
+    """Find a bank file, preferring DOS uppercase (has real data)."""
     names = [
-        f'bank{bank_id:02x}',
         f'BANK{bank_id:02X}',
+        f'bank{bank_id:02x}',
         f'Bank{bank_id:02x}',
         f'bank{bank_id:02X}',
     ]
@@ -190,8 +210,8 @@ def find_bank_file(game_dir, bank_id):
 
 
 def find_memlist(game_dir):
-    """Find memlist.bin trying different case conventions."""
-    for name in ['memlist.bin', 'MEMLIST.BIN', 'Memlist.bin']:
+    """Find memlist.bin, preferring DOS uppercase (matches BANK files)."""
+    for name in ['MEMLIST.BIN', 'memlist.bin', 'Memlist.bin']:
         path = os.path.join(game_dir, name)
         if os.path.exists(path):
             return path

@@ -1192,8 +1192,16 @@ CHECK_THREAD_REQUESTS:
 	LD WA, (REQUESTED_NEXT_PART)
 	CP WA, 0
 	JP EQ, _no_part_switch
-	; Part switch requested - call initForPart
+
+	; Validate part ID range before switching
+	CP WA, GAME_PART_FIRST
+	JP ULT, _invalid_part_switch
+	CP WA, GAME_PART_LAST
+	JP UGT, _invalid_part_switch
+
+	; Part switch requested - call initForPart (WA = partId)
 	CALL initForPart
+_invalid_part_switch:
 	LDW (REQUESTED_NEXT_PART), 0
 _no_part_switch:
 
