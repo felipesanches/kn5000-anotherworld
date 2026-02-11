@@ -2,10 +2,10 @@
 ; boot_hw_init.asm - Minimal Hardware Initialization (Local)
 ; =============================================================================
 ; Minimal version of the shared boot_hw_init.asm from kn5000-roms-disasm.
-; Only includes what's needed for: display (VGA + VRAM) and serial (SC0).
+; Only includes what's needed for: display (VGA + VRAM), serial (SC0),
+; and control panel serial (SC1 via Port F).
 ;
 ; Removed from original (315 bytes):
-;   - Port F setup (control panel / MIDI via SC1)
 ;   - 8-bit timer setup (T01, T23)
 ;   - 16-bit timer setup (T4, T5)
 ;   - Interrupt mode control (IIMC)
@@ -23,6 +23,11 @@
 
 	; === System Clock Setup ===
 	LD (CLKMOD), 004h			; High-speed (16 MHz)
+
+	; === Port F Setup (SC1 for Control Panel) ===
+	LD (PF), 000h
+	LD (PFFC), 073h			; SC0: TXD+RXD func, SC1: TXD+RXD+SCLK func
+	LD (PFCR), 055h			; SC0: TXD+SCLK output, SC1: TXD+SCLK output
 
 	; === Data Bus Ports Setup (P2, P3, P7) ===
 	; REVIEW: May be needed for external bus access to VGA/VRAM
@@ -120,3 +125,8 @@
 
 	; Enable INTT1 interrupt at priority level 6
 	LD (INTET01), 0C0h		; bits [7:5] = 110 = level 6, INTT0 disabled
+
+	; === SC1 Serial Setup (Control Panel, 250 kHz) ===
+	LD (SC1MOD), 000h		; Synchronous I/O mode
+	LD (BR1CR), 014h		; 250 kHz (16 MHz / 16 / 4)
+	LD (SC1CR), 001h		; IOC=0: internal clock, SCLKS=0: rising edge, RXE=1

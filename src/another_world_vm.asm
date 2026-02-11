@@ -53,13 +53,13 @@ PAGE_BITMAP_3 EQU 270000h
 
 ; VM variable indices (used by the game engine)
 VM_VARIABLE_RANDOM_SEED		EQU 03Ch
-VM_VARIABLE_LAST_KEYCHAR	EQU 0C5h
+VM_VARIABLE_LAST_KEYCHAR	EQU 0DAh
 VM_VARIABLE_HERO_POS_UP_DOWN	EQU 0E5h
-VM_VARIABLE_HERO_POS_JUMP_DOWN	EQU 0DCh
-VM_VARIABLE_HERO_POS_LEFT_RIGHT	EQU 0E9h
-VM_VARIABLE_HERO_POS_MASK	EQU 0FAh
-VM_VARIABLE_HERO_ACTION		EQU 0FBh
-VM_VARIABLE_HERO_ACTION_POS_MASK EQU 0FBh
+VM_VARIABLE_HERO_ACTION		EQU 0FAh
+VM_VARIABLE_HERO_POS_JUMP_DOWN	EQU 0FBh
+VM_VARIABLE_HERO_POS_LEFT_RIGHT	EQU 0FCh
+VM_VARIABLE_HERO_POS_MASK	EQU 0FDh
+VM_VARIABLE_HERO_ACTION_POS_MASK EQU 0FEh
 VM_VARIABLE_SCROLL_Y		EQU 0F9h
 
 ; Game part IDs (from reference: parts.h)
@@ -1257,10 +1257,133 @@ _write_vm_var:
 	RET
 
 
-INPUT_UPDATE_PLAYER:
-	; Stub: initialize input-related VM variables to neutral values
-	; Full input via control panel serial is a future enhancement
+	ifdef TARGET_MAINCPU
+; _cpanel_send_byte: Send/receive one byte via SC1 synchronous I/O
+; In sync mode, writing SC1BUF simultaneously sends and receives.
+; Input: A = byte to send
+; Output: A = byte received
+; Clobbers: A only (W preserved)
+_cpanel_send_byte:
+	LD (SC1BUF), A			; Start 8-bit transfer
+	LD A, 0FFh				; Delay ~255 iterations (~95µs at 16 MHz > 64µs @ 125 kHz effective SCLK)
+.delay:
+	DEC 1, A
+	JR NZ, .delay
+	LD A, (SC1BUF)			; Read received byte
 	RET
+
+; _cpanel_query_segment: Query a control panel button segment
+; Input: B = command (0x20=left panel, 0xE0=right panel), C = segment number
+; Output: A = button bitmap
+; Clobbers: A, W
+_cpanel_query_segment:
+	LD A, B					; Send command byte
+	CALL _cpanel_send_byte
+	LD A, C					; Send segment byte
+	CALL _cpanel_send_byte
+	LD A, 0FFh				; Send dummy (clock in header)
+	CALL _cpanel_send_byte	; A = header (discard)
+	LD A, 0FFh				; Send dummy (clock in bitmap)
+	CALL _cpanel_send_byte	; A = button bitmap
+	RET
+	endif ; TARGET_MAINCPU
+
+INPUT_UPDATE_PLAYER:
+	ifdef TARGET_MAINCPU
+	; Query CPR_SEG4 (right panel segment 4) for direction buttons
+	; CPR_SEG4: bit1=UP(PART:RIGHT2), bit4=LEFT(CONDUCTOR:LEFT),
+	;           bit5=DOWN(CONDUCTOR:RIGHT2), bit6=RIGHT(CONDUCTOR:RIGHT1)
+	LD B, 0E0h				; Right panel command
+	LD C, 004h				; Segment 4
+	CALL _cpanel_query_segment
+	LD H, A					; H = CPR_SEG4 bitmap
+
+	; Query CPL_SEG4 (left panel segment 4) for action button
+	; CPL_SEG4: bit3=ACTION(VARIATION 4)
+	LD B, 020h				; Left panel command
+	; C still = 004h
+	CALL _cpanel_query_segment
+	LD L, A					; L = CPL_SEG4 bitmap
+
+	; Build lr (left/right), ud (up/down), and mask m
+	; H, L, C are preserved across _write_vm_var (only clobbers XIY, XWA)
+	LD C, 0					; C = mask accumulator (m)
+
+	; --- RIGHT (H bit 6 = CONDUCTOR:RIGHT1) ---
+	LD DE, 0				; lr = 0
+	BIT 6, H
+	JR Z, .no_right
+	LD DE, 1				; lr = 1
+	SET 0, C				; m |= 1 (right)
+.no_right:
+
+	; --- LEFT (H bit 4 = CONDUCTOR:LEFT) ---
+	BIT 4, H
+	JR Z, .no_left
+	LD DE, -1				; lr = -1
+	SET 1, C				; m |= 2 (left)
+.no_left:
+
+	; Write VM_VARIABLE_HERO_POS_LEFT_RIGHT = lr (DE)
+	LD A, VM_VARIABLE_HERO_POS_LEFT_RIGHT
+	CALL _write_vm_var
+
+	; --- DOWN (H bit 5 = CONDUCTOR:RIGHT2) ---
+	LD DE, 0				; ud = 0
+	BIT 5, H
+	JR Z, .no_down
+	LD DE, 1				; ud = 1
+	SET 2, C				; m |= 4 (down)
+.no_down:
+
+	; --- UP (H bit 1 = PART:RIGHT2) ---
+	BIT 1, H
+	JR Z, .no_up
+	LD DE, -1				; ud = -1
+	SET 3, C				; m |= 8 (up)
+	; UP pressed: write HERO_POS_UP_DOWN = -1
+	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
+	CALL _write_vm_var		; DE = -1
+	JR .up_down_done
+.no_up:
+	; UP not pressed: write HERO_POS_UP_DOWN = ud (0 or 1)
+	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
+	CALL _write_vm_var		; DE = ud
+
+.up_down_done:
+	; Write VM_VARIABLE_HERO_POS_JUMP_DOWN = ud (DE still = ud)
+	LD A, VM_VARIABLE_HERO_POS_JUMP_DOWN
+	CALL _write_vm_var
+
+	; Write VM_VARIABLE_HERO_POS_MASK = m
+	LD D, 0
+	LD E, C					; DE = m (zero-extended)
+	LD A, VM_VARIABLE_HERO_POS_MASK
+	CALL _write_vm_var
+
+	; --- ACTION (L bit 3 = VARIATION 4) ---
+	LD DE, 0				; button = 0
+	BIT 3, L
+	JR Z, .no_action
+	LD DE, 1				; button = 1
+	SET 7, C				; m |= 0x80 (action)
+.no_action:
+
+	; Write VM_VARIABLE_HERO_ACTION = button
+	LD A, VM_VARIABLE_HERO_ACTION
+	CALL _write_vm_var
+
+	; Write VM_VARIABLE_HERO_ACTION_POS_MASK = m (with action bit)
+	LD D, 0
+	LD E, C					; DE = m
+	LD A, VM_VARIABLE_HERO_ACTION_POS_MASK
+	CALL _write_vm_var
+
+	RET
+
+	else ; TARGET_EXTENSION
+	RET
+	endif
 
 
 CHECK_THREAD_REQUESTS:
