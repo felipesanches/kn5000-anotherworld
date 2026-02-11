@@ -107,6 +107,8 @@ FRAME_OVERRAN:       DB ?		; 1 if last frame exceeded budget, 0 otherwise
 REQUESTED_NEXT_PART: DW ?		; Part switch request (0 = no request)
 CURRENT_PART_ID: DW ?			; Current game part ID
 
+BMP_SRC_PTR: DD ?				; Temp: LOAD_SCREEN source pointer during 4bpp conversion
+
 ; =============================================================================
 ; Main CPU ROM Layout
 ; =============================================================================

@@ -401,10 +401,27 @@ _setup_threads__loop:
 	LD DE, 021h
 	CALL _write_vm_var
 
-	; Initialize part tracking and load intro resources
+	; Initialize part tracking and start from the protection/splash screens
+	; (Part 0 = logo, credits, code-wheel). We bypass the code wheel by
+	; starting thread 0 at the splash screen entry point (0x007B) instead
+	; of PC=0 (which enters the code wheel). We also pre-start the display
+	; loop thread and set the frame delay variable, matching what the
+	; bytecode's normal entry at 0x0000 would have done.
 	LDW (REQUESTED_NEXT_PART), 0
-	LD WA, GAME_PART_INTRO
+	LD WA, GAME_PART_PROTECTION
 	CALL initForPart
+
+	; Override thread 0 PC to splash screen entry (skip code wheel at 0x0000)
+	LDW (THREADS_DATA + PC_OFFSET), 007Bh
+
+	; Start display loop on thread 60 (bytecode address 0x10A3)
+	; Thread 60 slot = 60 * 4 = 240 bytes into THREADS_DATA
+	LDW (THREADS_DATA + (60 * 4) + PC_OFFSET), 010A3h
+
+	; Set var[0xFF] = 2 (frame delay, normally set by bytecode at 0x0003)
+	LD A, 0FFh
+	LD DE, 2
+	CALL _write_vm_var
 
 	RET
 
@@ -981,11 +998,53 @@ OFFSET_BIT15_NOT_SET:
 
 
 LOAD_SCREEN:
-; Input: XHL = pointer to screen bitmap data (320x200 pixels)
-; Copies bitmap data to PAGE_BITMAP_0
-	LD XDE, PAGE_BITMAP_0
-	LD XBC, 320 * 200 / 2		; bitmap data length in 16-bit words (320x200 pixels)
-	LDIRW
+; Input: XHL = pointer to 32000 bytes of 4bpp Amiga planar screen data
+; Converts to 8bpp chunky and writes 64000 bytes to PAGE_BITMAP_0
+; Planar format: 4 bitplanes x 8000 bytes (320x200 / 8 bits per byte)
+; Each source byte produces 8 destination pixels.
+; Clobbers: XWA, XBC, XDE, XHL; preserves XIX
+	PUSH XIX
+
+	LD (BMP_SRC_PTR), XHL		; save source base pointer
+	LD XDE, PAGE_BITMAP_0		; destination: page 0 buffer
+	LD IX, 8000					; outer loop: 8000 byte positions
+
+_bmp_outer:
+	; Load one byte from each of the 4 bitplanes
+	LD XHL, (BMP_SRC_PTR)
+	LD A, (XHL)					; plane 0 (bit 0 of pixel color)
+	PUSH XHL
+	ADD XHL, 8000
+	LD B, (XHL)					; plane 1 (bit 1)
+	ADD XHL, 8000
+	LD C, (XHL)					; plane 2 (bit 2)
+	ADD XHL, 8000
+	LD W, (XHL)					; plane 3 (bit 3)
+	POP XHL
+	INC XHL
+	LD (BMP_SRC_PTR), XHL		; advance source pointer
+
+	; Convert 8 pixels from MSB to LSB
+	; A=plane0, B=plane1, C=plane2, W=plane3
+	LD H, 8						; pixel counter (8 pixels per byte)
+_bmp_pixel:
+	LD L, 0
+	; Extract MSB from each plane (p3 first → bit 3 of pixel)
+	SLA 1, W					; plane 3 MSB → carry
+	RLC L						; carry → L bit 0
+	SLA 1, C					; plane 2 MSB → carry
+	RLC L						; carry → L bit 0, prev → bit 1
+	SLA 1, B					; plane 1 MSB → carry
+	RLC L						; carry → L bit 0
+	SLA 1, A					; plane 0 MSB → carry
+	RLC L						; L = (p3<<3)|(p2<<2)|(p1<<1)|p0
+	LD (XDE), L
+	INC XDE
+	DJNZ H, _bmp_pixel
+
+	DJNZ IX, _bmp_outer
+
+	POP XIX
 	RET
 
 SETUP_PALETTE:
@@ -1375,10 +1434,12 @@ _OPCODE_0x80:
 	POP DE				; DE = x
 
 	; Compute offset and set up video data pointer
+	; Opcodes >= 0x80 always use CUR_VIDEO_2 (not CUR_VIDEO_DATA/VIDEO_1)
+	; Reference: vid_opcd_0x80 calls setDataBuffer(_ply, 1) → segVideo2
 	POP WA				; WA = offset_raw
-	SLA 1, WA			; offset *= 2
+	SLA 1, WA			; offset *= 2 (uint16_t wraps, e.g. 0x883E*2 → 0x107C)
 	EXTZ XWA
-	LD XIX, (CUR_VIDEO_DATA)
+	LD XIX, (CUR_VIDEO_2)
 	ADD XIX, XWA
 
 ;		if (y > 199)
@@ -2293,21 +2354,45 @@ INSTRUCTION_IS_NOT_PLAY_SOUND:
 	JP _end_of_EXECUTE_INSTRUCTION
 
 _load_check_screen:
-	; Check if resourceId matches a known screen bitmap resource
-	; screen_resource_indexes = {0x49, 0x53} (available resources)
+	; Check if resourceId matches a known screen bitmap resource.
+	; Screen resources serve dual purpose:
+	;   1. 4bpp planar bitmap copied to PAGE_BITMAP_0 (for direct display)
+	;   2. Raw data made available via CUR_VIDEO_2 (for VIDEO 0x80 polygon rendering)
+	; Reference: aw_hle.cpp screen_resource_indexes[] = {0x12,0x13,...,0x49,0x53,...}
+	CP WA, 012h
+	JP NE, _load_not_0x12
+	LD XHL, SCREEN_BITMAP_0x12
+	JP _load_screen_common
+_load_not_0x12:
+	CP WA, 013h
+	JP NE, _load_not_0x13
+	LD XHL, SCREEN_BITMAP_0x13
+	JP _load_screen_common
+_load_not_0x13:
+	CP WA, 047h
+	JP NE, _load_not_0x47
+	LD XHL, SCREEN_BITMAP_0x47
+	JP _load_screen_common
+_load_not_0x47:
 	CP WA, 049h
 	JP NE, _load_not_0x49
 	LD XHL, SCREEN_BITMAP_0x49
-	CALL LOAD_SCREEN
-	JP _end_of_EXECUTE_INSTRUCTION
+	JP _load_screen_common
 _load_not_0x49:
 	CP WA, 053h
 	JP NE, _load_unknown
 	LD XHL, SCREEN_BITMAP_0x53
-	CALL LOAD_SCREEN
-	JP _end_of_EXECUTE_INSTRUCTION
+	JP _load_screen_common
 _load_unknown:
 	; Unknown resource - ignore
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_load_screen_common:
+	; XHL = pointer to 32000-byte screen resource data
+	; 1. Set CUR_VIDEO_2 so VIDEO 0x80 opcodes can read polygon data from it
+	LD (CUR_VIDEO_2), XHL
+	; 2. Convert 4bpp planar to 8bpp chunky and copy to PAGE_BITMAP_0
+	CALL LOAD_SCREEN
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_LOAD:
 
@@ -2419,7 +2504,16 @@ PART_RESOURCE_TABLE:
 	; Part 9: Password (same)
 	dd PART8_PALETTES, PART8_BYTECODE, PART8_VIDEO_1, 0
 
-; Screen bitmap resources
+; Screen bitmap resources (dual-purpose: 4bpp planar bitmap + polygon data for VIDEO 0x80)
+SCREEN_BITMAP_0x12:
+	binclude "resources/resource-0x12.bin"
+
+SCREEN_BITMAP_0x13:
+	binclude "resources/resource-0x13.bin"
+
+SCREEN_BITMAP_0x47:
+	binclude "resources/resource-0x47.bin"
+
 SCREEN_BITMAP_0x49:
 	binclude "resources/resource-0x49.bin"
 
