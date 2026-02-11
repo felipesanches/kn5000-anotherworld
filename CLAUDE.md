@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Custom ROM development for the **Technics KN5000** arranger keyboard. ROMs can be tested in MAME's kn5000 driver and potentially installed on real hardware.
 
 **Target Hardware:**
-- CPU: Toshiba TMP94C241F (TLCS-900/H2), 25 MHz, 32-bit CISC
+- CPU: Toshiba TMP94C241F (TLCS-900/H2), 32-bit CISC
+  - Real hardware: 25 MHz; **MAME kn5000 driver: 16 MHz** (2 x 8 MHz XTAL)
 - Display: MN89304 VGA-compatible LCD controller, 320x240 @ 8bpp
 - Serial: SC0 for MIDI/Computer Interface, SC1 for Control Panel
 - Memory: 2MB Program ROM at 0xE00000-0xFFFFFF, 512KB VRAM at 0x1A0000
@@ -115,6 +116,12 @@ LDA_XWA_IMM24 addr    ; Load 24-bit address into XWA
 - SC0MOD (0xD2): Mode (0x29 = 8N1 with baud gen)
 - BR0CR (0xD3): Baud rate (0x06 = 38400)
 
+**Timers (T0/T1 cascade → INTT1 ISR):**
+- 12,500 Hz tick rate (80µs/tick) at MAME's 16 MHz clock
+- `TICKS_PER_SLICE = 250` (~20ms); PAUSE reads `var[0xFF]` for frame duration
+- Prescaler requires `LD (T16RUN), 080h` — T8RUN alone is not enough in MAME
+- See [`docs/timer-frame-timing.md`](docs/timer-frame-timing.md) for full details and MAME vs real hardware differences
+
 **Boot Requirements:**
 1. Disable watchdog: `ld (WDMOD), 0` then `ld (WDCR), 0xB1`
 2. Configure memory controller (MSAR/MAMR registers)
@@ -166,6 +173,11 @@ The VM interprets big-endian bytecode (Amiga/68k origin) on a little-endian TLCS
 - `LDIRW` uses XHL=src, XDE=dst, XBC=word_count (not XIX/XIY)
 
 **Signed vs unsigned shifts:** `SRA` (arithmetic shift right) sign-extends; `SRL` (logical shift right) zero-fills. Use `SRL` for unsigned nibble extraction (e.g., extracting high nibble of a byte).
+
+**MAME TLCS-900 bugs:**
+- `DEC 1, rr; JP NZ` doesn't work — DEC doesn't set flags correctly. Use `DJNZ rr, label` instead.
+- Prescaler requires T16RUN bit 7 (not just T8RUN). See [`docs/timer-frame-timing.md`](docs/timer-frame-timing.md).
+- MAME's T01MOD register layout and prescaler divisions differ from the TMP94C241F datasheet.
 
 **AW palette → VGA DAC conversion:**
 - AW format: 2 bytes/color, `0x0RGB`. Byte 0 low nibble = R, byte 1 high nibble = G, byte 1 low nibble = B

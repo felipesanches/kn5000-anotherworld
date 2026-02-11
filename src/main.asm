@@ -94,6 +94,11 @@ CUR_VIDEO_DATA: DD ?			; Pointer to current video polygon data (VIDEO_1 or VIDEO
 
 STRING_X0: DW ?
 
+SYSTEM_TICKS:        DD ?		; 32-bit tick counter (ISR-incremented, 12500 Hz)
+FRAME_START_TICKS:   DD ?		; Tick count at frame start
+LAST_FRAME_TICKS:    DW ?		; Elapsed ticks of last frame (for diagnostics)
+FRAME_OVERRAN:       DB ?		; 1 if last frame exceeded budget, 0 otherwise
+
 REQUESTED_NEXT_PART: DW ?		; Part switch request (0 = no request)
 CURRENT_PART_ID: DW ?			; Current game part ID
 
@@ -170,6 +175,14 @@ POINTERS:
 ; =============================================================================
 	ifdef TARGET_MAINCPU
 
+INTT1_Handler:
+	PUSH XWA
+	LD XWA, (SYSTEM_TICKS)
+	INC 1, XWA
+	LD (SYSTEM_TICKS), XWA
+	POP XWA
+	RETI
+
 Default_Handler:
 	halt
 	jr Default_Handler
@@ -197,7 +210,11 @@ VECTOR_TABLE:
 	dd Default_Handler	; Vector 6
 	dd Default_Handler	; Vector 7
 
-	rept 56
+	rept 13				; Entries 8-20 (offsets 0x20-0x50)
+	dd Default_Handler
+	endm
+	dd INTT1_Handler		; Entry 21 (offset 0x54): INTT1
+	rept 42				; Entries 22-63 (offsets 0x58-0xFC)
 	dd Default_Handler
 	endm
 

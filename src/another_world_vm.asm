@@ -26,6 +26,7 @@ REQUESTED_PC_OFFSET	EQU 2  ; 16 bits
 INACTIVE_THREAD		EQU 0FFFFh
 DELETE_THIS_THREAD	EQU 0FFFEh
 NO_REQUEST 			EQU 0FFFFh
+TICKS_PER_SLICE		EQU 250		; ~20ms at 12500 Hz tick rate (80 µs/tick)
 
 CURRENT_STATE	EQU 0  ; boolean stored as a byte
 REQUESTED_STATE	EQU 1  ; boolean stored as a byte
@@ -370,11 +371,13 @@ _setup_threads__loop:
 	RET
 
 ENTRY:
-	EI 06 ; DISABLE INTERRUPTS
-
-	; Diagnostics removed - MN89304 DAC confirmed as 4-bit (0-15)
+	EI 0 ; Enable interrupts (INTT1 timer ISR)
 
 	CALL GAME_RESET
+
+	; Initialize frame start time
+	LD XWA, (SYSTEM_TICKS)
+	LD (FRAME_START_TICKS), XWA
 
 MAIN_LOOP:
 	CALL EXECUTE_INSTRUCTION
@@ -390,12 +393,57 @@ LONG_PAUSE_LOOP2:
 	RET
 
 PAUSE:
-	LD BC, 0
-PAUSE_LOOP1:
-	LD DE, 01h
-PAUSE_LOOP2:
-	DJNZ DE, PAUSE_LOOP2
-	DJNZ BC, PAUSE_LOOP1
+	; Timer-based frame delay using VM variable 0xFF (pause slices).
+	; Each slice = ~20ms. Polls SYSTEM_TICKS until elapsed >= target.
+	; DJNZ fallback counter exits if timer ISR doesn't fire.
+
+	; Read VM variable 0xFF (pause slices)
+	LD A, 0FFh
+	CALL _read_vm_var		; DE = var[0xFF]
+
+	; Cap slices at 1-5 range
+	LD A, E
+	CP A, 0
+	JP NE, _pause_nonzero
+	LD A, 1
+_pause_nonzero:
+	CP A, 6
+	JP ULT, _pause_capped
+	LD A, 5
+_pause_capped:
+	; Compute target_ticks = slices * TICKS_PER_SLICE
+	LD D, 0
+	LD E, A					; DE = capped slices (1-5)
+	LD WA, TICKS_PER_SLICE	; WA = 250
+	MUL XWA, DE			; XWA = target_ticks (16-bit result in WA)
+	LD XBC, XWA			; XBC = target_ticks (preserved across loop)
+
+	; Check for overrun: elapsed already >= target?
+	LD XWA, (SYSTEM_TICKS)
+	LD XDE, (FRAME_START_TICKS)
+	SUB XWA, XDE			; XWA = elapsed ticks
+	CP XWA, XBC
+	JP UGE, _pause_overrun
+
+	; Poll timer with DJNZ fallback (65536 iterations ≈ 80ms safety net)
+	LD HL, 0				; fallback counter
+_pause_wait:
+	LD XWA, (SYSTEM_TICKS)
+	LD XDE, (FRAME_START_TICKS)
+	SUB XWA, XDE			; XWA = elapsed
+	CP XWA, XBC
+	JP UGE, _pause_done_ok
+	DJNZ HL, _pause_wait
+	; Fallback expired — exit (timer may not be running)
+
+_pause_done_ok:
+	LD (LAST_FRAME_TICKS), WA
+	LDB (FRAME_OVERRAN), 0
+	RET
+
+_pause_overrun:
+	LD (LAST_FRAME_TICKS), WA
+	LDB (FRAME_OVERRAN), 1
 	RET
 
 readAndDrawPolygon:
@@ -1197,7 +1245,12 @@ _next_thread__do_loop:
 	CALL CHECK_THREAD_REQUESTS
 	LD A, 0FEh
 	CALL UPDATE_DISPLAY
-	LD A, 0
+
+	; Record frame start time for next frame
+	LD XWA, (SYSTEM_TICKS)
+	LD (FRAME_START_TICKS), XWA
+
+	LD WA, 0			; Must clear W (clobbered by LD XWA above); thread scan uses W=0
 _not_end_of_frame:
 
 ;	while(current->state == FROZEN || current->PC == INACTIVE_THREAD);
@@ -1987,6 +2040,17 @@ _blit_no_hack:
 	POP WA			; restore pageId (A = pageId)
 	CALL UPDATE_DISPLAY
 	CALL PAUSE			; Frame timing delay
+
+	; Overrun visual indicator: white pixel at top-right for overrun, black otherwise
+	LD A, (FRAME_OVERRAN)
+	CP A, 0
+	JP EQ, _no_overrun_indicator
+	LDB (001a0000h + 20*320 + 319), 0Fh	; color 15 (white in most palettes)
+	JP _end_overrun_indicator
+_no_overrun_indicator:
+	LDB (001a0000h + 20*320 + 319), 00h	; color 0 (background)
+_end_overrun_indicator:
+
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_BLIT_FRAMEBUFFER:
 

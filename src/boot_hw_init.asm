@@ -105,3 +105,18 @@
 	LD (B3CSH), 08ah
 	LD (B4CSH), 082h
 	LD (B5CSH), 081h
+
+	; === 8-bit Timer Setup (T0/T1 cascade for system tick) ===
+	; T0 clock: prescaler T1 output = fCPU/8
+	; MAME KN5000: fCPU = 16 MHz → T0 input = 2 MHz
+	; T0 ÷10 (TREG0) → 200 kHz, T1 cascade ÷16 (TREG1) → 12500 Hz (80 µs/tick)
+	LD (T01MOD), 01dh		; T0CLK=01(T1/÷8), T01M=00(8bit cascade), PRRUN=1
+	LD (T02FFCR), 000h		; No flip-flop output
+	LD (TREG0), 00ah		; T0 divides by 10
+	LD (TREG1), 010h		; T1 divides by 16
+	LD (TRDC), 000h			; No double-buffer
+	LD (T16RUN), 080h		; Enable prescaler (bit 7 = PRRUN)
+	LD (T8RUN), 003h		; Start T0 (bit 0) + T1 (bit 1)
+
+	; Enable INTT1 interrupt at priority level 6
+	LD (INTET01), 0C0h		; bits [7:5] = 110 = level 6, INTT0 disabled
