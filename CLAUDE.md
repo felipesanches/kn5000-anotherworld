@@ -57,9 +57,24 @@ make check    # Verify tools and original ROMs are available
 - `src/another_world_vm.asm` - Another World bytecode VM (shared between targets)
 - `src/includes/local_macros.inc` - TLCS-900 instruction macros for ASL
 
-## Reference Repositories (Read-Only)
+## Current Goal
 
-These sibling repositories contain essential reference material. **Do not modify them; all changes go in this repo only.**
+**Fix both the Another World VM and the MAME KN5000 driver to achieve a fully playable game, while keeping the MAME driver compatible with the original KN5000 firmware.**
+
+This is a dual-target effort:
+- **VM code** (this repo): Implement missing features (input, sound, all game parts)
+- **MAME driver** (`../../kn5000-roms-disasm/mame_driver/`): Fix emulation bugs discovered during VM development (serial, timers, etc.). All MAME changes must be validated against the original firmware behavior — the driver serves both our custom ROM and the stock KN5000 ROM.
+
+The MAME driver files are at `../../kn5000-roms-disasm/mame_driver/` and are **editable**. Changes are manually copied to the user's full MAME source tree for building and testing.
+
+Key MAME driver files:
+- `src/devices/cpu/tlcs900/tmp94c241_serial.cpp/.h` — CPU serial channel emulation
+- `src/mame/matsushita/kn5000_cpanel.cpp/.h` — Control panel HLE (button input)
+- `src/mame/matsushita/kn5000.cpp` — Main driver (wiring, memory map, input ports)
+
+## Reference Repositories
+
+These sibling repositories contain essential reference material. **Do not modify them** except for the MAME driver files noted above.
 
 ### Hardware Documentation: `../../kn5000-docs/`
 | Topic | File | Key Information |
@@ -114,11 +129,19 @@ LDA_XWA_IMM24 addr    ; Load 24-bit address into XWA
 - VRAM: 0x1A0000, linear framebuffer, 1 byte per pixel
 - Palette: 6-bit RGB values via DAC registers
 
-**Serial Port SC0:**
+**Serial Port SC0 (MIDI):**
 - SC0BUF (0xD0): Data buffer
 - SC0CR (0xD1): Control (bit 1 = TX empty)
 - SC0MOD (0xD2): Mode (0x29 = 8N1 with baud gen)
 - BR0CR (0xD3): Baud rate (0x06 = 38400)
+
+**Serial Port SC1 (Control Panel):**
+- SC1BUF: Data buffer (write to send, read to receive in sync mode)
+- SC1MOD = 0x00: Synchronous I/O mode, clock source = TO2 trigger (original firmware) or baud rate gen
+- BR1CR = 0x14: 250 kHz (16 MHz / 16 / 4)
+- SC1CR = 0x01: IOC=0 (master/internal clock), RXE=1 (receive enable)
+- Protocol: 2-byte command (panel_cmd + segment), 2-byte response (header + button_bitmap)
+- See [`docs/serial-cpanel-compatibility-2026-02-11.md`](docs/serial-cpanel-compatibility-2026-02-11.md) for MAME bugs and fixes
 
 **Timers (T0/T1 cascade → INTT1 ISR):**
 - 12,500 Hz tick rate (80µs/tick) at MAME's 16 MHz clock
@@ -182,6 +205,9 @@ The VM interprets big-endian bytecode (Amiga/68k origin) on a little-endian TLCS
 - `DEC 1, rr; JP NZ` doesn't work — DEC doesn't set flags correctly. Use `DJNZ rr, label` instead.
 - Prescaler requires T16RUN bit 7 (not just T8RUN). See [`docs/timer-frame-timing.md`](docs/timer-frame-timing.md).
 - MAME's T01MOD register layout and prescaler divisions differ from the TMP94C241F datasheet.
+- **Serial timer stops early:** `timer_callback` only checks `m_tx_clock_count`, missing the final rising edge needed for RX completion. Fix: also check `m_rx_clock_count != 8`.
+- **Cpanel queue overwrites last bit:** When loading next byte from TX queue, pre-outputs bit 0 before CPU samples bit 7 of previous byte. Fix: use `tx_clock_count = 8`, defer bit 0 output to next falling edge.
+- **Serial baud rate timer at half speed:** Timer fires at `m_hz` but toggles SCLK, so effective bit rate is `m_hz/2`. Not fixed yet — VM uses longer delay loop to compensate.
 
 **AW palette → VGA DAC conversion:**
 - AW format: 2 bytes/color, `0x0RGB`. Byte 0 low nibble = R, byte 1 high nibble = G, byte 1 low nibble = B
