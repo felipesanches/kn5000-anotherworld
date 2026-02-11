@@ -450,11 +450,6 @@ code {
     <div class="step-desc">Only intro resources (0x17-0x1A, 0x49, 0x53) are included. The remaining parts' bytecode, palettes, and video data need to be extracted from the original game files.</div>
   </div>
   <div class="step">
-    <div class="step-title">Remove VM hacks</div>
-    <div class="step-status partial">Partial</div>
-    <div class="step-desc">Two workarounds remain: var[0x54]=0x81 for the Interplay logo, and forced hero position during intro-to-lake transition. These should become unnecessary once full part switching works.</div>
-  </div>
-  <div class="step">
     <div class="step-title">Real hardware testing</div>
     <div class="step-status todo">Todo</div>
     <div class="step-desc">All development has been in MAME. The extension board target builds but hasn't been tested on a real KN5000. Timer prescaler behavior and INC instruction encoding may differ.</div>
