@@ -1460,8 +1460,6 @@ _end_of__check_thread_reqs:
 
 .
 NEXT_THREAD:
-	CALL INPUT_UPDATE_PLAYER
-
 	LD WA, 0
 	LD A, (CURRENT_THREAD)
 
@@ -1471,6 +1469,7 @@ _next_thread__do_loop:
 	JP NE, _not_end_of_frame
 	; == END OF FRAME ==
 	LDB (CURRENT_THREAD), 0
+	CALL INPUT_UPDATE_PLAYER		; Once per frame (matches reference HLE)
 	CALL CHECK_THREAD_REQUESTS
 	LD A, 0FEh
 	CALL UPDATE_DISPLAY

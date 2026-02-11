@@ -65,7 +65,11 @@ This is a dual-target effort:
 - **VM code** (this repo): Implement missing features (input, sound, all game parts)
 - **MAME driver** (`../../kn5000-roms-disasm/mame_driver/`): Fix emulation bugs discovered during VM development (serial, timers, etc.). All MAME changes must be validated against the original firmware behavior — the driver serves both our custom ROM and the stock KN5000 ROM.
 
-The MAME driver files are at `../../kn5000-roms-disasm/mame_driver/` and are **editable**. Changes are manually copied to the user's full MAME source tree for building and testing.
+The MAME driver files are at `../../kn5000-roms-disasm/mame_driver/` and are **editable**. You may edit anything needed in the MAME driver as long as changes are:
+1. **Technically accurate** — consistent with TMP94C241 datasheets and KN5000 service manual
+2. **Compatible with the original KN5000 firmware** — the stock ROM must continue to work correctly
+
+Changes are manually copied to the user's full MAME source tree for building and testing.
 
 Key MAME driver files:
 - `src/devices/cpu/tlcs900/tmp94c241_serial.cpp/.h` — CPU serial channel emulation
@@ -74,7 +78,7 @@ Key MAME driver files:
 
 ## Reference Repositories
 
-These sibling repositories contain essential reference material. **Do not modify them** except for the MAME driver files noted above.
+These sibling repositories contain essential reference material. **Do not modify them**, except for MAME driver files under `../../kn5000-roms-disasm/mame_driver/` (see Current Goal above for editing policy).
 
 ### Hardware Documentation: `../../kn5000-docs/`
 | Topic | File | Key Information |
