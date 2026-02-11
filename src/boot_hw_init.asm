@@ -127,6 +127,6 @@
 	LD (INTET01), 0C0h		; bits [7:5] = 110 = level 6, INTT0 disabled
 
 	; === SC1 Serial Setup (Control Panel, 250 kHz) ===
-	LD (SC1MOD), 000h		; Synchronous I/O mode
+	LD (SC1MOD), 001h		; Synchronous I/O mode, clock source = baud rate generator
 	LD (BR1CR), 014h		; 250 kHz (16 MHz / 16 / 4)
 	LD (SC1CR), 001h		; IOC=0: internal clock, SCLKS=0: rising edge, RXE=1
