@@ -2083,7 +2083,9 @@ INSTRUCTION_IS_NOT_KILL_THREAD:
 	INC XIX
 	LD B, (XIX)		; color
 	INC XIX
+	PUSH XIX		; save bytecode position (DRAW_STRING clobbers XIX)
 	CALL DRAW_STRING
+	POP XIX			; restore bytecode position
 	JP _end_of_EXECUTE_INSTRUCTION
 INSTRUCTION_IS_NOT_DRAW_STRING:
 
