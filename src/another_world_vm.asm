@@ -452,7 +452,7 @@ readAndDrawPolygon:
 	; DE: x
 	; HL: y
 	; B: color (Black = FFh)
-	; C: zoom (default = 40h)
+	; CUR_ZOOM: 16-bit zoom value (default = 0x40)
 	PUSH DE
 	PUSH HL
 	PUSH BC
@@ -479,10 +479,10 @@ COLOR_BIT_7_IS_OFF:
 	JP end_of_readAndDrawPolygon
 
 VALUE_IS_LT_C0: ; for now, here we simply assume value is == 2 without checking.
-	;(zoom, pt)
+	;(CUR_ZOOM, pt)
 
 	PUSH XIX
-	PUSH BC ; C=zoom
+	PUSH BC ; B=color
 	PUSH DE ; x
 	PUSH HL ; y
 	CALL readAndDrawPolygonHierarchy
@@ -503,23 +503,21 @@ readVertices:
 	PUSH HL
 	PUSH BC
 
+	LD DE, (CUR_ZOOM)	; 16-bit zoom
+
 	LD WA, 0
 	LD A, (XIX)
 	INC XIX
-	LD DE, 0
-	LD E, C
 	MUL XWA, DE			; *= ZOOM
-	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 2, XWA			; /= default_zoom (40h): unsigned shift by 6
 	SRL 4, XWA
 	LD (POLYGON_BBOX_W), WA
 
 	LD WA, 0
 	LD A, (XIX)
 	INC XIX
-	LD DE, 0
-	LD E, C
 	MUL XWA, DE			; *= ZOOM
-	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 2, XWA			; /= default_zoom (40h): unsigned shift by 6
 	SRL 4, XWA
 	LD (POLYGON_BBOX_H), WA
 
@@ -528,8 +526,6 @@ readVertices:
 	LD (POLYGON_NUM_POINTS), B
 
 	LD XIY, POLYGON_POINTS
-	LD DE, 0
-	LD E, C
 
 READ_THE_COORDINATES:
 
@@ -537,7 +533,7 @@ READ_THE_COORDINATES:
 	LD A, (XIX)
 	INC XIX
 	MUL XWA, DE			; *= ZOOM
-	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 2, XWA			; /= default_zoom (40h): unsigned shift by 6
 	SRL 4, XWA
 	LD (XIY), WA
 	INC 2, XIY
@@ -546,12 +542,12 @@ READ_THE_COORDINATES:
 	LD A, (XIX)
 	INC XIX
 	MUL XWA, DE			; *= ZOOM
-	SRL 2, XWA			; /= default_zoom (40h): unsigned 32-bit shift by 6
+	SRL 2, XWA			; /= default_zoom (40h): unsigned shift by 6
 	SRL 4, XWA
 	LD (XIY), WA
 	INC 2, XIY
 
-	DJNZ B, READ_THE_COORDINATES	
+	DJNZ B, READ_THE_COORDINATES
 
 	POP BC
 	POP HL
@@ -846,8 +842,7 @@ POLYGON_H_IS_LE_ZERO:
 
 
 readAndDrawPolygonHierarchy:
-	LD D, 0
-	LD E, C ; zoom
+	LD DE, (CUR_ZOOM)	; 16-bit zoom
 	;	pt.x -= m_polygonData[m_data_offset++] * zoom / DEFAULT_ZOOM;
 	LD WA, 0
 	LD A, (XIX)
@@ -924,21 +919,19 @@ OFFSET_BIT15_NOT_SET:
 	ADD XIX, XWA
 	
 	LD HL, DE
-	; here L is the computer new color
+	; here L is the computed new color
 	; and BC is the children loop counter
 
-	; BC needs to become color | zoom params and
-	; DE needs to become x param
-	; to the readAndDrawPolygon routine
-	
-	LD DE, (XSP + 4)	; restore zoom
+	; B needs color, DE needs x param
+	; zoom is in CUR_ZOOM (memory)
+
+	LD DE, (XSP + 4)	; restore zoom in DE for next loop iteration
 
 	PUSH BC
 	LD B, L		; color
-	LD C, E		; zoom
 	LD DE, (XSP + 0ah)		; PO.x
 	LD HL, (XSP + 08h)		; PO.y
-	; (color, zoom, po)
+	; (color, CUR_ZOOM, po)
 	CALL readAndDrawPolygon
 	POP BC
 	POP XIX				; m_data_offset = backup;
@@ -1347,7 +1340,8 @@ _OPCODE_0x80:
 	LD HL, 199			; y = 199
 _0x80_y_ok:
 
-	LD BC, 0FF40h
+	LDW (CUR_ZOOM), 040h	; default zoom
+	LD B, 0FFh				; color = BLACK
 	CALL readAndDrawPolygon
 
 	JP _after_PC_update
@@ -1431,7 +1425,7 @@ _0x40_y_done:
 	PUSH HL				; save y [stack: y, x, offset]
 
 	; Zoom mode based on opcode bits 1,0
-	LD C, 40h			; default zoom
+	LDW (CUR_ZOOM), 040h		; default zoom (16-bit)
 	LD A, B
 	AND A, 3
 
@@ -1444,23 +1438,28 @@ _0x40_y_done:
 	LD A, (XIX)
 	INC XIX
 	CALL _read_vm_var	; DE = vm_var[A]
-	LD C, E				; zoom = low byte of variable
+	LD (CUR_ZOOM), DE	; zoom = full 16-bit variable value
 	JP _0x40_zoom_done
 
 _0x40_zoom_not_1:
 	CP A, 2
 	JP NE, _0x40_zoom_case3
-	; fetch_byte() and discard
+	; case 2: zoom = fetch_byte() (literal zoom value)
+	LD WA, 0
+	LD A, (XIX)
 	INC XIX
+	LD (CUR_ZOOM), WA	; zoom = byte, zero-extended to 16-bit
 	JP _0x40_zoom_done
 
 _0x40_zoom_case3:
 	; case 3: m_useVideo2 = true, zoom = 0x40
+	PUSH XIX
 	LD XIX, INTRO_VIDEO_2
 	LD (CUR_VIDEO_DATA), XIX
+	POP XIX
 
 _0x40_zoom_done:
-	; C = zoom
+	; CUR_ZOOM = 16-bit zoom value
 
 	; Save bytecode position (all variable-length bytes consumed)
 	LD XDE, XIX
@@ -1477,10 +1476,10 @@ _0x40_zoom_done:
 	LD XIX, (CUR_VIDEO_DATA)
 	ADD XIX, XWA
 
-	; B = color (0xFF = BLACK), C = zoom (already set)
+	; B = color (0xFF = BLACK), zoom in CUR_ZOOM
 	LD B, 0FFh
 
-	; DE = x, HL = y, BC = color|zoom, XIX = data pointer
+	; DE = x, HL = y, B = color, XIX = data pointer, CUR_ZOOM = zoom
 	CALL readAndDrawPolygon
 
 	; Reset video data pointer to default (VIDEO_1)
