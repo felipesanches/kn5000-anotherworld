@@ -84,6 +84,10 @@ These sibling repositories contain essential reference material. **Do not modify
 | Symbols | `symbols/maincpu_symbols_reference.txt` | 39,125 named addresses |
 | AW VM HLE | `mame_driver/src/devices/cpu/anotherworld/` | Reference C++ implementation of all opcodes |
 
+### MAME HLE Reference
+- Full commit: https://github.com/felipesanches/mame/commit/7cbb93bc3ee05f5ffdd083081530ac0daa2dfa84
+- Local copy: `../../kn5000-roms-disasm/mame_driver/src/devices/cpu/anotherworld/`
+
 ### Assembler: `../../tools/asl/`
 - `asl` - ASL Macro Assembler 1.42 Beta
 - `p2bin` - Converts .p intermediate files to raw binary ROM

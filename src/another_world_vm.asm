@@ -62,8 +62,20 @@ VM_VARIABLE_HERO_ACTION		EQU 0FBh
 VM_VARIABLE_HERO_ACTION_POS_MASK EQU 0FBh
 VM_VARIABLE_SCROLL_Y		EQU 0F9h
 
-; Game part IDs
-GAME_PART_INTRO			EQU 03E80h
+; Game part IDs (from reference: parts.h)
+GAME_PART_FIRST			EQU 03E80h
+GAME_PART_PROTECTION	EQU 03E80h	; Part 0: Copy protection
+GAME_PART_INTRO			EQU 03E81h	; Part 1: Introduction cinematic
+GAME_PART_WATER			EQU 03E82h	; Part 2: Water / lake
+GAME_PART_JAIL			EQU 03E83h	; Part 3: Jail / prison
+GAME_PART_CITADEL		EQU 03E84h	; Part 4: Citadel
+GAME_PART_BATTLECHAR	EQU 03E85h	; Part 5: Battle cinematic
+GAME_PART_ARENA			EQU 03E86h	; Part 6: Arena
+GAME_PART_FINAL			EQU 03E87h	; Part 7: Final / ending
+GAME_PART_PASSWORD1		EQU 03E88h	; Part 8: Password entry
+GAME_PART_PASSWORD2		EQU 03E89h	; Part 9: Password entry (alt)
+GAME_PART_LAST			EQU 03E89h
+GAME_NUM_PARTS			EQU 10
 NUM_MEM_LIST			EQU 091h
 
 CALC_LINE_XMAX_AND_XMIN:
@@ -198,16 +210,6 @@ drawPoint:
 	POP XIX
 	RET
 
-video MACRO type,data,x,y
-	LD XIX, INTRO_VIDEO_type
-	ADD XIX, data
-	LD DE, x
-	LD HL, y
-	LD BC, 0FF40h
-	CALL readAndDrawPolygon
-	ENDM
-
-
 text MACRO stringid, x, y, color
 	LD WA, stringid
 	LD DE, x
@@ -261,8 +263,7 @@ VIDEO_START:
 	LD (CUR_PAGE_PTR_2), XIX
 	LD XIX, PAGE_BITMAP_1
 	LD (CUR_PAGE_PTR_3), XIX
-	LD XIX, INTRO_VIDEO_1
-	LD (CUR_VIDEO_DATA), XIX
+	; CUR_VIDEO_DATA is set by initForPart from the resource table
 	RET
 
 ; initForPart: Reset all threads and prepare for a new game part
@@ -305,8 +306,26 @@ _initForPart_loop:
 	LD DE, 014h
 	CALL _write_vm_var
 
-	; Note: Full part switching would require bank-switching bytecode,
-	; palettes, and video data. Only intro resources are available.
+	; Load resource pointers from PART_RESOURCE_TABLE
+	; Table index = (partId - GAME_PART_FIRST) * 16 (4 DDs per entry)
+	LD WA, (CURRENT_PART_ID)
+	SUB WA, GAME_PART_FIRST
+	; WA = part index (0-9)
+	SLA 4, WA			; WA = index * 16
+	EXTZ XWA
+	ADD XWA, PART_RESOURCE_TABLE
+
+	; XWA now points to: [palette_ptr, bytecode_ptr, video1_ptr, video2_ptr]
+	LD XIX, XWA
+	LD XWA, (XIX + 4)	; bytecode pointer
+	LD (CUR_BYTECODE), XWA
+	LD XWA, (XIX + 8)	; video1 pointer
+	LD (CUR_VIDEO_DATA), XWA
+	LD (CUR_VIDEO_1), XWA
+	LD XWA, (XIX + 12)	; video2 pointer
+	LD (CUR_VIDEO_2), XWA
+	LD XWA, (XIX + 0)	; palette pointer
+	LD (CUR_PALETTES), XWA
 	RET
 
 
@@ -364,9 +383,10 @@ _setup_threads__loop:
 	LD DE, 0081h
 	CALL _write_vm_var
 
-	; Initialize part tracking
+	; Initialize part tracking and load intro resources
 	LDW (REQUESTED_NEXT_PART), 0
-	LDW (CURRENT_PART_ID), GAME_PART_INTRO
+	LD WA, GAME_PART_INTRO
+	CALL initForPart
 
 	RET
 
@@ -960,7 +980,7 @@ SETUP_PALETTE:
 	; Compute byte offset: palette_index * 32
 	SLA 1, WA			; * 2
 	SLA 4, WA			; * 16 → total * 32 (each palette = 16 colors × 2 bytes)
-	LD XHL, INTRO_PALETTES
+	LD XHL, (CUR_PALETTES)
 	ADD XHL, XWA		; XHL = palette data pointer
 
 	; Set VGA DAC write index to 0
@@ -1281,7 +1301,7 @@ EXECUTE_INSTRUCTION:
 
 	LD IX, (VM_PC)
 	EXTZ XIX
-	ADD XIX, INTRO_BYTECODE			; FIXME
+	ADD XIX, (CUR_BYTECODE)
 
 FETCH_OPCODE:
 	LD A, (XIX)  ; opcode = fetch_byte();
@@ -1313,7 +1333,7 @@ _OPCODE_0x80:
 	; Save bytecode position (past all 4 consumed bytes: opcode, offset_lo, x, y)
 	PUSH HL				; save y
 	LD XDE, XIX
-	SUB XDE, INTRO_BYTECODE
+	SUB XDE, (CUR_BYTECODE)
 	LD (VM_PC), DE
 	POP HL				; restore y
 
@@ -1324,7 +1344,7 @@ _OPCODE_0x80:
 	POP WA				; WA = offset_raw
 	SLA 1, WA			; offset *= 2
 	EXTZ XWA
-	LD XIX, INTRO_VIDEO_1
+	LD XIX, (CUR_VIDEO_DATA)
 	ADD XIX, XWA
 
 ;		if (y > 199)
@@ -1453,17 +1473,17 @@ _0x40_zoom_not_1:
 
 _0x40_zoom_case3:
 	; case 3: m_useVideo2 = true, zoom = 0x40
-	PUSH XIX
-	LD XIX, INTRO_VIDEO_2
-	LD (CUR_VIDEO_DATA), XIX
-	POP XIX
+	PUSH XWA
+	LD XWA, (CUR_VIDEO_2)
+	LD (CUR_VIDEO_DATA), XWA
+	POP XWA
 
 _0x40_zoom_done:
 	; CUR_ZOOM = 16-bit zoom value
 
 	; Save bytecode position (all variable-length bytes consumed)
 	LD XDE, XIX
-	SUB XDE, INTRO_BYTECODE
+	SUB XDE, (CUR_BYTECODE)
 	LD (VM_PC), DE
 
 	; Restore parameters from stack
@@ -1483,8 +1503,10 @@ _0x40_zoom_done:
 	CALL readAndDrawPolygon
 
 	; Reset video data pointer to default (VIDEO_1)
-	LD XIX, INTRO_VIDEO_1
-	LD (CUR_VIDEO_DATA), XIX
+	PUSH XWA
+	LD XWA, (CUR_VIDEO_1)
+	LD (CUR_VIDEO_DATA), XWA
+	POP XWA
 
 	JP _after_PC_update
 
@@ -1629,7 +1651,7 @@ INSTRUCTION_IS_NOT_RET:
 	; next instruction to resume execution
 	; in the next VM frame.
 	LD XDE, XIX
-	SUB XDE, INTRO_BYTECODE		; FIXME
+	SUB XDE, (CUR_BYTECODE)		; FIXME
 	LD (XWA + REQUESTED_PC_OFFSET), DE
 _pausethread_after_setting_request:
 	CALL NEXT_THREAD
@@ -2263,7 +2285,7 @@ INSTRUCTION_IS_NOT_PLAY_MUSIC:
 
 		
 _end_of_EXECUTE_INSTRUCTION:
-	SUB XIX, INTRO_BYTECODE
+	SUB XIX, (CUR_BYTECODE)
 	LD (VM_PC), IX
 _after_PC_update:
 	POP XIY
@@ -2280,17 +2302,84 @@ STRING_INDEX:
 STRING_DATA:
 	binclude "hardcoded_data/str_data.rom"
 
-INTRO_BYTECODE:
-	binclude "resources/resource-0x18.bin"
+; =============================================================================
+; Game Resources — Part data (palette, bytecode, video1, video2)
+; =============================================================================
+; Each part has up to 4 resources. Video2=0x11 is shared across gameplay parts.
+; Resources are extracted from the original game by tools/extract_resources.py.
+;
+; Part 0: Protection
+PART0_PALETTES:	binclude "resources/resource-0x14.bin"
+PART0_BYTECODE:	binclude "resources/resource-0x15.bin"
+PART0_VIDEO_1:	binclude "resources/resource-0x16.bin"
 
-INTRO_PALETTES:
-	binclude "resources/resource-0x17.bin"  ; intro
+; Part 1: Intro
+PART1_PALETTES:	binclude "resources/resource-0x17.bin"
+PART1_BYTECODE:	binclude "resources/resource-0x18.bin"
+PART1_VIDEO_1:	binclude "resources/resource-0x19.bin"
 
-INTRO_VIDEO_1:
-	binclude "resources/resource-0x19.bin"
+; Part 2: Water
+PART2_PALETTES:	binclude "resources/resource-0x1a.bin"
+PART2_BYTECODE:	binclude "resources/resource-0x1b.bin"
+PART2_VIDEO_1:	binclude "resources/resource-0x1c.bin"
 
-INTRO_VIDEO_2:
-	binclude "resources/resource-0x1a.bin"
+; Part 3: Jail
+PART3_PALETTES:	binclude "resources/resource-0x1d.bin"
+PART3_BYTECODE:	binclude "resources/resource-0x1e.bin"
+PART3_VIDEO_1:	binclude "resources/resource-0x1f.bin"
+
+; Part 4: Citadel
+PART4_PALETTES:	binclude "resources/resource-0x20.bin"
+PART4_BYTECODE:	binclude "resources/resource-0x21.bin"
+PART4_VIDEO_1:	binclude "resources/resource-0x22.bin"
+
+; Part 5: Battlechar
+PART5_PALETTES:	binclude "resources/resource-0x23.bin"
+PART5_BYTECODE:	binclude "resources/resource-0x24.bin"
+PART5_VIDEO_1:	binclude "resources/resource-0x25.bin"
+
+; Part 6: Arena
+PART6_PALETTES:	binclude "resources/resource-0x26.bin"
+PART6_BYTECODE:	binclude "resources/resource-0x27.bin"
+PART6_VIDEO_1:	binclude "resources/resource-0x28.bin"
+
+; Part 7: Final
+PART7_PALETTES:	binclude "resources/resource-0x29.bin"
+PART7_BYTECODE:	binclude "resources/resource-0x2a.bin"
+PART7_VIDEO_1:	binclude "resources/resource-0x2b.bin"
+
+; Part 8-9: Password (shared resources)
+PART8_PALETTES:	binclude "resources/resource-0x7d.bin"
+PART8_BYTECODE:	binclude "resources/resource-0x7e.bin"
+PART8_VIDEO_1:	binclude "resources/resource-0x7f.bin"
+
+; Shared video2 (gameplay parts 2-4, 6-7)
+SHARED_VIDEO_2:	binclude "resources/resource-0x11.bin"
+
+; =============================================================================
+; Resource lookup table — 4 x 32-bit pointers per part (palette, bytecode, video1, video2)
+; =============================================================================
+PART_RESOURCE_TABLE:
+	; Part 0: Protection
+	dd PART0_PALETTES, PART0_BYTECODE, PART0_VIDEO_1, 0
+	; Part 1: Intro
+	dd PART1_PALETTES, PART1_BYTECODE, PART1_VIDEO_1, 0
+	; Part 2: Water
+	dd PART2_PALETTES, PART2_BYTECODE, PART2_VIDEO_1, SHARED_VIDEO_2
+	; Part 3: Jail
+	dd PART3_PALETTES, PART3_BYTECODE, PART3_VIDEO_1, SHARED_VIDEO_2
+	; Part 4: Citadel
+	dd PART4_PALETTES, PART4_BYTECODE, PART4_VIDEO_1, SHARED_VIDEO_2
+	; Part 5: Battlechar
+	dd PART5_PALETTES, PART5_BYTECODE, PART5_VIDEO_1, 0
+	; Part 6: Arena
+	dd PART6_PALETTES, PART6_BYTECODE, PART6_VIDEO_1, SHARED_VIDEO_2
+	; Part 7: Final
+	dd PART7_PALETTES, PART7_BYTECODE, PART7_VIDEO_1, SHARED_VIDEO_2
+	; Part 8: Password
+	dd PART8_PALETTES, PART8_BYTECODE, PART8_VIDEO_1, 0
+	; Part 9: Password (same)
+	dd PART8_PALETTES, PART8_BYTECODE, PART8_VIDEO_1, 0
 
 ; Screen bitmap resources
 SCREEN_BITMAP_0x49:

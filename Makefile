@@ -22,6 +22,10 @@ ASL_PATH := ../../tools/asl
 ASL := $(ASL_PATH)/asl
 P2BIN := $(ASL_PATH)/p2bin
 UNIDASM := ../../tools/unidasm
+EXTRACT_RESOURCES := python3 tools/extract_resources.py
+
+# Game data directory (original Another World files)
+GAME_DATA_DIR := game_data/MSDOS
 
 # Assembler flags
 # -L generates listing file, -olist specifies listing filename
@@ -116,22 +120,36 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # =============================================================================
+# Extract game resources from original data files
+# =============================================================================
+# Resource files needed by the build (all parts + screen bitmaps)
+RESOURCE_DIR := src/resources
+RESOURCE_STAMP := $(RESOURCE_DIR)/.extracted
+
+.PHONY: resources
+resources: $(RESOURCE_STAMP)
+
+$(RESOURCE_STAMP): tools/extract_resources.py $(wildcard $(GAME_DATA_DIR)/memlist.bin $(GAME_DATA_DIR)/MEMLIST.BIN $(GAME_DATA_DIR)/bank* $(GAME_DATA_DIR)/BANK* $(GAME_DATA_DIR)/resource-*.bin)
+	$(EXTRACT_RESOURCES) $(GAME_DATA_DIR) $(RESOURCE_DIR)
+	@touch $@
+
+# =============================================================================
 # Generate bitmap assets from game resources
 # =============================================================================
 ASSET_FILES := src/another_world_logo.bin src/other_bitmap.bin
 
 .PHONY: assets
-assets: src/resources/resource-0x49.bin src/resources/resource-0x53.bin
+assets: $(RESOURCE_STAMP)
 	touch src/another_world_logo.bin
 	touch src/other_bitmap.bin
 	python src/resources_to_images.py src/resources/resource-0x53.bin src/another_world_logo.bin
 	python src/resources_to_images.py src/resources/resource-0x49.bin src/other_bitmap.bin
 
-src/another_world_logo.bin: src/resources/resource-0x53.bin src/resources_to_images.py
+src/another_world_logo.bin: $(RESOURCE_STAMP) src/resources_to_images.py
 	touch src/another_world_logo.bin
 	python src/resources_to_images.py src/resources/resource-0x53.bin src/another_world_logo.bin
 
-src/other_bitmap.bin: src/resources/resource-0x49.bin src/resources_to_images.py
+src/other_bitmap.bin: $(RESOURCE_STAMP) src/resources_to_images.py
 	touch src/other_bitmap.bin
 	python src/resources_to_images.py src/resources/resource-0x49.bin src/other_bitmap.bin
 
@@ -212,7 +230,8 @@ romset: $(MAIN_ROM)
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(ASSET_FILES)
-	@echo "Clean complete (ROM set at $(ROMSET_DIR) preserved)"
+	rm -f $(RESOURCE_STAMP)
+	@echo "Clean complete (ROM set at $(ROMSET_DIR) preserved, resources kept)"
 
 # Full clean including ROM set
 .PHONY: distclean
@@ -299,9 +318,10 @@ help:
 	@echo "  make build    - Build custom ROM only (current TARGET)"
 	@echo ""
 	@echo "Other targets:"
+	@echo "  make resources- Extract game resources from $(GAME_DATA_DIR)"
 	@echo "  make romset   - Create complete MAME ROM set"
 	@echo "  make test     - Run in MAME emulator"
-	@echo "  make clean    - Remove build artifacts (preserves ROM set)"
+	@echo "  make clean    - Remove build artifacts (preserves ROM set and resources)"
 	@echo "  make distclean- Remove everything including ROM set"
 	@echo "  make check    - Verify build tools and original ROMs"
 	@echo "  make help     - Show this help"

@@ -9,6 +9,7 @@ build/
 *.log
 
 # Game resources (extracted separately, not checked in)
+game_data/
 src/resources/
 
 # Exceptions for checked-in data files

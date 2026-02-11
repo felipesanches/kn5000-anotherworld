@@ -90,7 +90,11 @@ LINE_XMAX:	DW ?
 CUR_PAGE_PTR_1: DD ?
 CUR_PAGE_PTR_2: DD ?
 CUR_PAGE_PTR_3: DD ?
-CUR_VIDEO_DATA: DD ?			; Pointer to current video polygon data (VIDEO_1 or VIDEO_2)
+CUR_VIDEO_DATA: DD ?			; Pointer to current video polygon data (video1 or video2)
+CUR_VIDEO_1: DD ?				; Pointer to current part's video1 data (for reset after video2 use)
+CUR_VIDEO_2: DD ?				; Pointer to current part's video2 data (0 if none)
+CUR_BYTECODE: DD ?				; Pointer to current part's bytecode
+CUR_PALETTES: DD ?				; Pointer to current part's palette data
 CUR_ZOOM: DW ?					; uint16_t zoom for polygon scaling (default 0x40)
 
 STRING_X0: DW ?
