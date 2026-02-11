@@ -383,6 +383,24 @@ _setup_threads__loop:
 	LD DE, 0081h
 	CALL _write_vm_var
 
+	; Copy protection bypass: Set the variables that the protection
+	; bytecode (resource 0x15) would set when the correct code wheel
+	; answer is entered. Without these, the water part's check at
+	; subroutine 0x009A kills all threads and the game halts.
+	; Protection check requires: var[0xBC] & 0x0010, var[0xF2] == 0x0FA0,
+	; var[0xDC] == 0x21. These are set by the protection code at offsets
+	; 0x0CCF (OR var[0xBC] |= 0x0010), 0x0D0D (var[0xF2] = 0x0FA0),
+	; and indirectly via the VM hack (var[0xDC] = 0x21).
+	LD A, 0BCh
+	LD DE, 0010h
+	CALL _write_vm_var
+	LD A, 0F2h
+	LD DE, 0FA0h
+	CALL _write_vm_var
+	LD A, 0DCh
+	LD DE, 021h
+	CALL _write_vm_var
+
 	; Initialize part tracking and load intro resources
 	LDW (REQUESTED_NEXT_PART), 0
 	LD WA, GAME_PART_INTRO
@@ -1659,7 +1677,7 @@ INSTRUCTION_IS_NOT_RET:
 	; next instruction to resume execution
 	; in the next VM frame.
 	LD XDE, XIX
-	SUB XDE, (CUR_BYTECODE)		; FIXME
+	SUB XDE, (CUR_BYTECODE)
 	LD (XWA + REQUESTED_PC_OFFSET), DE
 _pausethread_after_setting_request:
 	CALL NEXT_THREAD
@@ -2053,10 +2071,14 @@ INSTRUCTION_IS_NOT_COPY_VIDEO_PAGE:
 	INC XIX
 
 	; VM_HACK_SWITCH_FROM_INTRO_TO_LAKE:
-	; If currentPart == INTRO and vm_var[0x67] == 1, set vm_var[0xDC] = 0x21
+	; If currentPart == PROTECTION and vm_var[0x67] == 1, set vm_var[0xDC] = 0x21
+	; (The protection bytecode sets var[0x67]=1 when correct answer is entered;
+	; this hack then sets var[0xDC]=0x21 which subsequent parts check.)
+	; Note: Since we skip protection and set var[0xDC] directly in GAME_RESET,
+	; this hack is currently redundant, but kept for correctness.
 	PUSH WA			; save pageId
 	LD WA, (CURRENT_PART_ID)
-	CP WA, GAME_PART_INTRO
+	CP WA, GAME_PART_PROTECTION
 	JP NE, _blit_no_hack
 	LD A, 067h
 	CALL _read_vm_var	; DE = vm_var[0x67]

@@ -10,7 +10,7 @@ build/
 
 # Game resources (extracted separately, not checked in)
 game_data/
-src/resources/
+src/resources*
 
 # Exceptions for checked-in data files
 !src/hardcoded_data/*.rom
