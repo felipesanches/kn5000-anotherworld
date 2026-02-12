@@ -109,6 +109,11 @@ CURRENT_PART_ID: DW ?			; Current game part ID
 
 BMP_SRC_PTR: DD ?				; Temp: LOAD_SCREEN source pointer during 4bpp conversion
 
+; Diagnostic variables for serial input debugging
+DIAG_CPR: DB ?					; Last raw CPR_SEG4 bitmap from serial
+DIAG_CPL: DB ?					; Last raw CPL_SEG4 bitmap from serial
+DIAG_SERIAL_OK: DB ?			; 0xAA if last serial exchange completed, 0x55 if timeout
+
 ; =============================================================================
 ; Main CPU ROM Layout
 ; =============================================================================

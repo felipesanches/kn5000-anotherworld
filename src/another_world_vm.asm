@@ -413,6 +413,10 @@ _setup_threads__loop:
 ENTRY:
 	EI 0 ; Enable interrupts (INTT1 timer ISR)
 
+	ifdef TARGET_MAINCPU
+	CALL _cpanel_init		; Initialize control panel serial protocol
+	endif
+
 	CALL GAME_RESET
 
 	; Initialize frame start time
@@ -1245,22 +1249,39 @@ _write_vm_var:
 	ifdef TARGET_MAINCPU
 ; _cpanel_send_byte: Send/receive one byte via SC1 synchronous I/O
 ; In sync mode, writing SC1BUF simultaneously sends and receives.
+; Polls INTRX1 (RX complete) flag in INTES1 to know when the byte
+; has been fully clocked in, then reads the received byte from SC1BUF.
+; Uses AND instead of BIT (MAME has known flag bugs with DEC; BIT
+; might be similarly affected). Includes timeout to prevent hangs.
 ; Input: A = byte to send
 ; Output: A = byte received
-; Clobbers: A only (W preserved)
+; Clobbers: A only (DE preserved via stack)
 _cpanel_send_byte:
-	LD (SC1BUF), A			; Start 8-bit transfer
-	LD A, 0FFh				; Delay ~255 iterations (~95µs at 16 MHz > 64µs @ 125 kHz effective SCLK)
-.delay:
-	DEC 1, A
-	JR NZ, .delay
+	LD (INTCLR), 022h		; Clear INTRX1 pending (bit 3 of INTES1)
+	LD (SC1BUF), A			; Start 8-bit synchronous transfer
+	PUSH DE
+	LD DE, 0				; Timeout counter (65536 iterations ~57ms at 16MHz)
+.wait:
+	LD A, (INTES1)			; Read interrupt status
+	AND A, 008h				; Test INTRX1 (RX complete) — bit 3
+	JR NZ, .done			; Exit when set
+	DJNZ DE, .wait			; Decrement timeout, loop if not expired
+	; Timeout: serial transfer did not complete
+	LDB (DIAG_SERIAL_OK), 055h	; Mark timeout for diagnostic
+	POP DE
+	LD A, 0					; Return 0 on timeout
+	RET
+.done:
+	LDB (DIAG_SERIAL_OK), 0AAh	; Mark success for diagnostic
+	POP DE
 	LD A, (SC1BUF)			; Read received byte
 	RET
 
 ; _cpanel_query_segment: Query a control panel button segment
+; Sends 2-byte command, then 2 dummy bytes to clock in response.
 ; Input: B = command (0x20=left panel, 0xE0=right panel), C = segment number
 ; Output: A = button bitmap
-; Clobbers: A, W
+; Clobbers: A only (B, C preserved)
 _cpanel_query_segment:
 	LD A, B					; Send command byte
 	CALL _cpanel_send_byte
@@ -1271,6 +1292,60 @@ _cpanel_query_segment:
 	LD A, 0FFh				; Send dummy (clock in bitmap)
 	CALL _cpanel_send_byte	; A = button bitmap
 	RET
+
+; _cpanel_init: Initialize control panel serial protocol
+; Sends the 5-command init sequence matching the original firmware.
+; Each command is followed by a delay. The cpanel MCUs respond with
+; sync packets; we consume them via the standard 4-byte exchange.
+; Must be called once before any _cpanel_query_segment calls.
+; Clobbers: A, B, C, DE
+_cpanel_init:
+	; Init command 1: 1F DA
+	LD B, 01Fh
+	LD C, 0DAh
+	CALL _cpanel_query_segment
+	CALL _cpanel_delay
+
+	; Init command 2: 1F 1A
+	LD B, 01Fh
+	LD C, 01Ah
+	CALL _cpanel_query_segment
+	CALL _cpanel_delay
+
+	; Init command 3: 1D 00
+	LD B, 01Dh
+	LD C, 000h
+	CALL _cpanel_query_segment
+	CALL _cpanel_delay
+
+	; Init command 4: DD 03
+	LD B, 0DDh
+	LD C, 003h
+	CALL _cpanel_query_segment
+	CALL _cpanel_delay
+
+	; Init command 5: 1E 80
+	LD B, 01Eh
+	LD C, 080h
+	CALL _cpanel_query_segment
+	CALL _cpanel_delay
+
+	; Clear serial interrupt flags (original firmware uses INTCLR)
+	LD (INTCLR), 023h		; Clear INTTX1 pending
+	LD (INTCLR), 022h		; Clear INTRX1 pending
+	RET
+
+; _cpanel_delay: Inter-command delay for init sequence
+; Matches the original firmware's DELAY_3000_LOOPS between init commands.
+; Clobbers: DE
+_cpanel_delay:
+	PUSH DE
+	LD DE, 3000h
+.loop:
+	DJNZ DE, .loop
+	POP DE
+	RET
+
 	endif ; TARGET_MAINCPU
 
 INPUT_UPDATE_PLAYER:
@@ -1291,77 +1366,81 @@ INPUT_UPDATE_PLAYER:
 	CALL _cpanel_query_segment
 	LD L, A					; L = CPL_SEG4 bitmap
 
-	; Build lr (left/right), ud (up/down), and mask m
-	; H, L, C are preserved across _write_vm_var (only clobbers XIY, XWA)
-	LD C, 0					; C = mask accumulator (m)
+	; Save raw serial results for VRAM diagnostic
+	LD (DIAG_CPR), H
+	LD (DIAG_CPL), L
 
-	; --- RIGHT (H bit 6 = CONDUCTOR:RIGHT1) ---
-	LD DE, 0				; lr = 0
-	BIT 6, H
-	JR Z, .no_right
+	; Process button bitmaps into VM variables.
+	; Follows reference input_updatePlayer() logic:
+	;   lr = 0; if RIGHT: lr=1, m|=1; if LEFT: lr=-1, m|=2; write LEFT_RIGHT=lr
+	;   ud = 0; if DOWN: ud=1, m|=4; if UP: ud=-1, m|=8; write JUMP_DOWN=ud
+	;   write UP_DOWN = UP ? -1 : 0
+	;   write POS_MASK = m
+	;   button = 0; if ACTION: button=1, m|=0x80; write HERO_ACTION=button
+	;   write ACTION_POS_MASK = m
+	; _write_vm_var clobbers XWA/XIY only — H, L, C all preserved.
+	; Uses AND (not BIT) for flag testing — MAME has known flag bugs with BIT.
+	LD C, 0					; mask = 0
+
+	; --- LEFT_RIGHT: compute in DE, then write once ---
+	LD DE, 0				; lr = 0 (default: no movement)
+	LD A, H
+	AND A, 040h				; RIGHT = CONDUCTOR: RIGHT 1 (bit 6)
+	JR Z, _input_no_right
 	LD DE, 1				; lr = 1
-	SET 0, C				; m |= 1 (right)
-.no_right:
-
-	; --- LEFT (H bit 4 = CONDUCTOR:LEFT) ---
-	BIT 4, H
-	JR Z, .no_left
-	LD DE, -1				; lr = -1
-	SET 1, C				; m |= 2 (left)
-.no_left:
-
-	; Write VM_VARIABLE_HERO_POS_LEFT_RIGHT = lr (DE)
+	SET 0, C				; mask |= 1
+_input_no_right:
+	LD A, H
+	AND A, 010h				; LEFT = CONDUCTOR: LEFT (bit 4)
+	JR Z, _input_no_left
+	LD DE, 0FFFFh			; lr = -1 (overrides RIGHT)
+	SET 1, C				; mask |= 2
+_input_no_left:
 	LD A, VM_VARIABLE_HERO_POS_LEFT_RIGHT
-	CALL _write_vm_var
+	CALL _write_vm_var		; Always write lr (even if 0)
 
-	; --- DOWN (H bit 5 = CONDUCTOR:RIGHT2) ---
-	LD DE, 0				; ud = 0
-	BIT 5, H
-	JR Z, .no_down
+	; --- JUMP_DOWN: compute in DE, then write once ---
+	LD DE, 0				; ud = 0 (default: no movement)
+	LD A, H
+	AND A, 020h				; DOWN = CONDUCTOR: RIGHT 2 (bit 5)
+	JR Z, _input_no_down
 	LD DE, 1				; ud = 1
-	SET 2, C				; m |= 4 (down)
-.no_down:
-
-	; --- UP (H bit 1 = PART:RIGHT2) ---
-	BIT 1, H
-	JR Z, .no_up
-	LD DE, -1				; ud = -1
-	SET 3, C				; m |= 8 (up)
-	; UP pressed: write HERO_POS_UP_DOWN = -1
-	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
-	CALL _write_vm_var		; DE = -1
-	JR .up_down_done
-.no_up:
-	; UP not pressed: write HERO_POS_UP_DOWN = ud (0 or 1)
-	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
-	CALL _write_vm_var		; DE = ud
-
-.up_down_done:
-	; Write VM_VARIABLE_HERO_POS_JUMP_DOWN = ud (DE still = ud)
+	SET 2, C				; mask |= 4
+_input_no_down:
 	LD A, VM_VARIABLE_HERO_POS_JUMP_DOWN
-	CALL _write_vm_var
+	CALL _write_vm_var		; Always write ud (even if 0)
 
-	; Write VM_VARIABLE_HERO_POS_MASK = m
+	; --- UP_DOWN: -1 if UP pressed, else 0 ---
+	LD DE, 0				; UP_DOWN = 0
+	LD A, H
+	AND A, 002h				; UP = PART SELECT: RIGHT 2 (bit 1)
+	JR Z, _input_no_up
+	LD DE, 0FFFFh			; UP_DOWN = -1
+	SET 3, C				; mask |= 8
+_input_no_up:
+	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
+	CALL _write_vm_var		; Always write (even if 0)
+
+	; --- POS_MASK ---
 	LD D, 0
-	LD E, C					; DE = m (zero-extended)
+	LD E, C					; DE = mask
 	LD A, VM_VARIABLE_HERO_POS_MASK
 	CALL _write_vm_var
 
-	; --- ACTION (L bit 3 = VARIATION 4) ---
+	; --- ACTION: 1 if pressed, 0 otherwise; set mask bit 7 ---
 	LD DE, 0				; button = 0
-	BIT 3, L
-	JR Z, .no_action
+	LD A, L
+	AND A, 008h				; ACTION = VARIATION 4 (bit 3)
+	JR Z, _input_no_action
+	SET 7, C				; mask |= 0x80
 	LD DE, 1				; button = 1
-	SET 7, C				; m |= 0x80 (action)
-.no_action:
-
-	; Write VM_VARIABLE_HERO_ACTION = button
+_input_no_action:
 	LD A, VM_VARIABLE_HERO_ACTION
 	CALL _write_vm_var
 
-	; Write VM_VARIABLE_HERO_ACTION_POS_MASK = m (with action bit)
+	; --- ACTION_POS_MASK ---
 	LD D, 0
-	LD E, C					; DE = m
+	LD E, C					; DE = mask (with bit 7 if action)
 	LD A, VM_VARIABLE_HERO_ACTION_POS_MASK
 	CALL _write_vm_var
 
@@ -1459,6 +1538,70 @@ _next_thread__do_loop:
 	CALL CHECK_THREAD_REQUESTS
 	LD A, 0FEh
 	CALL UPDATE_DISPLAY
+
+	ifdef TARGET_MAINCPU
+	; DIAGNOSTIC: Draw colored rectangles to VRAM after blit
+	; Each rectangle is 10x10 pixels, spaced 2px apart, on row 0 of game area.
+	; Rect 0 (col 0-9):   White (0x0F) = heartbeat (proves end-of-frame reached)
+	; Rect 1 (col 12-21): DIAG_SERIAL_OK color (0xAA=green-ish, 0x55=red-ish)
+	; Rect 2 (col 24-33): DIAG_CPR value (changes when direction buttons pressed)
+	; Rect 3 (col 36-45): DIAG_CPL value (changes when action button pressed)
+	PUSH XDE
+	PUSH XBC
+	PUSH XHL
+
+	; XHL = VRAM base for row 0 of game area (row 20 on screen)
+	LD XHL, 001A1900h
+	LD B, 10				; 10 rows per rectangle
+
+_diag_row:
+	; Rect 0: white heartbeat (cols 0-9)
+	LD XDE, XHL
+	LD A, 00Fh
+	LD C, 10
+_diag_r0:
+	LD (XDE), A
+	INC 1, XDE
+	DJNZ C, _diag_r0
+
+	; Rect 1: serial status (cols 12-21)
+	LD XDE, XHL
+	ADD XDE, 12
+	LD A, (DIAG_SERIAL_OK)
+	LD C, 10
+_diag_r1:
+	LD (XDE), A
+	INC 1, XDE
+	DJNZ C, _diag_r1
+
+	; Rect 2: CPR bitmap (cols 24-33)
+	LD XDE, XHL
+	ADD XDE, 24
+	LD A, (DIAG_CPR)
+	LD C, 10
+_diag_r2:
+	LD (XDE), A
+	INC 1, XDE
+	DJNZ C, _diag_r2
+
+	; Rect 3: CPL bitmap (cols 36-45)
+	LD XDE, XHL
+	ADD XDE, 36
+	LD A, (DIAG_CPL)
+	LD C, 10
+_diag_r3:
+	LD (XDE), A
+	INC 1, XDE
+	DJNZ C, _diag_r3
+
+	; Advance to next row (320 bytes per row)
+	ADD XHL, 320
+	DJNZ B, _diag_row
+
+	POP XHL
+	POP XBC
+	POP XDE
+	endif
 
 	; Record frame start time for next frame
 	LD XWA, (SYSTEM_TICKS)

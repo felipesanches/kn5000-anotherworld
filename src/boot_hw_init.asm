@@ -129,3 +129,4 @@
 	LD (SC1MOD), 000h		; Synchronous I/O mode, clock source = TO2 trigger
 	LD (BR1CR), 014h		; 250 kHz baud rate (16 MHz / 16 / 4)
 	LD (SC1CR), 001h		; IOC=0: internal clock, SCLKS=0: rising edge, RXE=1
+	LD (INTES1), 000h		; Clear TX complete flag set by SC1MOD write (polled mode)
