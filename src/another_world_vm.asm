@@ -384,14 +384,14 @@ _setup_threads__loop:
 
 	; Copy protection bypass: Set the variables that the protection
 	; bytecode (resource 0x15) would set when the correct code wheel
-	; answer is entered. Without these, the water part's check at
-	; subroutine 0x009A kills all threads and the game halts.
-	; Protection check requires: var[0xBC] & 0x0010, var[0xF2] == 0x0FA0,
-	; var[0xDC] == 0x21. These are set by the protection code at offsets
-	; 0x0CCF (OR var[0xBC] |= 0x0010), 0x0D0D (var[0xF2] = 0x0FA0),
-	; and indirectly via the VM hack (var[0xDC] = 0x21).
+	; answer is entered. Without these, protection checks kill all threads.
+	; Water/Citadel check: var[0xBC] & 0x0010, var[0xF2] == 0x0FA0, var[0xDC] == 0x21
+	; Password screen adds: var[0xC6] & 0x80
 	LD A, 0BCh
 	LD DE, 0010h
+	CALL _write_vm_var
+	LD A, 0C6h
+	LD DE, 0080h
 	CALL _write_vm_var
 	LD A, 0F2h
 	LD DE, 0FA0h
