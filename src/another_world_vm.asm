@@ -1266,12 +1266,10 @@ _cpanel_send_byte:
 	JR NZ, .done			; Exit when set
 	DJNZ DE, .wait			; Decrement timeout, loop if not expired
 	; Timeout: serial transfer did not complete
-	LDB (DIAG_SERIAL_OK), 055h	; Mark timeout for diagnostic
 	POP DE
 	LD A, 0					; Return 0 on timeout
 	RET
 .done:
-	LDB (DIAG_SERIAL_OK), 0AAh	; Mark success for diagnostic
 	POP DE
 	LD A, (SC1BUF)			; Read received byte
 	RET
@@ -1364,10 +1362,6 @@ INPUT_UPDATE_PLAYER:
 	; C still = 004h
 	CALL _cpanel_query_segment
 	LD L, A					; L = CPL_SEG4 bitmap
-
-	; Save raw serial results for VRAM diagnostic
-	LD (DIAG_CPR), H
-	LD (DIAG_CPL), L
 
 	; Process button bitmaps into VM variables.
 	; Follows reference input_updatePlayer() logic:
@@ -1534,70 +1528,6 @@ _next_thread__do_loop:
 	CALL CHECK_THREAD_REQUESTS
 	LD A, 0FEh
 	CALL UPDATE_DISPLAY
-
-	ifdef TARGET_MAINCPU
-	; DIAGNOSTIC: Draw colored rectangles to VRAM after blit
-	; Each rectangle is 10x10 pixels, spaced 2px apart, on row 0 of game area.
-	; Rect 0 (col 0-9):   White (0x0F) = heartbeat (proves end-of-frame reached)
-	; Rect 1 (col 12-21): DIAG_SERIAL_OK color (0xAA=green-ish, 0x55=red-ish)
-	; Rect 2 (col 24-33): DIAG_CPR value (changes when direction buttons pressed)
-	; Rect 3 (col 36-45): DIAG_CPL value (changes when action button pressed)
-	PUSH XDE
-	PUSH XBC
-	PUSH XHL
-
-	; XHL = VRAM base for row 0 of game area (row 20 on screen)
-	LD XHL, 001A1900h
-	LD B, 10				; 10 rows per rectangle
-
-_diag_row:
-	; Rect 0: white heartbeat (cols 0-9)
-	LD XDE, XHL
-	LD A, 00Fh
-	LD C, 10
-_diag_r0:
-	LD (XDE), A
-	INC 1, XDE
-	DJNZ C, _diag_r0
-
-	; Rect 1: serial status (cols 12-21)
-	LD XDE, XHL
-	ADD XDE, 12
-	LD A, (DIAG_SERIAL_OK)
-	LD C, 10
-_diag_r1:
-	LD (XDE), A
-	INC 1, XDE
-	DJNZ C, _diag_r1
-
-	; Rect 2: CPR bitmap (cols 24-33)
-	LD XDE, XHL
-	ADD XDE, 24
-	LD A, (DIAG_CPR)
-	LD C, 10
-_diag_r2:
-	LD (XDE), A
-	INC 1, XDE
-	DJNZ C, _diag_r2
-
-	; Rect 3: CPL bitmap (cols 36-45)
-	LD XDE, XHL
-	ADD XDE, 36
-	LD A, (DIAG_CPL)
-	LD C, 10
-_diag_r3:
-	LD (XDE), A
-	INC 1, XDE
-	DJNZ C, _diag_r3
-
-	; Advance to next row (320 bytes per row)
-	ADD XHL, 320
-	DJNZ B, _diag_row
-
-	POP XHL
-	POP XBC
-	POP XDE
-	endif
 
 	; Record frame start time for next frame
 	LD XWA, (SYSTEM_TICKS)
