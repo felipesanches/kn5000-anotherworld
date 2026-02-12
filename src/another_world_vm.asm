@@ -33,7 +33,6 @@ REQUESTED_STATE	EQU 1  ; boolean stored as a byte
 
 FROZEN	EQU 0
 NOT_FROZEN EQU 1
-NO_STATE_REQUEST EQU 0FFh
 
 ; These off-screen video pages are stored in external RAM:
 ; MAINCPU: in DRAM at 0x020000-0x05FFFF
@@ -291,7 +290,7 @@ _initForPart_loop:
 	EXTZ XIX
 	ADD XIX, VM_IS_CHANNEL_ACTIVE
 	LD (XIX + CURRENT_STATE), NOT_FROZEN
-	LD (XIX + REQUESTED_STATE), NO_STATE_REQUEST
+	LD (XIX + REQUESTED_STATE), NOT_FROZEN
 	POP IX
 
 	INC IX
@@ -363,7 +362,7 @@ _setup_threads__loop:
 	EXTZ XIX
 	ADD XIX, VM_IS_CHANNEL_ACTIVE
 	LD (XIX + CURRENT_STATE), NOT_FROZEN
-	LD (XIX + REQUESTED_STATE), NO_STATE_REQUEST
+	LD (XIX + REQUESTED_STATE), NOT_FROZEN
 	POP IX
 
 	INC IX
@@ -1479,23 +1478,15 @@ _no_part_switch:
 _check_thread_reqs__loop:
 
 	; thread->state = thread->requested_state;
-	; After applying, clear requested_state to NOT_FROZEN.
-	; This matches the reference HLE where requested_state is a bool
-	; and "= NO_REQUEST" (0xFFFF) truncates to true (UNFROZEN).
-	; Effect: FREEZE is one-shot (lasts one frame, then auto-unfreezes).
-	; This is critical for the death handler which FREEZEs all threads
-	; then sets up threads 0 and 60 — without auto-unfreeze, they
-	; stay frozen and the password display never runs.
+	; Applied unconditionally every frame (freeze/unfreeze persists
+	; until explicitly changed by another resetThread call).
+	; Reference: thread->state = thread->requested_state; (no clearing)
 	PUSH WA
 	SLA 1, WA
 	EXTZ XWA
 	ADD XWA, VM_IS_CHANNEL_ACTIVE
 	LD E, (XWA + REQUESTED_STATE)
-	CP E, NO_STATE_REQUEST
-	JP EQ, _no_state_request
 	LD (XWA + CURRENT_STATE), E
-	LD (XWA + REQUESTED_STATE), NOT_FROZEN	; clear request (auto-unfreeze)
-_no_state_request:
 	POP WA
 
 	PUSH WA
@@ -2190,22 +2181,7 @@ INSTRUCTION_IS_NOT_SET_PALETTE:
 	; Clamp last to [0, 63]
 	AND C, 3Fh
 
-	CP D, 0			; type 0: freeze threads
-	JP NE, _resetThread_not_freeze
-_resetThread_freeze_loop:
-	LD WA, 0
-	LD A, B
-	SLA 1, WA
-	EXTZ XWA
-	ADD XWA, VM_IS_CHANNEL_ACTIVE
-	LD (XWA + REQUESTED_STATE), FROZEN
-	INC B
-	CP B, C
-	JP ULE, _resetThread_freeze_loop
-	JP _end_of_EXECUTE_INSTRUCTION
-
-_resetThread_not_freeze:
-	CP D, 1			; type 1: unfreeze threads
+	CP D, 0			; type 0: unfreeze threads (make active)
 	JP NE, _resetThread_not_unfreeze
 _resetThread_unfreeze_loop:
 	LD WA, 0
@@ -2220,6 +2196,21 @@ _resetThread_unfreeze_loop:
 	JP _end_of_EXECUTE_INSTRUCTION
 
 _resetThread_not_unfreeze:
+	CP D, 1			; type 1: freeze threads (make inactive)
+	JP NE, _resetThread_not_freeze
+_resetThread_freeze_loop:
+	LD WA, 0
+	LD A, B
+	SLA 1, WA
+	EXTZ XWA
+	ADD XWA, VM_IS_CHANNEL_ACTIVE
+	LD (XWA + REQUESTED_STATE), FROZEN
+	INC B
+	CP B, C
+	JP ULE, _resetThread_freeze_loop
+	JP _end_of_EXECUTE_INSTRUCTION
+
+_resetThread_not_freeze:
 	; type 2: delete threads (set requested_PC = DELETE_THIS_THREAD)
 _resetThread_delete_loop:
 	LD WA, 0
