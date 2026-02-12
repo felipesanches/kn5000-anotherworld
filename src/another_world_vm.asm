@@ -1363,6 +1363,18 @@ INPUT_UPDATE_PLAYER:
 	CALL _cpanel_query_segment
 	LD L, A					; L = CPL_SEG4 bitmap
 
+	; Query CPL_SEG10 (left panel segment 10) for OTHER PARTS/TR button
+	; CPL_SEG10: bit3=OTHER PARTS/TR
+	; B still = 020h (left panel)
+	LD C, 00Ah				; Segment 10
+	CALL _cpanel_query_segment
+	; A = CPL_SEG10 bitmap
+	AND A, 008h				; bit 3 = OTHER PARTS/TR
+	JR Z, _input_no_password
+	LD WA, GAME_PART_PASSWORD1
+	LD (REQUESTED_NEXT_PART), WA
+_input_no_password:
+
 	; Process button bitmaps into VM variables.
 	; Follows reference input_updatePlayer() logic:
 	;   lr = 0; if RIGHT: lr=1, m|=1; if LEFT: lr=-1, m|=2; write LEFT_RIGHT=lr
