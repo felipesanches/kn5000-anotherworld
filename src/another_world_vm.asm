@@ -1019,13 +1019,13 @@ _bmp_pixel:
 	LD L, 0
 	; Extract MSB from each plane (p3 first → bit 3 of pixel)
 	SLA 1, W					; plane 3 MSB → carry
-	RLC L						; carry → L bit 0
+	RL L						; carry → L bit 0
 	SLA 1, C					; plane 2 MSB → carry
-	RLC L						; carry → L bit 0, prev → bit 1
+	RL L						; carry → L bit 0, prev → bit 1
 	SLA 1, B					; plane 1 MSB → carry
-	RLC L						; carry → L bit 0
+	RL L						; carry → L bit 0
 	SLA 1, A					; plane 0 MSB → carry
-	RLC L						; L = (p3<<3)|(p2<<2)|(p1<<1)|p0
+	RL L						; L = (p3<<3)|(p2<<2)|(p1<<1)|p0
 	LD (XDE), L
 	INC XDE
 	DJNZ H, _bmp_pixel
