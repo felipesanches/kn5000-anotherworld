@@ -231,6 +231,10 @@ p {
   height: fit-content;
   text-align: center;
 }
+.step-status.done {
+  background: rgba(90, 184, 122, 0.15);
+  color: var(--green);
+}
 .step-status.stub {
   background: rgba(200, 80, 80, 0.15);
   color: var(--red);
@@ -298,7 +302,7 @@ code {
   <dt>Display</dt>        <dd>MN89304 VGA LCD controller, 320x240 @ 8bpp</dd>
   <dt>Assembler</dt>      <dd>ASL Macro Assembler (<code>cpu 96c141</code>)</dd>
   <dt>VM origin</dt>      <dd>Big-endian Amiga/68k bytecode on little-endian TLCS-900</dd>
-  <dt>Status</dt>         <dd>Intro + splash screens play fully; part switching, copy protection bypass, input via serial</dd>
+  <dt>Status</dt>         <dd>Playable: intro, splash screens, part switching, input (directions + action) via SC1 serial. Sound stubbed.</dd>
 </dl>
 
 <h2>Plans &amp; Design Documents</h2>
@@ -355,7 +359,7 @@ code {
   <a class="card full-width" href="logs.html">
     <div class="label log">Viewer</div>
     <div class="title">Conversation Log Viewer</div>
-    <div class="desc">10 sessions covering the full development from initial setup through working intro. Includes tool calls, thinking traces, and all user/assistant messages verbatim.</div>
+    <div class="desc">13 sessions covering the full development from initial setup through playable game. Includes tool calls, thinking traces, and all user/assistant messages verbatim.</div>
   </a>
 </div>
 
@@ -442,6 +446,21 @@ code {
     <div class="date">Feb 11</div>
     <div class="commit">Implement input via SC1 serial to control panel; fix 3 MAME serial bugs</div>
   </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 12</div>
+    <div class="commit">Fix SC1MOD regression: baud rate generator instead of TO2 trigger</div>
+    <div class="hash">009c54f</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 12</div>
+    <div class="commit">Fix jump: JUMP_DOWN must reflect UP button per reference logic</div>
+    <div class="hash">6af0a7e</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 12</div>
+    <div class="commit">Add MAME driver architecture documentation (5 files)</div>
+    <div class="hash">c9be971</div>
+  </div>
 </div>
 
 <h2>Next Steps</h2>
@@ -450,8 +469,8 @@ code {
 <div class="next-steps">
   <div class="step">
     <div class="step-title">Input handling</div>
-    <div class="step-status partial">Partial</div>
-    <div class="step-desc">VM reads control panel buttons via SC1 serial (CPR_SEG4 for directions, CPL_SEG4 for action). MAME driver needs 3 serial bug fixes before it works in emulation. <a href="doc.html?file=serial-cpanel-compatibility-2026-02-11.md" style="color:var(--accent)">See compatibility report.</a></div>
+    <div class="step-status done">Done</div>
+    <div class="step-desc">Directions (UP/DOWN/LEFT/RIGHT) and ACTION mapped to KN5000 control panel buttons via SC1 serial polling. MAME serial bugs fixed (idle transition, dummy byte filter, SC1MOD clock source). <a href="doc.html?file=serial-cpanel-compatibility-2026-02-11.md" style="color:var(--accent)">See compatibility report.</a></div>
   </div>
   <div class="step">
     <div class="step-title">Sound &amp; music</div>
