@@ -401,27 +401,12 @@ _setup_threads__loop:
 	LD DE, 021h
 	CALL _write_vm_var
 
-	; Initialize part tracking and start from the protection/splash screens
-	; (Part 0 = logo, credits, code-wheel). We bypass the code wheel by
-	; starting thread 0 at the splash screen entry point (0x007B) instead
-	; of PC=0 (which enters the code wheel). We also pre-start the display
-	; loop thread and set the frame delay variable, matching what the
-	; bytecode's normal entry at 0x0000 would have done.
+	; Start directly on the intro (Part 1), skipping the code wheel
+	; protection screen (Part 0). Part 1 bytecode at PC=0 does its own
+	; initialization (video init, display loop, sound loads, etc.).
 	LDW (REQUESTED_NEXT_PART), 0
-	LD WA, GAME_PART_PROTECTION
+	LD WA, GAME_PART_INTRO
 	CALL initForPart
-
-	; Override thread 0 PC to splash screen entry (skip code wheel at 0x0000)
-	LDW (THREADS_DATA + PC_OFFSET), 007Bh
-
-	; Start display loop on thread 60 (bytecode address 0x10A3)
-	; Thread 60 slot = 60 * 4 = 240 bytes into THREADS_DATA
-	LDW (THREADS_DATA + (60 * 4) + PC_OFFSET), 010A3h
-
-	; Set var[0xFF] = 2 (frame delay, normally set by bytecode at 0x0003)
-	LD A, 0FFh
-	LD DE, 2
-	CALL _write_vm_var
 
 	RET
 
@@ -1290,6 +1275,7 @@ _cpanel_query_segment:
 
 INPUT_UPDATE_PLAYER:
 	ifdef TARGET_MAINCPU
+
 	; Query CPR_SEG4 (right panel segment 4) for direction buttons
 	; CPR_SEG4: bit1=UP(PART:RIGHT2), bit4=LEFT(CONDUCTOR:LEFT),
 	;           bit5=DOWN(CONDUCTOR:RIGHT2), bit6=RIGHT(CONDUCTOR:RIGHT1)
@@ -1556,12 +1542,13 @@ _OPCODE_0x80:
 	POP DE				; DE = x
 
 	; Compute offset and set up video data pointer
-	; Opcodes >= 0x80 always use CUR_VIDEO_2 (not CUR_VIDEO_DATA/VIDEO_1)
-	; Reference: vid_opcd_0x80 calls setDataBuffer(_ply, 1) → segVideo2
+	; Opcodes >= 0x80 always use CUR_VIDEO_1 (cinematic segment)
+	; Reference: vid_opcd_0x80 calls setDataBuffer(CINEMATIC, offset)
+	; Note: Fabien's "segVideo2" = cinematic data = our CUR_VIDEO_1 (naming inverted)
 	POP WA				; WA = offset_raw
 	SLA 1, WA			; offset *= 2 (uint16_t wraps, e.g. 0x883E*2 → 0x107C)
 	EXTZ XWA
-	LD XIX, (CUR_VIDEO_2)
+	LD XIX, (CUR_VIDEO_1)
 	ADD XIX, XWA
 
 ;		if (y > 199)
@@ -2479,7 +2466,7 @@ _load_check_screen:
 	; Check if resourceId matches a known screen bitmap resource.
 	; Screen resources serve dual purpose:
 	;   1. 4bpp planar bitmap copied to PAGE_BITMAP_0 (for direct display)
-	;   2. Raw data made available via CUR_VIDEO_2 (for VIDEO 0x80 polygon rendering)
+	;   2. Raw data replaces CUR_VIDEO_1 (cinematic segment, used by VIDEO 0x80)
 	; Reference: aw_hle.cpp screen_resource_indexes[] = {0x12,0x13,...,0x49,0x53,...}
 	CP WA, 012h
 	JP NE, _load_not_0x12
@@ -2511,8 +2498,10 @@ _load_unknown:
 
 _load_screen_common:
 	; XHL = pointer to 32000-byte screen resource data
-	; 1. Set CUR_VIDEO_2 so VIDEO 0x80 opcodes can read polygon data from it
-	LD (CUR_VIDEO_2), XHL
+	; 1. Set CUR_VIDEO_1 so VIDEO 0x80 opcodes can read polygon data from it
+	;    (screen bitmaps replace the cinematic segment; Fabien's "segVideo2")
+	LD (CUR_VIDEO_1), XHL
+	LD (CUR_VIDEO_DATA), XHL
 	; 2. Convert 4bpp planar to 8bpp chunky and copy to PAGE_BITMAP_0
 	CALL LOAD_SCREEN
 	JP _end_of_EXECUTE_INSTRUCTION
