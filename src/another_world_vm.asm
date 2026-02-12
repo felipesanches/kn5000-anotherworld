@@ -1367,8 +1367,8 @@ HELP_SCREEN:
 	LD XWA, (CUR_PAGE_PTR_1)
 	PUSH XWA					; Save CUR_PAGE_PTR_1
 
-	; Set drawing target to PAGE_BITMAP_0
-	LD XWA, PAGE_BITMAP_0
+	; Set drawing target to OFFSCREEN_BUFFER_1 (avoids corrupting game page buffers)
+	LD XWA, OFFSCREEN_BUFFER_1
 	LD (CUR_PAGE_PTR_1), XWA
 	LDB (HELP_PAGE), 0			; Start on page 0 (controls)
 
@@ -1394,36 +1394,53 @@ _help_poll:
 	AND A, 008h					; bit 3 = EXIT
 	JR NZ, _help_exit
 
+	; Check game buttons — any VM-mapped button also exits help screen
+	; CPR_SEG4: bit1=UP, bit4=LEFT, bit5=DOWN, bit6=RIGHT
+	LD B, 0E0h					; Right panel
+	LD C, 004h					; Segment 4
+	CALL _cpanel_query_segment
+	AND A, 072h					; bits 1,4,5,6 = UP/LEFT/DOWN/RIGHT
+	JR NZ, _help_exit
+	; CPL_SEG4: bit3=ACTION
+	LD B, 020h					; Left panel
+	LD C, 004h					; Segment 4
+	CALL _cpanel_query_segment
+	AND A, 008h					; bit 3 = ACTION
+	JR NZ, _help_exit
+
 	; Check PAGE UP / PAGE DOWN (CPL_SEG2 bits 7 and 6)
 	LD B, 020h					; Left panel
 	LD C, 002h					; Segment 2
 	CALL _cpanel_query_segment
-	LD H, A						; Save bitmap
 
-	; PAGE UP (bit 7) — go to page 0
-	LD A, H
+	; PAGE UP (bit 7) — previous page
+	PUSH WA
 	AND A, 080h					; bit 7 = PAGE UP
 	JR Z, _help_no_pageup
 	LD A, (HELP_PAGE)
 	CP A, 0
-	JR Z, _help_no_pageup		; Already on page 0
-	LDB (HELP_PAGE), 0
+	JR Z, _help_no_pageup		; Already on first page
+	DEC 1, A
+	LD (HELP_PAGE), A
 	CALL _help_draw_page
 	CALL _help_blit
-	CALL _help_debounce
+	CALL _help_wait_page_release
+	POP WA
+	JP _help_poll				; Skip PAGE DOWN check (mutually exclusive)
 _help_no_pageup:
+	POP WA
 
-	; PAGE DOWN (bit 6) — go to page 1
-	LD A, H
+	; PAGE DOWN (bit 6) — next page
 	AND A, 040h					; bit 6 = PAGE DOWN
 	JR Z, _help_no_pagedown
 	LD A, (HELP_PAGE)
-	CP A, 1
-	JR Z, _help_no_pagedown	; Already on page 1
-	LDB (HELP_PAGE), 1
+	CP A, 2
+	JR Z, _help_no_pagedown	; Already on last page
+	INC A
+	LD (HELP_PAGE), A
 	CALL _help_draw_page
 	CALL _help_blit
-	CALL _help_debounce
+	CALL _help_wait_page_release
 _help_no_pagedown:
 
 	; Small delay before next poll
@@ -1435,13 +1452,8 @@ _help_poll_delay:
 	JP _help_poll
 
 _help_exit:
-	; Wait for EXIT button release
-_help_wait_exit_release:
-	LD B, 020h
-	LD C, 007h
-	CALL _cpanel_query_segment
-	AND A, 008h
-	JR NZ, _help_wait_exit_release
+	; Wait for all buttons to be released
+	CALL _help_wait_all_release
 
 	; Restore game palette
 	CALL _help_restore_palette
@@ -1462,13 +1474,35 @@ _help_wait_exit_release:
 	POP XWA
 	RET
 
-; _help_debounce: Wait ~100ms for button release
-_help_debounce:
-	PUSH DE
-	LD DE, 08000h
-_help_debounce_loop:
-	DJNZ DE, _help_debounce_loop
-	POP DE
+; _help_wait_page_release: Wait until PAGE UP and PAGE DOWN are both released
+_help_wait_page_release:
+	LD B, 020h					; Left panel
+	LD C, 002h					; Segment 2
+	CALL _cpanel_query_segment
+	AND A, 0C0h				; bits 7,6 = PAGE UP / PAGE DOWN
+	JR NZ, _help_wait_page_release
+	RET
+
+; _help_wait_all_release: Wait until EXIT and all game buttons are released
+_help_wait_all_release:
+	; Check EXIT (CPL_SEG7 bit 3)
+	LD B, 020h
+	LD C, 007h
+	CALL _cpanel_query_segment
+	AND A, 008h
+	JR NZ, _help_wait_all_release
+	; Check game direction buttons (CPR_SEG4 bits 1,4,5,6)
+	LD B, 0E0h
+	LD C, 004h
+	CALL _cpanel_query_segment
+	AND A, 072h
+	JR NZ, _help_wait_all_release
+	; Check ACTION (CPL_SEG4 bit 3)
+	LD B, 020h
+	LD C, 004h
+	CALL _cpanel_query_segment
+	AND A, 008h
+	JR NZ, _help_wait_all_release
 	RET
 
 ; _help_set_palette: Set a simple 16-color palette for the help screen
@@ -1532,9 +1566,9 @@ _help_restore_palette:
 	CALL SETUP_PALETTE
 	RET
 
-; _help_fill_page: Fill PAGE_BITMAP_0 with color 0 (black)
+; _help_fill_page: Fill draw buffer with color 0 (black)
 _help_fill_page:
-	LD XDE, PAGE_BITMAP_0
+	LD XDE, OFFSCREEN_BUFFER_1
 	LDW WA, 0					; Color 0 in both bytes
 	LD BC, 320 * 200 / 2		; Word count
 _help_fill_loop:
@@ -1543,9 +1577,9 @@ _help_fill_loop:
 	DJNZ BC, _help_fill_loop
 	RET
 
-; _help_blit: Copy PAGE_BITMAP_0 to VRAM (with 20-line vertical offset)
+; _help_blit: Copy draw buffer to VRAM (with 20-line vertical offset)
 _help_blit:
-	LD XHL, PAGE_BITMAP_0
+	LD XHL, OFFSCREEN_BUFFER_1
 	LD XDE, 001a0000h + 20*320	; VRAM + 20-line offset
 	LD XBC, 320 * 200 / 2		; Word count
 	LDIRW
@@ -1565,7 +1599,9 @@ _help_draw_page:
 	LD A, (HELP_PAGE)
 	CP A, 0
 	JP EQ, _help_draw_page_0
-	JP _help_draw_page_1
+	CP A, 1
+	JP EQ, _help_draw_page_1
+	JP _help_draw_page_2
 
 ; _help_draw_text: Draw null-terminated string at XIY to page
 ; Input: DE=x, HL=y, B=color, XIY=string pointer
@@ -1705,11 +1741,11 @@ _help_draw_page_0:
 	LD DE, 104
 	LD HL, 180
 	LD B, 1
-	LD XIY, _str_page_1_2
+	LD XIY, _str_page_1_3
 	CALL _help_draw_text
 	RET
 
-; --- Page 1: Codes & Credits ---
+; --- Page 1: Codes 1-8 ---
 _help_draw_page_1:
 	; Title
 	LD DE, 72
@@ -1717,8 +1753,6 @@ _help_draw_page_1:
 	LD B, 2
 	LD XIY, _str_title1
 	CALL _help_draw_text
-
-	; Subtitle
 	LD DE, 96
 	LD HL, 20
 	LD B, 2
@@ -1732,7 +1766,7 @@ _help_draw_page_1:
 	LD XIY, _str_level_codes
 	CALL _help_draw_text
 
-	; LDKD  Prison
+	; 1. LDKD  By the lake
 	LD DE, 8
 	LD HL, 56
 	LD B, 3
@@ -1741,10 +1775,10 @@ _help_draw_page_1:
 	LD DE, 56
 	LD HL, 56
 	LD B, 1
-	LD XIY, _str_level_prison
+	LD XIY, _str_level_ldkd
 	CALL _help_draw_text
 
-	; HTDC  Citadel
+	; 2. HTDC  Trapped in the cage
 	LD DE, 8
 	LD HL, 68
 	LD B, 3
@@ -1753,10 +1787,10 @@ _help_draw_page_1:
 	LD DE, 56
 	LD HL, 68
 	LD B, 1
-	LD XIY, _str_level_citadel
+	LD XIY, _str_level_htdc
 	CALL _help_draw_text
 
-	; CLLD  Arena
+	; 3. CLLD  Crawling in ducts
 	LD DE, 8
 	LD HL, 80
 	LD B, 3
@@ -1765,55 +1799,190 @@ _help_draw_page_1:
 	LD DE, 56
 	LD HL, 80
 	LD B, 1
-	LD XIY, _str_level_arena
+	LD XIY, _str_level_clld
 	CALL _help_draw_text
 
-	; CKJL  Baths
+	; 4. LBKG  Fight the guard
 	LD DE, 8
 	LD HL, 92
+	LD B, 3
+	LD XIY, _str_code_lbkg
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 92
+	LD B, 1
+	LD XIY, _str_level_lbkg
+	CALL _help_draw_text
+
+	; 5. XDDJ  Down in the caves
+	LD DE, 8
+	LD HL, 104
+	LD B, 3
+	LD XIY, _str_code_xddj
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 104
+	LD B, 1
+	LD XIY, _str_level_xddj
+	CALL _help_draw_text
+
+	; 6. FXLC  Deeper in the caves
+	LD DE, 8
+	LD HL, 116
+	LD B, 3
+	LD XIY, _str_code_fxlc
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 116
+	LD B, 1
+	LD XIY, _str_level_fxlc
+	CALL _help_draw_text
+
+	; 7. KRFK  Cause a flood
+	LD DE, 8
+	LD HL, 128
+	LD B, 3
+	LD XIY, _str_code_krfk
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 128
+	LD B, 1
+	LD XIY, _str_level_krfk
+	CALL _help_draw_text
+
+	; 8. KLFB  On to the castle
+	LD DE, 8
+	LD HL, 140
+	LD B, 3
+	LD XIY, _str_code_klfb
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 140
+	LD B, 1
+	LD XIY, _str_level_klfb
+	CALL _help_draw_text
+
+	; Page indicator
+	LD DE, 104
+	LD HL, 180
+	LD B, 1
+	LD XIY, _str_page_2_3
+	CALL _help_draw_text
+	RET
+
+; --- Page 2: Codes 9-15 + Credits ---
+_help_draw_page_2:
+	; Title
+	LD DE, 72
+	LD HL, 8
+	LD B, 2
+	LD XIY, _str_title1
+	CALL _help_draw_text
+	LD DE, 96
+	LD HL, 20
+	LD B, 2
+	LD XIY, _str_title2
+	CALL _help_draw_text
+
+	; "LEVEL CODES (cont.):"
+	LD DE, 8
+	LD HL, 40
+	LD B, 1
+	LD XIY, _str_level_codes2
+	CALL _help_draw_text
+
+	; 9. TTCT  Swim to the depths
+	LD DE, 8
+	LD HL, 56
+	LD B, 3
+	LD XIY, _str_code_ttct
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 56
+	LD B, 1
+	LD XIY, _str_level_ttct
+	CALL _help_draw_text
+
+	; 10. XRJT  Back up to the top
+	LD DE, 8
+	LD HL, 68
+	LD B, 3
+	LD XIY, _str_code_xrjt
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 68
+	LD B, 1
+	LD XIY, _str_level_xrjt
+	CALL _help_draw_text
+
+	; 11. HBHK  Dash through doors
+	LD DE, 8
+	LD HL, 80
+	LD B, 3
+	LD XIY, _str_code_hbhk
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 80
+	LD B, 1
+	LD XIY, _str_level_hbhk
+	CALL _help_draw_text
+
+	; 12. TFBB  Lester to the rescue
+	LD DE, 8
+	LD HL, 92
+	LD B, 3
+	LD XIY, _str_code_tfbb
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 92
+	LD B, 1
+	LD XIY, _str_level_tfbb
+	CALL _help_draw_text
+
+	; 13. TXHF  Wait before you shoot
+	LD DE, 8
+	LD HL, 104
+	LD B, 3
+	LD XIY, _str_code_txhf
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 104
+	LD B, 1
+	LD XIY, _str_level_txhf
+	CALL _help_draw_text
+
+	; 14. CKJL  In the armoured car
+	LD DE, 8
+	LD HL, 116
 	LD B, 3
 	LD XIY, _str_code_ckjl
 	CALL _help_draw_text
 	LD DE, 56
-	LD HL, 92
+	LD HL, 116
 	LD B, 1
-	LD XIY, _str_level_baths
+	LD XIY, _str_level_ckjl
 	CALL _help_draw_text
 
-	; LFCK  Final
+	; 15. LFCK  The grand finale
 	LD DE, 8
-	LD HL, 104
+	LD HL, 128
 	LD B, 3
 	LD XIY, _str_code_lfck
 	CALL _help_draw_text
 	LD DE, 56
-	LD HL, 104
+	LD HL, 128
 	LD B, 1
-	LD XIY, _str_level_final
+	LD XIY, _str_level_lfck
 	CALL _help_draw_text
 
-	; KRTD  Ending
+	; URL
 	LD DE, 8
-	LD HL, 116
-	LD B, 3
-	LD XIY, _str_code_krtd
-	CALL _help_draw_text
-	LD DE, 56
-	LD HL, 116
-	LD B, 1
-	LD XIY, _str_level_ending
-	CALL _help_draw_text
-
-	; URL line 1
-	LD DE, 8
-	LD HL, 140
+	LD HL, 152
 	LD B, 2
 	LD XIY, _str_url1
 	CALL _help_draw_text
-
-	; URL line 2
 	LD DE, 32
-	LD HL, 152
+	LD HL, 164
 	LD B, 2
 	LD XIY, _str_url2
 	CALL _help_draw_text
@@ -1822,7 +1991,7 @@ _help_draw_page_1:
 	LD DE, 104
 	LD HL, 180
 	LD B, 1
-	LD XIY, _str_page_2_2
+	LD XIY, _str_page_3_3
 	CALL _help_draw_text
 	RET
 
@@ -1848,21 +2017,41 @@ _str_page_key:		DB "PAGE", 0
 _str_page_btn:		DB "Page Up / Page Down", 0
 _str_exit_key:		DB "EXIT", 0
 _str_exit_btn:		DB "Exit this screen", 0
-_str_page_1_2:		DB "Page 1/2", 0
-_str_page_2_2:		DB "Page 2/2", 0
+_str_page_1_3:		DB "Page 1/3", 0
+_str_page_2_3:		DB "Page 2/3", 0
+_str_page_3_3:		DB "Page 3/3", 0
 _str_level_codes:	DB "LEVEL CODES:", 0
+_str_level_codes2:	DB "LEVEL CODES (cont.):", 0
 _str_code_ldkd:		DB "LDKD", 0
-_str_level_prison:	DB "Prison", 0
+_str_level_ldkd:	DB "By the lake", 0
 _str_code_htdc:		DB "HTDC", 0
-_str_level_citadel:	DB "Citadel", 0
+_str_level_htdc:	DB "Trapped in the cage", 0
 _str_code_clld:		DB "CLLD", 0
-_str_level_arena:	DB "Arena", 0
+_str_level_clld:	DB "Crawling in ducts", 0
+_str_code_lbkg:		DB "LBKG", 0
+_str_level_lbkg:	DB "Fight the guard", 0
+_str_code_xddj:		DB "XDDJ", 0
+_str_level_xddj:	DB "Down in the caves", 0
+_str_code_fxlc:		DB "FXLC", 0
+_str_level_fxlc:	DB "Deeper in the caves", 0
+_str_code_krfk:		DB "KRFK", 0
+_str_level_krfk:	DB "Cause a flood", 0
+_str_code_klfb:		DB "KLFB", 0
+_str_level_klfb:	DB "On to the castle", 0
+_str_code_ttct:		DB "TTCT", 0
+_str_level_ttct:	DB "Swim to the depths", 0
+_str_code_xrjt:		DB "XRJT", 0
+_str_level_xrjt:	DB "Back up to the top", 0
+_str_code_hbhk:		DB "HBHK", 0
+_str_level_hbhk:	DB "Dash through doors", 0
+_str_code_tfbb:		DB "TFBB", 0
+_str_level_tfbb:	DB "Lester to the rescue", 0
+_str_code_txhf:		DB "TXHF", 0
+_str_level_txhf:	DB "Wait before you shoot", 0
 _str_code_ckjl:		DB "CKJL", 0
-_str_level_baths:	DB "Baths", 0
+_str_level_ckjl:	DB "In the armoured car", 0
 _str_code_lfck:		DB "LFCK", 0
-_str_level_final:	DB "Final", 0
-_str_code_krtd:		DB "KRTD", 0
-_str_level_ending:	DB "Ending", 0
+_str_level_lfck:	DB "The grand finale", 0
 _str_url1:			DB "github.com/felipesanches/", 0
 _str_url2:			DB "kn5000-anotherworld", 0
 
