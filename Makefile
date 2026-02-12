@@ -7,6 +7,7 @@
 #   make          - Build ROM and create MAME ROM set
 #   make build    - Build custom ROM only
 #   make romset   - Create complete MAME ROM set with custom program ROM
+#   make disc     - Create KN5000 system update floppy disc image (SLIDE4K compressed)
 #   make clean    - Remove build artifacts
 #   make test     - Run in MAME emulator
 #
@@ -257,6 +258,19 @@ test-verify: romset
 	mame kn5000 -rompath $(ROMSET_BASE) -verifyroms
 
 # =============================================================================
+# Create KN5000 system update floppy disc image
+# =============================================================================
+DISC_IMAGE := $(BUILD_DIR)/update_disc.img
+MAKE_DISC := python3 tools/make_update_disc.py
+
+.PHONY: disc
+disc: $(DISC_IMAGE)
+	@echo "Update disc image ready: $(DISC_IMAGE)"
+
+$(DISC_IMAGE): $(MAIN_ROM) tools/make_update_disc.py
+	$(MAKE_DISC) $(MAIN_ROM) $@ --type 7
+
+# =============================================================================
 # Development helpers
 # =============================================================================
 
@@ -320,6 +334,7 @@ help:
 	@echo "Other targets:"
 	@echo "  make resources- Extract game resources from $(GAME_DATA_DIR)"
 	@echo "  make romset   - Create complete MAME ROM set"
+	@echo "  make disc     - Create KN5000 system update floppy disc image"
 	@echo "  make test     - Run in MAME emulator"
 	@echo "  make clean    - Remove build artifacts (preserves ROM set and resources)"
 	@echo "  make distclean- Remove everything including ROM set"
