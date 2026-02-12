@@ -109,6 +109,9 @@ CURRENT_PART_ID: DW ?			; Current game part ID
 
 BMP_SRC_PTR: DD ?				; Temp: LOAD_SCREEN source pointer during 4bpp conversion
 
+LAST_PALETTE_INDEX: DW ?		; Last palette index passed to SETUP_PALETTE (for restore after help screen)
+HELP_PAGE:          DB ?		; Current help screen page (0=controls, 1=codes)
+
 ; =============================================================================
 ; Main CPU ROM Layout
 ; =============================================================================

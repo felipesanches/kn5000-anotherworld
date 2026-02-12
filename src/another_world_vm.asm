@@ -1038,6 +1038,7 @@ _bmp_pixel:
 SETUP_PALETTE:
 	; WA: palette index (0-63), already extracted by caller (opcode 0x0B does SRA 8)
 	; XWA: zero-extended by caller (EXTZ XWA)
+	LD (LAST_PALETTE_INDEX), WA	; Save for restore after help screen
 	; Palette format: 2 bytes per color, 0x0RGB (4 bits per channel)
 	; Byte 0: 0000_RRRR (low nibble = red)
 	; Byte 1: GGGG_BBBB (high nibble = green, low nibble = blue)
@@ -1345,6 +1346,528 @@ _cpanel_delay:
 
 	endif ; TARGET_MAINCPU
 
+; =============================================================================
+; HELP_SCREEN — Pause VM and display help/codes overlay
+; =============================================================================
+; Called when HELP button is pressed. Pauses VM execution, displays a
+; multi-page help screen with key mappings and level codes.
+; Navigation: PAGE UP/DOWN to change pages, EXIT to return to game.
+; Draws to PAGE_BITMAP_0, restores game display on exit.
+; =============================================================================
+	ifdef TARGET_MAINCPU
+
+HELP_SCREEN:
+	; Save all registers
+	PUSH XWA
+	PUSH XBC
+	PUSH XDE
+	PUSH XHL
+	PUSH XIX
+	PUSH XIY
+	LD XWA, (CUR_PAGE_PTR_1)
+	PUSH XWA					; Save CUR_PAGE_PTR_1
+
+	; Set drawing target to PAGE_BITMAP_0
+	LD XWA, PAGE_BITMAP_0
+	LD (CUR_PAGE_PTR_1), XWA
+	LDB (HELP_PAGE), 0			; Start on page 0 (controls)
+
+	; Wait for HELP button release (debounce)
+_help_wait_release:
+	LD B, 020h					; Left panel
+	LD C, 00Ah					; Segment 10
+	CALL _cpanel_query_segment
+	AND A, 004h					; bit 2 = HELP
+	JR NZ, _help_wait_release
+
+	; Draw and display initial page
+	CALL _help_set_palette
+	CALL _help_draw_page
+	CALL _help_blit
+
+	; === Poll loop ===
+_help_poll:
+	; Check EXIT button (CPL_SEG7 bit 3)
+	LD B, 020h					; Left panel
+	LD C, 007h					; Segment 7
+	CALL _cpanel_query_segment
+	AND A, 008h					; bit 3 = EXIT
+	JR NZ, _help_exit
+
+	; Check PAGE UP / PAGE DOWN (CPL_SEG2 bits 7 and 6)
+	LD B, 020h					; Left panel
+	LD C, 002h					; Segment 2
+	CALL _cpanel_query_segment
+	LD H, A						; Save bitmap
+
+	; PAGE UP (bit 7) — go to page 0
+	LD A, H
+	AND A, 080h					; bit 7 = PAGE UP
+	JR Z, _help_no_pageup
+	LD A, (HELP_PAGE)
+	CP A, 0
+	JR Z, _help_no_pageup		; Already on page 0
+	LDB (HELP_PAGE), 0
+	CALL _help_draw_page
+	CALL _help_blit
+	CALL _help_debounce
+_help_no_pageup:
+
+	; PAGE DOWN (bit 6) — go to page 1
+	LD A, H
+	AND A, 040h					; bit 6 = PAGE DOWN
+	JR Z, _help_no_pagedown
+	LD A, (HELP_PAGE)
+	CP A, 1
+	JR Z, _help_no_pagedown	; Already on page 1
+	LDB (HELP_PAGE), 1
+	CALL _help_draw_page
+	CALL _help_blit
+	CALL _help_debounce
+_help_no_pagedown:
+
+	; Small delay before next poll
+	PUSH DE
+	LD DE, 01000h
+_help_poll_delay:
+	DJNZ DE, _help_poll_delay
+	POP DE
+	JP _help_poll
+
+_help_exit:
+	; Wait for EXIT button release
+_help_wait_exit_release:
+	LD B, 020h
+	LD C, 007h
+	CALL _cpanel_query_segment
+	AND A, 008h
+	JR NZ, _help_wait_exit_release
+
+	; Restore game palette
+	CALL _help_restore_palette
+
+	; Reblit game display (current front buffer → VRAM)
+	CALL _help_reblit_game
+
+	; Restore CUR_PAGE_PTR_1
+	POP XWA
+	LD (CUR_PAGE_PTR_1), XWA
+
+	; Restore all registers
+	POP XIY
+	POP XIX
+	POP XHL
+	POP XDE
+	POP XBC
+	POP XWA
+	RET
+
+; _help_debounce: Wait ~100ms for button release
+_help_debounce:
+	PUSH DE
+	LD DE, 08000h
+_help_debounce_loop:
+	DJNZ DE, _help_debounce_loop
+	POP DE
+	RET
+
+; _help_set_palette: Set a simple 16-color palette for the help screen
+; Color 0: black (background)
+; Color 1: white (body text)
+; Color 2: cyan (headers)
+; Color 3: yellow (codes/highlight)
+; Colors 4-15: black
+_help_set_palette:
+	; Set VGA DAC write index to 0
+	LDW WA, 3c8h
+	LDW BC, 0
+	CALR Write_VGA_Register
+
+	LD XIY, _help_palette_data
+	LD XIX, 16					; 16 colors
+_help_pal_loop:
+	; Red
+	LD C, (XIY)
+	INC XIY
+	LDW WA, 3c9h
+	CALR Write_VGA_Register
+	; Green
+	LD C, (XIY)
+	INC XIY
+	LDW WA, 3c9h
+	CALR Write_VGA_Register
+	; Blue
+	LD C, (XIY)
+	INC XIY
+	LDW WA, 3c9h
+	CALR Write_VGA_Register
+	DEC 1, XIX
+	CP IX, 0
+	JP NE, _help_pal_loop
+	RET
+
+; Palette data: 16 colors x 3 bytes (R, G, B), 4-bit values (0-15)
+_help_palette_data:
+	DB  0, 0, 0		; 0: black
+	DB 15,15,15		; 1: white
+	DB  0,10,15		; 2: cyan
+	DB 15,15, 0		; 3: yellow
+	DB  0, 0, 0		; 4-15: black
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+	DB  0, 0, 0
+
+; _help_restore_palette: Restore game palette using saved index
+_help_restore_palette:
+	LD WA, (LAST_PALETTE_INDEX)
+	EXTZ XWA
+	CALL SETUP_PALETTE
+	RET
+
+; _help_fill_page: Fill PAGE_BITMAP_0 with color 0 (black)
+_help_fill_page:
+	LD XDE, PAGE_BITMAP_0
+	LDW WA, 0					; Color 0 in both bytes
+	LD BC, 320 * 200 / 2		; Word count
+_help_fill_loop:
+	LD (XDE), WA
+	INC 2, XDE
+	DJNZ BC, _help_fill_loop
+	RET
+
+; _help_blit: Copy PAGE_BITMAP_0 to VRAM (with 20-line vertical offset)
+_help_blit:
+	LD XHL, PAGE_BITMAP_0
+	LD XDE, 001a0000h + 20*320	; VRAM + 20-line offset
+	LD XBC, 320 * 200 / 2		; Word count
+	LDIRW
+	RET
+
+; _help_reblit_game: Copy current front buffer back to VRAM
+_help_reblit_game:
+	LD XHL, (CUR_PAGE_PTR_2)
+	LD XDE, 001a0000h + 20*320
+	LD XBC, 320 * 200 / 2
+	LDIRW
+	RET
+
+; _help_draw_page: Clear page and draw content based on HELP_PAGE
+_help_draw_page:
+	CALL _help_fill_page
+	LD A, (HELP_PAGE)
+	CP A, 0
+	JP EQ, _help_draw_page_0
+	JP _help_draw_page_1
+
+; _help_draw_text: Draw null-terminated string at XIY to page
+; Input: DE=x, HL=y, B=color, XIY=string pointer
+; Clobbers: A, C, DE (x advances), XIY (advances past string)
+; Note: DRAW_CHAR clobbers XIY (uses it for font data), so we save/restore it.
+_help_draw_text:
+	LD C, (XIY)
+	INC XIY
+	CP C, 0						; Null terminator?
+	RET Z
+	PUSH XIY					; DRAW_CHAR clobbers XIY
+	CALL DRAW_CHAR
+	POP XIY
+	INC 8, DE					; x += 8
+	JP _help_draw_text
+
+; --- Page 0: Controls ---
+_help_draw_page_0:
+	; Title: "ANOTHER WORLD" centered (x=72 for 17 chars centered in 320px)
+	LD DE, 72
+	LD HL, 8
+	LD B, 2						; cyan
+	LD XIY, _str_title1
+	CALL _help_draw_text
+
+	; Subtitle: "KN5000 PORT"
+	LD DE, 96
+	LD HL, 20
+	LD B, 2
+	LD XIY, _str_title2
+	CALL _help_draw_text
+
+	; "CONTROLS:"
+	LD DE, 8
+	LD HL, 40
+	LD B, 1						; white
+	LD XIY, _str_controls
+	CALL _help_draw_text
+
+	; UP
+	LD DE, 8
+	LD HL, 56
+	LD B, 3						; yellow
+	LD XIY, _str_up_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 56
+	LD B, 1
+	LD XIY, _str_up_btn
+	CALL _help_draw_text
+
+	; DOWN
+	LD DE, 8
+	LD HL, 68
+	LD B, 3
+	LD XIY, _str_down_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 68
+	LD B, 1
+	LD XIY, _str_down_btn
+	CALL _help_draw_text
+
+	; LEFT
+	LD DE, 8
+	LD HL, 80
+	LD B, 3
+	LD XIY, _str_left_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 80
+	LD B, 1
+	LD XIY, _str_left_btn
+	CALL _help_draw_text
+
+	; RIGHT
+	LD DE, 8
+	LD HL, 92
+	LD B, 3
+	LD XIY, _str_right_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 92
+	LD B, 1
+	LD XIY, _str_right_btn
+	CALL _help_draw_text
+
+	; ACTION
+	LD DE, 8
+	LD HL, 104
+	LD B, 3
+	LD XIY, _str_action_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 104
+	LD B, 1
+	LD XIY, _str_action_btn
+	CALL _help_draw_text
+
+	; CODES
+	LD DE, 8
+	LD HL, 120
+	LD B, 3
+	LD XIY, _str_codes_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 120
+	LD B, 1
+	LD XIY, _str_codes_btn
+	CALL _help_draw_text
+
+	; PAGE
+	LD DE, 8
+	LD HL, 132
+	LD B, 3
+	LD XIY, _str_page_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 132
+	LD B, 1
+	LD XIY, _str_page_btn
+	CALL _help_draw_text
+
+	; EXIT
+	LD DE, 8
+	LD HL, 144
+	LD B, 3
+	LD XIY, _str_exit_key
+	CALL _help_draw_text
+	LD DE, 72
+	LD HL, 144
+	LD B, 1
+	LD XIY, _str_exit_btn
+	CALL _help_draw_text
+
+	; Page indicator
+	LD DE, 104
+	LD HL, 180
+	LD B, 1
+	LD XIY, _str_page_1_2
+	CALL _help_draw_text
+	RET
+
+; --- Page 1: Codes & Credits ---
+_help_draw_page_1:
+	; Title
+	LD DE, 72
+	LD HL, 8
+	LD B, 2
+	LD XIY, _str_title1
+	CALL _help_draw_text
+
+	; Subtitle
+	LD DE, 96
+	LD HL, 20
+	LD B, 2
+	LD XIY, _str_title2
+	CALL _help_draw_text
+
+	; "LEVEL CODES:"
+	LD DE, 8
+	LD HL, 40
+	LD B, 1
+	LD XIY, _str_level_codes
+	CALL _help_draw_text
+
+	; LDKD  Prison
+	LD DE, 8
+	LD HL, 56
+	LD B, 3
+	LD XIY, _str_code_ldkd
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 56
+	LD B, 1
+	LD XIY, _str_level_prison
+	CALL _help_draw_text
+
+	; HTDC  Citadel
+	LD DE, 8
+	LD HL, 68
+	LD B, 3
+	LD XIY, _str_code_htdc
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 68
+	LD B, 1
+	LD XIY, _str_level_citadel
+	CALL _help_draw_text
+
+	; CLLD  Arena
+	LD DE, 8
+	LD HL, 80
+	LD B, 3
+	LD XIY, _str_code_clld
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 80
+	LD B, 1
+	LD XIY, _str_level_arena
+	CALL _help_draw_text
+
+	; CKJL  Baths
+	LD DE, 8
+	LD HL, 92
+	LD B, 3
+	LD XIY, _str_code_ckjl
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 92
+	LD B, 1
+	LD XIY, _str_level_baths
+	CALL _help_draw_text
+
+	; LFCK  Final
+	LD DE, 8
+	LD HL, 104
+	LD B, 3
+	LD XIY, _str_code_lfck
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 104
+	LD B, 1
+	LD XIY, _str_level_final
+	CALL _help_draw_text
+
+	; KRTD  Ending
+	LD DE, 8
+	LD HL, 116
+	LD B, 3
+	LD XIY, _str_code_krtd
+	CALL _help_draw_text
+	LD DE, 56
+	LD HL, 116
+	LD B, 1
+	LD XIY, _str_level_ending
+	CALL _help_draw_text
+
+	; URL line 1
+	LD DE, 8
+	LD HL, 140
+	LD B, 2
+	LD XIY, _str_url1
+	CALL _help_draw_text
+
+	; URL line 2
+	LD DE, 32
+	LD HL, 152
+	LD B, 2
+	LD XIY, _str_url2
+	CALL _help_draw_text
+
+	; Page indicator
+	LD DE, 104
+	LD HL, 180
+	LD B, 1
+	LD XIY, _str_page_2_2
+	CALL _help_draw_text
+	RET
+
+; =============================================================================
+; Help screen string data
+; =============================================================================
+_str_title1:		DB "ANOTHER WORLD", 0
+_str_title2:		DB "KN5000 PORT", 0
+_str_controls:		DB "CONTROLS:", 0
+_str_up_key:		DB "UP", 0
+_str_up_btn:		DB "Part Select: RIGHT 2", 0
+_str_down_key:		DB "DOWN", 0
+_str_down_btn:		DB "Conductor: RIGHT 2", 0
+_str_left_key:		DB "LEFT", 0
+_str_left_btn:		DB "Conductor: LEFT", 0
+_str_right_key:		DB "RIGHT", 0
+_str_right_btn:		DB "Conductor: RIGHT 1", 0
+_str_action_key:	DB "ACTION", 0
+_str_action_btn:	DB "Variation 4", 0
+_str_codes_key:		DB "CODES", 0
+_str_codes_btn:		DB "Other Parts/TR", 0
+_str_page_key:		DB "PAGE", 0
+_str_page_btn:		DB "Page Up / Page Down", 0
+_str_exit_key:		DB "EXIT", 0
+_str_exit_btn:		DB "Exit this screen", 0
+_str_page_1_2:		DB "Page 1/2", 0
+_str_page_2_2:		DB "Page 2/2", 0
+_str_level_codes:	DB "LEVEL CODES:", 0
+_str_code_ldkd:		DB "LDKD", 0
+_str_level_prison:	DB "Prison", 0
+_str_code_htdc:		DB "HTDC", 0
+_str_level_citadel:	DB "Citadel", 0
+_str_code_clld:		DB "CLLD", 0
+_str_level_arena:	DB "Arena", 0
+_str_code_ckjl:		DB "CKJL", 0
+_str_level_baths:	DB "Baths", 0
+_str_code_lfck:		DB "LFCK", 0
+_str_level_final:	DB "Final", 0
+_str_code_krtd:		DB "KRTD", 0
+_str_level_ending:	DB "Ending", 0
+_str_url1:			DB "github.com/felipesanches/", 0
+_str_url2:			DB "kn5000-anotherworld", 0
+
+	endif ; TARGET_MAINCPU (HELP_SCREEN)
+
 INPUT_UPDATE_PLAYER:
 	ifdef TARGET_MAINCPU
 
@@ -1363,12 +1886,18 @@ INPUT_UPDATE_PLAYER:
 	CALL _cpanel_query_segment
 	LD L, A					; L = CPL_SEG4 bitmap
 
-	; Query CPL_SEG10 (left panel segment 10) for OTHER PARTS/TR button
-	; CPL_SEG10: bit3=OTHER PARTS/TR
+	; Query CPL_SEG10 (left panel segment 10) for HELP and OTHER PARTS/TR
+	; CPL_SEG10: bit2=HELP, bit3=OTHER PARTS/TR
 	; B still = 020h (left panel)
 	LD C, 00Ah				; Segment 10
 	CALL _cpanel_query_segment
 	; A = CPL_SEG10 bitmap
+	PUSH WA
+	AND A, 004h				; bit 2 = HELP
+	JR Z, _input_no_help
+	CALL HELP_SCREEN
+_input_no_help:
+	POP WA
 	AND A, 008h				; bit 3 = OTHER PARTS/TR
 	JR Z, _input_no_password
 	LD WA, GAME_PART_PASSWORD1
