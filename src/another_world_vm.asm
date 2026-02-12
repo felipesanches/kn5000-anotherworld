@@ -1392,7 +1392,7 @@ _help_poll:
 	LD C, 007h					; Segment 7
 	CALL _cpanel_query_segment
 	AND A, 008h					; bit 3 = EXIT
-	JR NZ, _help_exit
+	JP NZ, _help_exit
 
 	; Check game buttons — any VM-mapped button also exits help screen
 	; CPR_SEG4: bit1=UP, bit4=LEFT, bit5=DOWN, bit6=RIGHT
@@ -1400,13 +1400,19 @@ _help_poll:
 	LD C, 004h					; Segment 4
 	CALL _cpanel_query_segment
 	AND A, 072h					; bits 1,4,5,6 = UP/LEFT/DOWN/RIGHT
-	JR NZ, _help_exit
+	JP NZ, _help_exit
 	; CPL_SEG4: bit3=ACTION
 	LD B, 020h					; Left panel
 	LD C, 004h					; Segment 4
 	CALL _cpanel_query_segment
 	AND A, 008h					; bit 3 = ACTION
-	JR NZ, _help_exit
+	JP NZ, _help_exit
+	; CPL_SEG10: bit3=OTHER PARTS/TR
+	; B still = 020h (left panel)
+	LD C, 00Ah					; Segment 10
+	CALL _cpanel_query_segment
+	AND A, 008h					; bit 3 = OTHER PARTS/TR
+	JP NZ, _help_exit
 
 	; Check PAGE UP / PAGE DOWN (CPL_SEG2 bits 7 and 6)
 	LD B, 020h					; Left panel
@@ -1500,6 +1506,12 @@ _help_wait_all_release:
 	; Check ACTION (CPL_SEG4 bit 3)
 	LD B, 020h
 	LD C, 004h
+	CALL _cpanel_query_segment
+	AND A, 008h
+	JR NZ, _help_wait_all_release
+	; Check OTHER PARTS/TR (CPL_SEG10 bit 3)
+	LD B, 020h
+	LD C, 00Ah
 	CALL _cpanel_query_segment
 	AND A, 008h
 	JR NZ, _help_wait_all_release
