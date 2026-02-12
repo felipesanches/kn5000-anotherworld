@@ -1399,7 +1399,7 @@ _input_no_left:
 	LD A, VM_VARIABLE_HERO_POS_LEFT_RIGHT
 	CALL _write_vm_var		; Always write lr (even if 0)
 
-	; --- JUMP_DOWN: compute in DE, then write once ---
+	; --- JUMP_DOWN: ud reflects both DOWN and UP (UP overrides) ---
 	LD DE, 0				; ud = 0 (default: no movement)
 	LD A, H
 	AND A, 020h				; DOWN = CONDUCTOR: RIGHT 2 (bit 5)
@@ -1407,8 +1407,14 @@ _input_no_left:
 	LD DE, 1				; ud = 1
 	SET 2, C				; mask |= 4
 _input_no_down:
+	LD A, H
+	AND A, 002h				; UP = PART SELECT: RIGHT 2 (bit 1)
+	JR Z, _input_no_up_jd
+	LD DE, 0FFFFh			; ud = -1 (UP overrides DOWN)
+	SET 3, C				; mask |= 8
+_input_no_up_jd:
 	LD A, VM_VARIABLE_HERO_POS_JUMP_DOWN
-	CALL _write_vm_var		; Always write ud (even if 0)
+	CALL _write_vm_var		; Write ud
 
 	; --- UP_DOWN: -1 if UP pressed, else 0 ---
 	LD DE, 0				; UP_DOWN = 0
@@ -1416,7 +1422,6 @@ _input_no_down:
 	AND A, 002h				; UP = PART SELECT: RIGHT 2 (bit 1)
 	JR Z, _input_no_up
 	LD DE, 0FFFFh			; UP_DOWN = -1
-	SET 3, C				; mask |= 8
 _input_no_up:
 	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
 	CALL _write_vm_var		; Always write (even if 0)
