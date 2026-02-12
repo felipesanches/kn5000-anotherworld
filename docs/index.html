@@ -302,7 +302,7 @@ code {
   <dt>Display</dt>        <dd>MN89304 VGA LCD controller, 320x240 @ 8bpp</dd>
   <dt>Assembler</dt>      <dd>ASL Macro Assembler (<code>cpu 96c141</code>)</dd>
   <dt>VM origin</dt>      <dd>Big-endian Amiga/68k bytecode on little-endian TLCS-900</dd>
-  <dt>Status</dt>         <dd>Playable: intro, splash screens, part switching, input (directions + action) via SC1 serial. Sound stubbed.</dd>
+  <dt>Status</dt>         <dd>Playable: all 10 game parts, input via SC1 serial, help/pause screen with level codes. Sound stubbed.</dd>
 </dl>
 
 <h2>Plans &amp; Design Documents</h2>
@@ -359,7 +359,7 @@ code {
   <a class="card full-width" href="logs.html">
     <div class="label log">Viewer</div>
     <div class="title">Conversation Log Viewer</div>
-    <div class="desc">13 sessions covering the full development from initial setup through playable game. Includes tool calls, thinking traces, and all user/assistant messages verbatim.</div>
+    <div class="desc">Development sessions covering the full journey from initial setup through playable game. Includes tool calls, thinking traces, and all user/assistant messages verbatim.</div>
   </a>
 </div>
 
@@ -461,10 +461,35 @@ code {
     <div class="commit">Add MAME driver architecture documentation (5 files)</div>
     <div class="hash">c9be971</div>
   </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 12</div>
+    <div class="commit">Fix thread freeze/unfreeze, bitmap rendering (RL not RLC), remove diagnostics</div>
+    <div class="hash">7ea0236 .. 4581528</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 12</div>
+    <div class="commit">Add all 12 screen bitmap resources for complete game</div>
+    <div class="hash">d565a2a</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 12</div>
+    <div class="commit">Map OTHER PARTS/TR to password screen, bypass copy protection check</div>
+    <div class="hash">0944369 + 97013e2</div>
+  </div>
+  <div class="timeline-entry">
+    <div class="date">Feb 12</div>
+    <div class="commit">Fix DOWN input for password screen</div>
+    <div class="hash">6ec667f</div>
+  </div>
+  <div class="timeline-entry milestone">
+    <div class="date">Feb 12</div>
+    <div class="commit">Add HELP pause screen: 3-page overlay with controls, all 15 level codes, and credits</div>
+    <div class="hash">46892a3 + 956a257</div>
+  </div>
 </div>
 
 <h2>Next Steps</h2>
-<p>The intro sequence plays fully, but several features are needed to play the complete game.</p>
+<p>The game is fully playable with all 10 parts. Remaining work is sound and real hardware testing.</p>
 
 <div class="next-steps">
   <div class="step">
@@ -473,19 +498,19 @@ code {
     <div class="step-desc">Directions (UP/DOWN/LEFT/RIGHT) and ACTION mapped to KN5000 control panel buttons via SC1 serial polling. MAME serial bugs fixed (idle transition, dummy byte filter, SC1MOD clock source). <a href="doc.html?file=serial-cpanel-compatibility-2026-02-11.md" style="color:var(--accent)">See compatibility report.</a></div>
   </div>
   <div class="step">
+    <div class="step-title">Help / pause screen</div>
+    <div class="step-status done">Done</div>
+    <div class="step-desc">HELP button pauses VM and displays a 3-page overlay: control mappings, all 15 level codes, and project credits. PAGE UP/DOWN navigates; EXIT or any game button resumes. Draws to offscreen buffer to preserve game frame.</div>
+  </div>
+  <div class="step">
+    <div class="step-title">Part switching &amp; resources</div>
+    <div class="step-status done">Done</div>
+    <div class="step-desc">All 10 game parts (protection, intro, water, jail, citadel, battle, arena, final, password x2) with full resources extracted and included. Copy protection bypassed for all parts. 12 screen bitmap resources included.</div>
+  </div>
+  <div class="step">
     <div class="step-title">Sound &amp; music</div>
     <div class="step-status stub">Stub</div>
     <div class="step-desc">Opcodes 0x18 (playSound) and 0x1A (playMusic) consume their bytecode arguments but produce no output. The KN5000 sound hardware (sub CPU + DSP) is not yet understood well enough to drive it directly.</div>
-  </div>
-  <div class="step">
-    <div class="step-title">Part switching</div>
-    <div class="step-status partial">Partial</div>
-    <div class="step-desc">Works for included parts (Part 0 logo/credits, Part 1 intro, Part 2 water). Copy protection bypassed for all parts. Missing: resource extraction for later game parts (citadel, arena, etc.).</div>
-  </div>
-  <div class="step">
-    <div class="step-title">Resource extraction</div>
-    <div class="step-status todo">Todo</div>
-    <div class="step-desc">Only intro resources (0x17-0x1A, 0x49, 0x53) are included. The remaining parts' bytecode, palettes, and video data need to be extracted from the original game files.</div>
   </div>
   <div class="step">
     <div class="step-title">Real hardware testing</div>
