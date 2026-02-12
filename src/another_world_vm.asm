@@ -1421,15 +1421,23 @@ _input_no_up_jd:
 	LD A, VM_VARIABLE_HERO_POS_JUMP_DOWN
 	CALL _write_vm_var		; Write ud
 
-	; --- UP_DOWN: -1 if UP pressed, else 0 ---
-	LD DE, 0				; UP_DOWN = 0
+	; --- UP_DOWN: -1 if UP, 1 if DOWN, 0 if neither ---
+	; Reference: if UP, force -1; else write ud (which is 1 for DOWN, 0 for neither)
+	; Reuse ud already computed for JUMP_DOWN (DE still has it after _write_vm_var)
+	; Recompute since _write_vm_var clobbers DE:
+	LD DE, 0				; ud = 0
+	LD A, H
+	AND A, 020h				; DOWN = CONDUCTOR: RIGHT 2 (bit 5)
+	JR Z, _input_no_down_ud
+	LD DE, 1				; ud = 1
+_input_no_down_ud:
 	LD A, H
 	AND A, 002h				; UP = PART SELECT: RIGHT 2 (bit 1)
 	JR Z, _input_no_up
-	LD DE, 0FFFFh			; UP_DOWN = -1
+	LD DE, 0FFFFh			; ud = -1 (UP overrides DOWN)
 _input_no_up:
 	LD A, VM_VARIABLE_HERO_POS_UP_DOWN
-	CALL _write_vm_var		; Always write (even if 0)
+	CALL _write_vm_var		; Write ud (-1/0/1)
 
 	; --- POS_MASK ---
 	LD D, 0
