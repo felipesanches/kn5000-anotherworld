@@ -103,6 +103,17 @@ These sibling repositories contain essential reference material. **Do not modify
 | Symbols | `symbols/maincpu_symbols_reference.txt` | 39,125 named addresses |
 | AW VM HLE | `mame_driver/src/devices/cpu/anotherworld/` | Reference C++ implementation of all opcodes |
 
+### MAME Driver Architecture: `../../kn5000-roms-disasm/docs/mame-driver/`
+Summary documentation of the MAME KN5000 driver source code — memory maps, SFR registers, serial protocol, timer quirks, device wiring. Start with [`README.md`](../../kn5000-roms-disasm/docs/mame-driver/README.md) for quick reference, drill into per-component docs for details.
+
+| Topic | File | Key Content |
+|-------|------|-------------|
+| Overview + quick ref | `README.md` | Memory map, serial wiring, known quirks |
+| Machine config | `machine-config.md` | CPU ports, interrupts, VGA, FDC, inter-CPU latches |
+| Control panel HLE | `control-panel-hle.md` | Serial protocol, command format, button segments, LED commands |
+| CPU peripherals | `cpu-peripherals.md` | Full SFR map, timer architecture, prescaler quirk, INTCLR mechanism |
+| Serial channels | `serial-channels.md` | Clock sources, baud rate calc, TO2 trigger pitfall, bit timing |
+
 ### MAME HLE Reference
 - Full commit: https://github.com/felipesanches/mame/commit/7cbb93bc3ee05f5ffdd083081530ac0daa2dfa84
 - Local copy: `../../kn5000-roms-disasm/mame_driver/src/devices/cpu/anotherworld/`
