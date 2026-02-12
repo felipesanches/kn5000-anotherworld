@@ -2536,7 +2536,8 @@ _load_check_screen:
 	; Screen resources serve dual purpose:
 	;   1. 4bpp planar bitmap copied to PAGE_BITMAP_0 (for direct display)
 	;   2. Raw data replaces CUR_VIDEO_1 (cinematic segment, used by VIDEO 0x80)
-	; Reference: aw_hle.cpp screen_resource_indexes[] = {0x12,0x13,...,0x49,0x53,...}
+	; Reference: aw_hle.cpp screen_resource_indexes[] =
+	;   {0x12,0x13,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x53,0x90,0x91}
 	CP WA, 012h
 	JP NE, _load_not_0x12
 	LD XHL, SCREEN_BITMAP_0x12
@@ -2547,19 +2548,54 @@ _load_not_0x12:
 	LD XHL, SCREEN_BITMAP_0x13
 	JP _load_screen_common
 _load_not_0x13:
+	CP WA, 043h
+	JP NE, _load_not_0x43
+	LD XHL, SCREEN_BITMAP_0x43
+	JP _load_screen_common
+_load_not_0x43:
+	CP WA, 044h
+	JP NE, _load_not_0x44
+	LD XHL, SCREEN_BITMAP_0x44
+	JP _load_screen_common
+_load_not_0x44:
+	CP WA, 045h
+	JP NE, _load_not_0x45
+	LD XHL, SCREEN_BITMAP_0x45
+	JP _load_screen_common
+_load_not_0x45:
+	CP WA, 046h
+	JP NE, _load_not_0x46
+	LD XHL, SCREEN_BITMAP_0x46
+	JP _load_screen_common
+_load_not_0x46:
 	CP WA, 047h
 	JP NE, _load_not_0x47
 	LD XHL, SCREEN_BITMAP_0x47
 	JP _load_screen_common
 _load_not_0x47:
+	CP WA, 048h
+	JP NE, _load_not_0x48
+	LD XHL, SCREEN_BITMAP_0x48
+	JP _load_screen_common
+_load_not_0x48:
 	CP WA, 049h
 	JP NE, _load_not_0x49
 	LD XHL, SCREEN_BITMAP_0x49
 	JP _load_screen_common
 _load_not_0x49:
 	CP WA, 053h
-	JP NE, _load_unknown
+	JP NE, _load_not_0x53
 	LD XHL, SCREEN_BITMAP_0x53
+	JP _load_screen_common
+_load_not_0x53:
+	CP WA, 090h
+	JP NE, _load_not_0x90
+	LD XHL, SCREEN_BITMAP_0x90
+	JP _load_screen_common
+_load_not_0x90:
+	CP WA, 091h
+	JP NE, _load_unknown
+	LD XHL, SCREEN_BITMAP_0x91
 	JP _load_screen_common
 _load_unknown:
 	; Unknown resource - ignore
@@ -2691,8 +2727,23 @@ SCREEN_BITMAP_0x12:
 SCREEN_BITMAP_0x13:
 	binclude "resources/resource-0x13.bin"
 
+SCREEN_BITMAP_0x43:
+	binclude "resources/resource-0x43.bin"
+
+SCREEN_BITMAP_0x44:
+	binclude "resources/resource-0x44.bin"
+
+SCREEN_BITMAP_0x45:
+	binclude "resources/resource-0x45.bin"
+
+SCREEN_BITMAP_0x46:
+	binclude "resources/resource-0x46.bin"
+
 SCREEN_BITMAP_0x47:
 	binclude "resources/resource-0x47.bin"
+
+SCREEN_BITMAP_0x48:
+	binclude "resources/resource-0x48.bin"
 
 SCREEN_BITMAP_0x49:
 	binclude "resources/resource-0x49.bin"
@@ -2700,7 +2751,9 @@ SCREEN_BITMAP_0x49:
 SCREEN_BITMAP_0x53:
 	binclude "resources/resource-0x53.bin"
 
-BITMAP_1:
-	binclude "another_world_logo.bin"
-BITMAP_2:
-	binclude "other_bitmap.bin"
+SCREEN_BITMAP_0x90:
+	binclude "resources/resource-0x90.bin"
+
+SCREEN_BITMAP_0x91:
+	binclude "resources/resource-0x91.bin"
+
