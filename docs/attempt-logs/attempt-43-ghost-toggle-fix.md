@@ -46,53 +46,46 @@ query path) to prevent bypassing the confirmation logic.
 
 ### Root Cause
 
-**The button packet header encoding was wrong for the left panel.** The real
-panel MCUs encode the panel identity in bits 7:6 of the response header:
+**The button packet header encoding was wrong for the left panel.** The
+panel identity is encoded in bits 7:6 of the response header. The firmware's
+event dispatcher translates headers via a ROM lookup table at `0xEDA03C`:
 
-| Panel | Bits 7:6 | Header format | Example (seg 3) |
-|-------|----------|---------------|------------------|
-| Left  | 00       | `segment`     | 0x03             |
-| Right | 11       | `0xC0 \| seg` | 0xC3             |
-
-Our HLE was using `bit 6 = 1` for left panel (header = `0x40 | segment`),
-which was **wrong**.
-
-### Why This Matters
-
-The firmware's event dispatcher at `LABEL_FC6A12` translates raw header bytes
-through a ROM lookup table at address `0xEDA03C`. The translation index is
-computed as `(header & 0xC0) >> 1 | (header & 0x1F)`:
-
-| Header encoding   | Lookup index | Table value | Result |
-|-------------------|-------------|-------------|--------|
-| Left (00): 0x03   | 0x03        | 0x0E        | Valid index 14 → LED dispatch ✓ |
-| Right (C0): 0xC3  | 0x63        | 0x03        | Valid index 3 → LED dispatch ✓ |
-| **Old left (40): 0x43** | **0x23** | **0x1F** | **Index 31 → DEAD ZONE** ✗ |
-
-The lookup table contents (verified from ROM at offset 0xDA03C):
 ```
-[0x00-0x0A]: 0B 0C 0D 0E 0F 10 11 12 13 14 15   ← left panel → indices 11-21
+[0x00-0x0A]: 0B 0C 0D 0E 0F 10 11 12 13 14 15   ← right panel → event indices 11-21
 [0x0B-0x5F]: all 1F                                ← dead zone (index 31)
-[0x60-0x6A]: 00 01 02 03 04 05 06 07 08 09 0A     ← right panel → indices 0-10
+[0x60-0x6A]: 00 01 02 03 04 05 06 07 08 09 0A     ← left panel → event indices 0-10
 ```
 
-With the old encoding (0x40), left panel events got index 0x1F. In the
-dispatcher, indices > 0x15 (21) bypass the LED dispatch path — so the firmware
-**never sent LED commands or processed button handlers for left panel events**.
+The translation index is `(header & 0xC0) >> 1 | (header & 0x1F)`:
 
-### Fix
+| Header encoding         | Lookup index | Table value | Result |
+|--------------------------|-------------|-------------|--------|
+| Right (00): 0x03         | 0x03        | 0x0E        | Index 14 → LED dispatch ✓ |
+| Left (C0): 0xC3          | 0x63        | 0x03        | Index 3 → LED dispatch ✓ |
+| **Old left (40): 0x43**  | **0x23**    | **0x1F**    | **Index 31 → DEAD ZONE** ✗ |
 
-Changed `send_button_packet` header encoding:
+Right panel was **already working** with `header = segment` (bits 7:6=00).
+Left panel used `header = 0x40 | segment` (bits 7:6=01) which fell in the
+dead zone. Index 0x1F > 0x15, so left panel events bypassed LED dispatch.
+
+### Fix (corrected after initial regression)
+
+The first fix attempt swapped both panels, breaking right panel. The correct
+fix only changes left panel encoding while keeping right panel unchanged:
+
 ```cpp
-// OLD (wrong):
-if (is_left_panel) header |= 0x40;
+// OLD (left panel dead):
+if (is_left_panel) header |= 0x40;   // bits 7:6=01 → dead zone
 
-// NEW (correct):
-if (!is_left_panel) header |= 0xC0;
+// WRONG FIX (broke right panel):
+if (!is_left_panel) header |= 0xC0;  // swapped both panels
+
+// CORRECT FIX:
+if (is_left_panel) header |= 0xC0;   // bits 7:6=11 → valid zone
 ```
 
-Left panel headers are now plain segment numbers (0x00-0x0A), and right panel
-headers use 0xC0 | segment (0xC0-0xCA), matching the real panel MCU encoding.
+Right panel stays at `header = segment` (bits 7:6=00, already working).
+Left panel changes to `header = 0xC0 | segment` (bits 7:6=11, now valid).
 
 ### Verification via CPanel_RX_ButtonPacket
 
