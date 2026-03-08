@@ -160,18 +160,31 @@ Reset_Handler:
 ; =============================================================================
 	ifdef TARGET_EXTENSION
 
+STACK_TOP		EQU 0200000h + 0400h	; Stack in extension SRAM (after VM vars)
+OFFSCREEN_BUFFER_1	EQU 0210000h		; Offscreen buffer in extension SRAM
+
 	ORG 0280000h
 
 EXTENSION_HEADER:
 	db 'XAPR'
 	dd POINTERS
-	JP ENTRY
+	JP ENTRY_EXT
 POINTERS:
 	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE
 	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE
 	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE
 	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE
 	db 0Eh, 00h, 00h, 00h; EMPTY_ROUTINE
+
+; Include shared VGA I/O routines (needed by VM for palette writes)
+	include "vga_io.asm"
+
+ENTRY_EXT:
+	; Extension entry: firmware already initialized hardware
+	; Set up our own stack in extension SRAM
+	LDA_XWA_IMM24 STACK_TOP
+	ld XSP, XWA
+	jp ENTRY
 
 	endif ; TARGET_EXTENSION
 

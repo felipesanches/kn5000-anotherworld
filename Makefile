@@ -81,8 +81,18 @@ ORIGINAL_ROM_FILES := \
 	kn5000_waveform_rom.ic307 \
 	kn5000_custom_data_rom.ic19
 
-# The program ROM that gets replaced with our custom build
-PROGRAM_ROM_NAME := kn5000_v10_program.rom
+# ROM names depend on target
+ifeq ($(TARGET),extension)
+  # Extension build: output goes to HDAE5000 ROM, original firmware stays
+  CUSTOM_ROM_NAME := hd-ae5000.ic4
+  PROGRAM_ROM_NAME := kn5000_v10_program.rom
+  NEED_ORIGINAL_PROGRAM := yes
+else
+  # Maincpu build: output replaces program ROM
+  CUSTOM_ROM_NAME := kn5000_v10_program.rom
+  PROGRAM_ROM_NAME := kn5000_v10_program.rom
+  NEED_ORIGINAL_PROGRAM := no
+endif
 
 # =============================================================================
 # Default target - build everything including ROM set
@@ -163,7 +173,7 @@ SYMBOLS_USED := $(BUILD_DIR)/symbols.used
 SYMBOLS_UNUSED := $(BUILD_DIR)/symbols.unused
 
 $(BUILD_DIR)/main.p: $(MAIN_SRC) $(wildcard $(INCLUDE_DIR)/*.inc) $(wildcard src/*.asm) $(ASSET_FILES) | $(BUILD_DIR)
-	$(ASL) $(ASL_FLAGS) $(ASL_EXTRA) -olist $(LISTING_FILE) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/shared $(MAIN_SRC) -o $@
+	$(ASL) $(ASL_FLAGS) $(ASL_EXTRA) -olist $(LISTING_FILE) -i $(INCLUDE_DIR) -i src -i $(DISASM_REPO) -i $(DISASM_REPO)/archive/asl -i $(DISASM_REPO)/archive/asl/shared $(MAIN_SRC) -o $@
 	@# Extract symbol table from listing, split into used and unused
 	@grep -E "^[ *]?[A-Za-z_][A-Za-z0-9_.]* :" $(LISTING_FILE) | \
 		sed 's/ *| */\n/g' | \
@@ -216,9 +226,18 @@ romset: $(MAIN_ROM)
 			echo "  WARNING: Missing original ROM: $$rom"; \
 		fi; \
 	done
-	@# Copy our custom ROM as the program ROM
-	cp $(MAIN_ROM) $(ROMSET_DIR)/$(PROGRAM_ROM_NAME)
-	@echo "  Installed: $(PROGRAM_ROM_NAME) (custom build)"
+	@# Install custom ROM
+	cp $(MAIN_ROM) $(ROMSET_DIR)/$(CUSTOM_ROM_NAME)
+	@echo "  Installed: $(CUSTOM_ROM_NAME) (custom build)"
+ifeq ($(NEED_ORIGINAL_PROGRAM),yes)
+	@# Extension mode: also need original program ROM (firmware)
+	@if [ -f "$(ORIGINAL_ROMS)/$(PROGRAM_ROM_NAME)" ]; then \
+		cp "$(ORIGINAL_ROMS)/$(PROGRAM_ROM_NAME)" "$(ROMSET_DIR)/"; \
+		echo "  Copied: $(PROGRAM_ROM_NAME) (original firmware)"; \
+	else \
+		echo "  WARNING: Missing original program ROM: $(PROGRAM_ROM_NAME)"; \
+	fi
+endif
 	@# Show ROM set contents
 	@echo ""
 	@echo "ROM set contents:"
@@ -249,7 +268,11 @@ test: romset
 	@echo "Running MAME with custom ROM set..."
 	@echo "ROM path: $(ROMSET_BASE)"
 	@echo ""
+ifeq ($(TARGET),extension)
+	mame kn5000 -rompath $(ROMSET_BASE) -extension hdae5000
+else
 	mame kn5000 -rompath $(ROMSET_BASE)
+endif
 
 # Non-interactive test (just verify ROM loads)
 .PHONY: test-verify
