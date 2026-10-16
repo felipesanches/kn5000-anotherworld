@@ -18,9 +18,16 @@ directions:
 | `awnotediff.lua`  | does any RAM byte equal the held note / key idx?| 0 bytes correlate (C4→G4) across 12 KB of work RAM |
 | `awkeycal.lua`    | what *does* move when a key is held?            | free-running phase/voice accumulators (`0x8901` one run, `0x0E79` another for the same region) — not a stable note |
 
-The only clean keybed signal is "a voice is active" (bit 7 of `0x5014967C`: `0x89` held
-vs `0x09` released), which is enough for the intro *skip* (any key = fire) but carries no
-direction. Reliable directional input therefore comes from the panel.
+The only clean keybed signal *in that RAM window* is "a voice is active" (bit 7 of
+`0x5014967C`: `0x89` held vs `0x09` released), enough for the intro *skip* (any key =
+fire). So the shipped gameplay input uses the panel.
+
+**Correction (2026-10-16): the keybed *can* give directions — those three probes just
+scanned the wrong region.** The stable, polyphonic held-note state is the TG voice
+allocator's bookkeeping at `0x500D288C` (held-slot bitmap) + `0x500D1278 + slot*0x2C +
+0x0C` (note per slot), far below the `0x50148000` window above. Verified reading three
+simultaneous held notes in-game. See [PLUGIN-INPUT-INTERFACES.md](PLUGIN-INPUT-INTERFACES.md).
+The panel remains what the port currently wires up; the keybed is now a viable alternative.
 
 ## The firmware panel switch-shadow (decoded by `awpanelmap.lua`)
 

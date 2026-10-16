@@ -16,7 +16,8 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `awdiag.lua`     | each button alone vs same-frame pairs                 | every button registers alone; same-frame pairs collapse (scan-timing artifact) |
 | `awinputverify.lua` | do the panel buttons write the right hero variables? | all five single-button cases match rustyworld's `update_player` exactly |
 | `awmove.lua`     | does holding a direction change the game output?      | **yes** — displayed-page checksums diverge by direction (none vs UP vs LEFT) |
-| `awnotediff.lua`, `awkeycal.lua` | can the keybed give a held-note identity? | **no** — FIFO drained, no RAM byte equals the note, only free-running phase accumulators move. See [PANEL-INPUT.md](PANEL-INPUT.md) |
+| `awnotediff.lua`, `awkeycal.lua` | (wrong region) keybed held-note in `0x50148000..` | nothing stable there — only phase caches; superseded by the probes below |
+| `awnodes.lua`, `awnode2.lua`, `awkeyread.lua` | can a plug-in read held keybed notes? | **yes, polyphonic** — held-slot bitmap `0x500D288C` + note at `0x500D1278+slot*0x2C+0x0C`; 3 notes read at once in-game. See [PLUGIN-INPUT-INTERFACES.md](PLUGIN-INPUT-INTERFACES.md) |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can
