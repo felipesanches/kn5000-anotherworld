@@ -1,0 +1,89 @@
+# Another World on the Technics SX-KN7000
+
+A port of the Another World bytecode VM to the **Technics SX-KN7000** arranger
+keyboard, as a sibling of the KN5000 version in this repository. Where the KN5000
+build is a Toshiba TLCS-900 extension-board ROM, the KN7000 runs a Panasonic
+MN10300 and has no expansion slot — so the game rides along with the keyboard's
+**SP7001 "SD PLUG-iN"** firmware and loads from the SD card.
+
+> **Status (2026-10-16): platform bring-up complete; VM port in progress.**
+> Everything the port needs from the instrument is proven in MAME (`kn7000 -bios
+> sp7001`): our code runs, it reads files from the SD card, it owns the LCD, and a
+> 320×200 indexed page blits to the screen through a palette. The bytecode VM
+> itself (the ~3,500-line interpreter and polygon renderer) is being translated
+> from the KN5000 TLCS-900 source to MN10300.
+
+## How it runs on the KN7000
+
+The KN7000's firmware owns the LCD and runs no outside code — except through the
+SP7001 plug-in, which loads `TECHNICS\DATA\BASEEXT.XAP` from the SD card into RAM
+and runs it (see [SP7001 Firmware](../../kn5000-docs/kn7000-sp7001-firmware.md)).
+The port **rides along** with that plug-in rather than replacing it:
+
+1. `kn7000_disassembly/tools/xap_addon.py` places our module in `BASEEXT.XAP`'s
+   unused tail and redirects the plug-in's entry (`XapEntry`) to our **hook**.
+2. The hook runs on the firmware's loading task. It loads the game from the SD
+   card (the file API works in this context) and starts a **task** of our own,
+   then lets `XapEntry` continue so the plug-in still initialises normally.
+3. Because the plug-in finishes, the firmware reaches its static SP7001 screen.
+   On a static screen the firmware repaints only what changes, so our task's
+   **full-frame blit to `0x9CE00000`** (640×240 RGB565) persists — we own the LCD.
+4. Another World is 320×200; the VM renders into an 8-bit-indexed page in RAM, and
+   the task blits it centred into the frame through a 16-colour palette.
+
+Replacing `BASEEXT.XAP` outright does **not** work: the firmware then sits on its
+"Initializing PLUG-iN System" screen (our stub plug-in never completes init) and
+full-clears the frame every repaint, so a blit cannot win. Riding along avoids that.
+
+## What is proven (and how)
+
+Each fact was established in MAME; the read-only probes are in `probes/`.
+
+| fact                                                   | probe / result                                                                 |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| our code runs as a ride-along module                   | the clock demo and this port boot and draw                                     |
+| a full-frame blit to `0x9CE00000` persists             | `probes/` full-frame fill covers the whole LCD                                 |
+| the firmware heap is too small for the game            | `heap_probe.lua`: ~15–31 KB free → load game data into a large RAM window      |
+| writable RAM windows                                   | `ram_probe.lua`: `0x44000000`, `0x4C000000`, work RAM `0x50000000–0x503FFFFF`, LCD `0x9C…` |
+| **reading a file from the SD card**                    | `sdread.lua`: `fopen`/`fread`/`fclose` return the exact file bytes             |
+
+### The SD file API (the key enabler)
+
+The firmware exports a C-like file API to plug-ins; it is reachable both by name
+(program 942: `fopen_api` `0x48585E2A`, `fread_api` `0x48585E50`, `fclose_api`
+`0x48585E65`) and as methods on the framework object. Three things make it work:
+
+- **Call it from the hook, not from our task.** On the firmware's loading task it
+  works; from a task we create with `cre_tsk_X` it faults (no per-task C-runtime).
+- **Single backslashes in the path.** `fopen_api("C:\TECHNICS\DATA\FILE.EXT",
+  "rb")`. (Our assembler's `.asciz` does not process escapes, so write one `\`.)
+- **Read into work RAM, not the `0x44000000` window.** The SD read cannot target
+  the external-memory window; `fread_api(buf, FILE, 1, count)` with `buf` in
+  `0x50000000–0x503FFFFF` returns the bytes. The loader then copies to `0x44…`.
+
+## Building
+
+Needs a checkout of [`kn7000_disassembly`](../../kn7000_disassembly) beside this
+repo (for the MN10300 assembler and the XAP/SD tools) and its extracted vendor
+`BASEEXT.XAP`:
+
+    make -C ../../kn7000_disassembly baserom/sp7001_baseext.xap
+    make            # build/BASEEXT.XAP  (the vendor plug-in with our module added)
+    make card       # build/another_sd.img  (a copy of an SP7001 SD image with it)
+    make run        # boot MAME; press the orange SD CARD button to load it
+
+The vendor plug-in is not redistributed: the build adds our module to your own copy.
+
+## Layout
+
+| path              | what it is                                                        |
+|-------------------|-------------------------------------------------------------------|
+| `src/platform.inc`| KN7000/SP7001 addresses and constants, with how each was found    |
+| `src/main.s`      | the platform layer: hook, task, page→frame blit (test page today) |
+| `probes/`         | read-only MAME probes that established the facts above             |
+
+## Credits
+
+Derived from the KN5000 Another World port (TLCS-900), itself derived from Fabien
+Sanglard's Another World bytecode interpreter. Game data must be extracted from an
+original copy of the game.
