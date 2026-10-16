@@ -20,6 +20,11 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `awnodes.lua`, `awnode2.lua`, `awkeyread.lua` | can a plug-in read held keybed notes?                       | **yes, polyphonic** — held-slot bitmap `0x500D288C` + note at `0x500D1278+slot*0x2C+0x0C`; 3 notes read at once in-game. See [PLUGIN-INPUT-INTERFACES.md](PLUGIN-INPUT-INTERFACES.md) |
 | `awkbdmap.lua`                                | does the keybed gameplay mapping write the right hero vars? | **yes** — F5 left, C6 right, A5 down, Ab5/Bb5 up, C4/bass action; move+fire together, all match the oracle |
 | `awmiditest.lua` + `gen_held_mid.py`          | do USB-MIDI-IN notes reach the game's keybed read?          | **yes** — a SMF on `-midiin1` shows C4/G4/E4 in the TG held mask; a controller drives the game like the keys |
+| `awinput_bug.lua`                             | why does a key sometimes read as the wrong input?           | note-on sets a slot's held bit ~1 frame before its note field, so a fresh slot reads note 0 (action) or a stale note (wrong dir). See GAMEPLAY-BUGFIXES.md |
+| `awrelease.lua`                               | how fast does a released key clear?                         | the sounding mask lags key-up ~50 ms (firmware) -- a released direction lingers ~1 VM frame |
+| `awinput_fix3.lua`                            | does the per-slot 2-frame debounce fix the press glitches?  | **yes** -- press-context wrong-direction glitch-frames drop to 0 |
+| `awdis.py`                                    | what page copies does the water bytecode emit?              | `python3 awdis.py resource-0x1b.bin` -> shows COPY src=0x83 (VSCROLL) at 0x01AC = the dynamic-layer carry. Bug-2 evidence |
+| `awcopytrace.lua`                             | does CopyPage resolve source pages correctly now?           | **yes** -- src=0x40->page 0, src=0x03->page 3 (so 0x83->page 3, not page 0) |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can

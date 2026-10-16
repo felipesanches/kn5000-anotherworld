@@ -36,7 +36,9 @@ WriteVar:
     ret     [a2,a3], 0x10
 
 # GetPagePtr(d0 = pageId) -> a0 = page base
-#   0xFF -> CUR_PAGE_3, 0xFE -> CUR_PAGE_2, 0..3 -> PAGE_BITMAP_n, else page 0.
+#   0xFF -> CUR_PAGE_3 (back), 0xFE -> CUR_PAGE_2 (front), anything else -> page (id & 3).
+# The &3 matches Another World's PageSelector::from (Page(e & 0x3)): the 0x40/0x80 bits a
+# copyVideoPage source carries are NOT page bits, so e.g. 0x83 is page 3, not page 0.
 GetPagePtr:
     and     0xff, d0
     cmp     0xff, d0
@@ -49,27 +51,10 @@ gp_not_ff:
     mov     (CUR_PAGE_2), a0
     rets
 gp_not_fe:
-    cmp     0, d0
-    bne     gp_not_0
+    and     3, d0
+    asl     16, d0                  # (id & 3) * 0x10000  (page stride)
     mov     PAGE_BITMAP_0, a0
-    rets
-gp_not_0:
-    cmp     1, d0
-    bne     gp_not_1
-    mov     PAGE_BITMAP_1, a0
-    rets
-gp_not_1:
-    cmp     2, d0
-    bne     gp_not_2
-    mov     PAGE_BITMAP_2, a0
-    rets
-gp_not_2:
-    cmp     3, d0
-    bne     gp_not_3
-    mov     PAGE_BITMAP_3, a0
-    rets
-gp_not_3:
-    mov     PAGE_BITMAP_0, a0
+    add     d0, a0                  # a0 = PAGE_BITMAP_0 + (id & 3) * 0x10000
     rets
 
 # ================================================================================
@@ -304,31 +289,43 @@ fpo_loop:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
-# CopyPage(d0 = srcId, d1 = dstId): plain full-page copy (scroll modes not ported;
-# the intro does not use vertical scroll). srcId >= 0xFE and the masked/plain paths
-# all reduce to a straight 64000-byte copy here.
+# CopyPage(d0 = srcId, d1 = dstId): copy one page to another, matching Another World's
+# copyVideoPage. GetPagePtr resolves ids (0xFE front / 0xFF back / else id&3). When
+# srcId < 0xFE and bit 0x80 is set, the copy is shifted vertically by VAR_SCROLL_Y
+# (var 0xF9) -- the water part uses src=0x83 each scroll frame to carry the whole
+# composited scene (background + sprites) forward. Without this the dynamic layer is
+# lost every scroll frame. Self-copies (src page == dst page) are a no-op.
 CopyPage:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    mov     d1, d3                  # dstId
-    mov     d0, d2                  # srcId
-    mov     d3, d0
+    mov     d0, d2                  # srcId (raw; keep for the scroll-flag test)
+    mov     d1, d0                  # dstId
     call    GetPagePtr, 0, 0
-    mov     a0, a3                  # a3 = dst
-    # Resolve the source page id. srcId >= 0xFE (0xFE front / 0xFF back) is used
-    # UNMASKED; a normal page id has the 0x40 bit stripped. (The 0xBF-masked form
-    # with bit 7 set selects vertical-scroll copy mode, which the intro never uses;
-    # match the KN5000 by treating 0xFE/0xFF specially before masking.)
+    mov     a0, a3                  # a3 = dst base
+    mov     d2, d0                  # srcId
+    call    GetPagePtr, 0, 0
+    mov     a0, a2                  # a2 = src base
+    # self-copy guard (matches the oracle's early returns)
+    mov     a2, d0
+    mov     a3, d1
+    cmp     d0, d1
+    beq     cp_ret
+    # vscroll = (srcId < 0xFE && srcId & 0x80) ? (s16)var[0xF9] : 0
+    clr     d3
     mov     d2, d0
     and     0xff, d0
-    cmp     0xff, d0
-    beq     cp_src
     cmp     0xfe, d0
-    beq     cp_src
-    and     0xbf, d0                # normal page: strip the 0x40 bit
-cp_src:
-    call    GetPagePtr, 0, 0
-    mov     a0, a2                  # a2 = src
+    bge     cp_novscroll            # 0xFE/0xFF: no scroll
+    and     0x80, d0
+    beq     cp_novscroll
+    mov     0xF9, d0
+    call    ReadVar, 0, 0           # d0 = var[0xF9]
+    exth    d0                      # sign-extend to s32
+    mov     d0, d3                  # d3 = vscroll
+cp_novscroll:
+    cmp     0, d3
+    bne     cp_scrolled
+    # plain full-page copy
     mov     PAGE_SIZE, d2
 cp_loop:
     movbu   (a2), d0
@@ -337,6 +334,64 @@ cp_loop:
     inc     a3
     add     -1, d2
     bne     cp_loop
+    bra     cp_ret
+cp_scrolled:
+    # abs(vscroll) in d2, clamped to 199; direction kept in d3 (sign)
+    mov     d3, d2
+    cmp     0, d3
+    bge     cp_absclamp
+    clr     d0
+    sub     d2, d0                  # -vscroll
+    mov     d0, d2
+cp_absclamp:
+    cmp     199, d2
+    ble     cp_off
+    mov     199, d2
+cp_off:
+    # off_bytes = abs*320 -> a1
+    mov     d2, d0
+    asl     8, d0                   # abs*256
+    mov     d2, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0                  # abs*64
+    add     a0, d0                  # abs*320
+    mov     d0, a1                  # a1 = off_bytes
+    # n_bytes = (200-abs)*320 -> d2
+    mov     200, d0
+    sub     d2, d0                  # n_rows
+    mov     d0, d1
+    asl     8, d1                   # n_rows*256
+    mov     d0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0
+    add     a0, a0                  # n_rows*64
+    add     a0, d1                  # n_rows*320
+    mov     d1, d2                  # d2 = n_bytes
+    # vscroll >= 0 shifts content DOWN (dst += off); < 0 shifts UP (src += off)
+    cmp     0, d3
+    blt     cp_up
+    add     a1, a3
+    bra     cp_scopy
+cp_up:
+    add     a1, a2
+cp_scopy:
+    cmp     0, d2
+    beq     cp_ret
+cp_sloop:
+    movbu   (a2), d0
+    movbu   d0, (a3)
+    inc     a2
+    inc     a3
+    add     -1, d2
+    bne     cp_sloop
+cp_ret:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
@@ -415,23 +470,47 @@ rig_nu:
     or      0x80, d2
 rig_nf:
     # --- fold the held keybed notes into the mask (polyphonic; see vm.inc) ---
-    # For each of the 128 voice slots whose held-bit is set, read its MIDI note and OR the
-    # matching AW mask bit. Note <= 60 (bass range + C4) = action; F5 left, A5 down, C6
-    # right, Ab5/Bb5 up. Keyboard and panel share d2, so holding either (or both) works.
-    mov     TG_NODE_BASE, a2        # a2 = voice node pointer
-    clr     d3                      # d3 = slot index 0..127
-rkb_loop:
-    mov     TG_HELD_MASK, a3
-    mov     d3, d0
-    lsr     3, d0                   # byte = slot >> 3
+    # Note <= 60 (bass range + C4) = action; F5 left, A5 down, C6 right, Ab5/Bb5 up.
+    # A held slot's note is read only once its held bit has survived a full VM frame
+    # (per-slot debounce), which skips the 1-frame note-on allocation transient (note 0
+    # or a stale note). Keyboard and panel share d2, so holding either (or both) works.
+    # Pass A: STABLE[i] = HELD[i] & PREV[i]; PREV[i] = HELD[i].  (i = 0..15)
+    clr     d0
+rkb_pa:
+    mov     TG_HELD_MASK, a2
+    add     d0, a2
+    movbu   (a2), d1                # cur = held bitmap byte
+    mov     KBD_PREV_MASK, a3
     add     d0, a3
-    movbu   (a3), d0                # held-bitmap byte for this slot's group
-    mov     d3, d1
-    and     7, d1                   # bit = slot & 7
-    lsr     d1, d0
-    and     1, d0
-    beq     rkb_next                # slot not held
+    movbu   (a3), d3                # prev
+    movbu   d1, (a3)                # PREV[i] = cur
+    and     d1, d3                  # d3 = cur & prev
+    mov     KBD_STABLE, a2
+    add     d0, a2
+    movbu   d3, (a2)                # STABLE[i]
+    inc     d0
+    cmp     16, d0
+    bne     rkb_pa
+    # Pass B: classify the note of every slot whose STABLE bit is set.
+    clr     d3                      # keybed mask accumulator
+    clr     d0
+    mov     d0, (0, sp)             # slot = 0
+    mov     TG_NODE_BASE, a2        # voice node pointer
+rkb_pb:
+    mov     (0, sp), d0             # slot
+    mov     d0, d1
+    lsr     3, d1                   # byte = slot >> 3
+    mov     KBD_STABLE, a3
+    add     d1, a3
+    movbu   (a3), d1                # STABLE byte
+    mov     (0, sp), d0
+    and     7, d0                   # bit = slot & 7
+    lsr     d0, d1                  # STABLE >> bit
+    and     1, d1
+    beq     rkb_next                # slot not stably held
     movbu   (TG_NODE_NOTE, a2), d0  # MIDI note of this held voice
+    cmp     0, d0
+    beq     rkb_next                # ignore an unallocated slot (note 0)
     cmp     KBD_ACTION_MAX, d0
     ble     rkb_act                 # note <= 60 -> action (bass range + C4)
     cmp     KBD_LEFT_NOTE, d0
@@ -446,24 +525,27 @@ rkb_loop:
     beq     rkb_right
     bra     rkb_next
 rkb_act:
-    or      0x80, d2
+    or      0x80, d3
     bra     rkb_next
 rkb_left:
-    or      2, d2
+    or      2, d3
     bra     rkb_next
 rkb_up:
-    or      8, d2
+    or      8, d3
     bra     rkb_next
 rkb_down:
-    or      4, d2
+    or      4, d3
     bra     rkb_next
 rkb_right:
-    or      1, d2
+    or      1, d3
 rkb_next:
     add     TG_NODE_STRIDE, a2
-    inc     d3
-    cmp     128, d3
-    bne     rkb_loop
+    mov     (0, sp), d0
+    inc     d0
+    mov     d0, (0, sp)
+    cmp     128, d0
+    bne     rkb_pb
+    or      d3, d2                  # fold keybed mask into the panel mask
     # d2 = panel mask | keybed mask; now derive the hero variables
     # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
     mov     VAR_HERO_LR, d0
