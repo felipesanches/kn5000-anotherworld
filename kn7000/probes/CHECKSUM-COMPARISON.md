@@ -121,4 +121,12 @@ shift of 8 px**. `DrawString` (vm.s) computed `x = 8*(col-1)` (`add -1,d1; asl 3
 but the original VM uses `x = 8*col` (Fabien's drawChar indexes the page at
 `col*8`; rustyworld likewise). The `-1` shifted every string 8 px (one column)
 left. Fix: drop the `add -1,d1`. This fixes the remaining lab/text-scene ranges
-(1120–1897) that use DRAW_STRING.
+(1120–1897) that use DRAW_STRING. (17% → 93.6%.)
+
+### Third bug: DrawChar clips the rightmost column/row
+
+After the DRAW_STRING fix the only residue (3 ranges, 167 frames) was 4–18 px
+clustered at the right edge (x≈312–317). `DrawChar` rejected `x >= 312` and
+`y >= 192`, but a glyph at col 39 (x=312) fits exactly in [312,319] and one at
+y=192 fits in [192,199] — the original clips `col <= 39`, `y <= 192`. Fix:
+`cmp 312`→`cmp 313`, `cmp 192`→`cmp 193` (allow x≤312, y≤192).

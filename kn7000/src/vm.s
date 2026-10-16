@@ -712,14 +712,14 @@ DrawChar:
     mov     d2, (0, sp)             # colour (no calls here, so (0,sp) is safe)
     mov     d3, (4, sp)             # char
     exth    d0
-    cmp     0, d0                   # clip x to [0, 311]
+    cmp     0, d0                   # clip x to [0, 312] (col 0..39; glyph fits 8 px)
     blt     dchr_ret
-    cmp     312, d0
+    cmp     313, d0
     bge     dchr_ret
     exth    d1
-    cmp     0, d1                   # clip y to [0, 191]
+    cmp     0, d1                   # clip y to [0, 192] (glyph fits 8 px into 200)
     blt     dchr_ret
-    cmp     192, d1
+    cmp     193, d1
     bge     dchr_ret
     mov     (4, sp), d2             # char -> font pointer
     and     0xff, d2
