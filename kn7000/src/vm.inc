@@ -91,3 +91,10 @@
 .equ DRAW_BUDGET_MAX, 4000
 .equ DRAW_DEPTH,      0x44080074     # polygon-hierarchy recursion depth (stack guard)
 .equ DRAW_DEPTH_MAX,  12             # AW hierarchies are shallow; cap to protect the stack
+
+# VM instruction trace (for diffing against the vm-gui reference). Each entry is 8
+# bytes: frame(u16)@0, thread(u8)@2, opcode(u8)@3, pc(u16)@4. Dumped by probes/awtrace.lua.
+.equ TRACE_COUNT,     0x44080078     # entries logged so far
+.equ FRAME_NO,        0x4408007C     # current VM frame (tick) number
+.equ TRACE_BUF,       0x44800000     # 8 bytes/entry
+.equ TRACE_MAX,       40000

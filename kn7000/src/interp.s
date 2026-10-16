@@ -139,6 +139,11 @@ ifp_loop:
 GameReset:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    clr     d0                      # reset the instruction trace
+    mov     TRACE_COUNT, a0
+    mov     d0, (a0)
+    mov     FRAME_NO, a0
+    mov     d0, (a0)
     call    VideoStart, 0, 0
     # zero 256 vars (512 bytes)
     mov     VM_VARIABLES, a2
@@ -327,6 +332,10 @@ nt_loop:
     call    CheckThreadRequests, 0, 0
     mov     0xFE, d0
     call    UpdateDisplay, 0, 0
+    mov     FRAME_NO, a2            # advance the VM frame (tick) number for the trace
+    movhu   (a2), d0
+    inc     d0
+    movhu   d0, (a2)
     mov     30, d0                  # ~30 ms/frame: paces the VM and yields to firmware
     mov     DLY_TSK, a1
     calls   (a1)
@@ -401,6 +410,25 @@ ExecuteInstruction:
     add     d0, a2
     movbu   (a2), d1                # d1 = opcode
     inc     a2
+    # --- VM instruction trace: (frame u16, thread u8, opcode u8, pc u16) ---
+    mov     (TRACE_COUNT), d0
+    cmp     TRACE_MAX, d0
+    bge     ei_notrace
+    mov     d0, d3
+    asl     3, d3
+    mov     TRACE_BUF, a3
+    add     d3, a3
+    movhu   (FRAME_NO), d3
+    movhu   d3, (a3)
+    movbu   (CURRENT_THREAD), d3
+    movbu   d3, (2, a3)
+    movbu   d1, (3, a3)
+    movhu   (VM_PC), d3
+    movhu   d3, (4, a3)
+    inc     d0
+    mov     TRACE_COUNT, a3
+    mov     d0, (a3)
+ei_notrace:
     # --- 0x80: VIDEO (cinematic, CUR_VIDEO_1) ---
     mov     d1, d0
     and     0x80, d0
@@ -727,9 +755,10 @@ cj_byte:
     mov     d2, d0                  # a = c (zero-extended)
 cj_have_a:
     mov     d0, d2                  # d2 = a (RHS)
-    # fetch target
+    # fetch target (big-endian), advancing past it so the fall-through PC is correct
     movbu   (a2), d0
     movbu   (1, a2), d1
+    add     2, a2
     asl     8, d0
     or      d1, d0
     mov     d0, (4, sp)             # stash target
