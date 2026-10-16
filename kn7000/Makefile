@@ -38,6 +38,9 @@ card: build/BASEEXT.XAP
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID1.AW' $(RES_DIR)/resource-0x19.bin
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID2.AW' $(RES_DIR)/resource-0x11.bin
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWPAL.AW'  $(RES_DIR)/resource-0x17.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWBYTE2.AW' $(RES_DIR)/resource-0x1b.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID12.AW' $(RES_DIR)/resource-0x1c.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWPAL2.AW'  $(RES_DIR)/resource-0x1a.bin
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWFONT.AW'   $(FONT_DIR)/anotherworld_chargen.rom
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWSTRIDX.AW' $(FONT_DIR)/str_index.rom
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWSTRDAT.AW' $(FONT_DIR)/str_data.rom

@@ -121,16 +121,31 @@ ifp_loop:
     mov     0xE4, d0
     mov     0x14, d1
     call    WriteVar, 0, 0
-    # resource pointers = the fixed SD load addresses
+    # resource pointers for this part (video2 is shared by all parts)
+    movhu   (CURRENT_PART_ID), d0
+    cmp     0x3E82, d0
+    beq     ifp_part2
+    # part 0x3E81 (intro): the first preloaded resource region
     mov     AW_BYTECODE, a0
     mov     a0, (CUR_BYTECODE)
     mov     AW_VIDEO1, a0
     mov     a0, (CUR_VIDEO_DATA)
     mov     a0, (CUR_VIDEO_1)
-    mov     AW_VIDEO2, a0
-    mov     a0, (CUR_VIDEO_2)
     mov     AW_PALETTES, a0
     mov     a0, (CUR_PALETTES)
+    bra     ifp_vid2
+ifp_part2:
+    # part 0x3E82 (water): the second preloaded resource region
+    mov     AW2_BYTECODE, a0
+    mov     a0, (CUR_BYTECODE)
+    mov     AW2_VIDEO1, a0
+    mov     a0, (CUR_VIDEO_DATA)
+    mov     a0, (CUR_VIDEO_1)
+    mov     AW2_PALETTES, a0
+    mov     a0, (CUR_PALETTES)
+ifp_vid2:
+    mov     AW_VIDEO2, a0           # video2 (resource 0x11) shared by all parts
+    mov     a0, (CUR_VIDEO_2)
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
@@ -325,6 +340,40 @@ cp_loop:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
+# ReadInput: map the KN7000 keybed to the Another World fire button so the player
+# can skip the intro. The intro bytecode polls var[0xFE] (ACTION_MASK) and jumps to
+# the first playable part (0x3E82) when fire is pressed. We only drive input during
+# the intro; gameplay input mapping for the water part is a later step.
+# Source: the firmware's first voice-slot "key active" flag at 0x50149690 -- any held
+# keybed key sets it (0 while no key is down during the intro).
+ReadInput:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    movhu   (CURRENT_PART_ID), d0
+    cmp     0x3E81, d0              # intro only
+    bne     ri_ret
+    mov     0x50149690, a0
+    movhu   (a0), d0                # a keybed key is held?
+    cmp     0, d0
+    beq     ri_clear
+    mov     0xFA, d0               # var[0xFA] = 1  (HERO_ACTION)
+    mov     1, d1
+    call    WriteVar, 0, 0
+    mov     0xFE, d0               # var[0xFE] = 0x80 (HERO_ACTION_MASK = fire)
+    mov     0x80, d1
+    call    WriteVar, 0, 0
+    bra     ri_ret
+ri_clear:
+    mov     0xFA, d0
+    clr     d1
+    call    WriteVar, 0, 0
+    mov     0xFE, d0
+    clr     d1
+    call    WriteVar, 0, 0
+ri_ret:
+    ret     [d2,d3,a2,a3], 0x20
+
+# ================================================================================
 # NextThread: advance CURRENT_THREAD to the next active, unfrozen thread. When the
 # scan wraps past 63 it is end-of-frame: apply requested thread states/PCs and show
 # the front page. Loads the chosen thread's PC into VM_PC.
@@ -349,6 +398,17 @@ nt_loop:
     mov     30, d0                  # ~30 ms/frame: paces the VM and yields to firmware
     mov     DLY_TSK, a1
     calls   (a1)
+    call    ReadInput, 0, 0         # map the keybed to the fire button (intro skip)
+    # deferred part switch, requested by OpLoad (0x19 with id >= 0x3E80). The intro
+    # issues it at its end, or immediately when the player presses fire (skip).
+    mov     REQ_NEXT_PART, a2
+    movhu   (a2), d0
+    cmp     0, d0
+    beq     nt_noswitch
+    clr     d1
+    movhu   d1, (a2)                # clear the request
+    call    InitForPart, 0, 0       # d0 = partId: re-point resources + reset threads
+nt_noswitch:
     clr     d2
 nt_not_eof:
     # frozen?

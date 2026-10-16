@@ -91,6 +91,15 @@
 .equ AW_FONT_SZ,      768
 .equ AW_STRIDX_SZ,    2048
 .equ AW_STRDAT_SZ,    4096
+
+# Part 0x3E82 (water -- first playable) resources, preloaded at startup into their
+# own RAM region just past the intro's. video2 (0x11) is shared with the intro.
+.equ AW2_BYTECODE,    0x444B0000     # resource 0x1B, 20810 bytes
+.equ AW2_VIDEO1,      0x444C0000     # resource 0x1C, 57510 bytes
+.equ AW2_PALETTES,    0x444D0000     # resource 0x1A, 2048 bytes
+.equ AW2_BYTECODE_SZ, 20810
+.equ AW2_VIDEO1_SZ,   57510
+.equ AW2_PALETTES_SZ, 2048
 .equ AW_LOADED_FLAG,  0x44080020     # set to 0x600D once all four are loaded
 
 .equ DRAW_BUDGET,     0x44080070     # per-VIDEO-op polygon budget (anti-hang guard)

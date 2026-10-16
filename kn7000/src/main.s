@@ -328,6 +328,89 @@ lgd_c6:
     mov     (0x18, sp), a0
     mov     FCLOSE, a3
     calls   (a3)
+    # --- part 0x3E82 (water) bytecode (resource 0x1B) ---
+    mov     path_byte2, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_vid12
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW2_BYTECODE_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW2_BYTECODE, a1
+lgd_cb2:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_cb2
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- part 0x3E82 video1 (resource 0x1C) ---
+lgd_vid12:
+    mov     path_vid12, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_pal2
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW2_VIDEO1_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW2_VIDEO1, a1
+lgd_cv12:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_cv12
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- part 0x3E82 palette (resource 0x1A) ---
+lgd_pal2:
+    mov     path_pal2, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_flag
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW2_PALETTES_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW2_PALETTES, a1
+lgd_cp2:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_cp2
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
 lgd_flag:
     mov     0x600D, d0
     mov     AW_LOADED_FLAG, a0
@@ -410,6 +493,15 @@ path_stridx:
     .align 2
 path_strdat:
     .asciz "C:\TECHNICS\DATA\AWSTRDAT.AW"
+    .align 2
+path_byte2:
+    .asciz "C:\TECHNICS\DATA\AWBYTE2.AW"
+    .align 2
+path_vid12:
+    .asciz "C:\TECHNICS\DATA\AWVID12.AW"
+    .align 2
+path_pal2:
+    .asciz "C:\TECHNICS\DATA\AWPAL2.AW"
     .align 2
 aw_mode:
     .asciz "rb"
