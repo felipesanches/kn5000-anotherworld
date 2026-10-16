@@ -23,13 +23,13 @@ fp_loop:
     inc     a2
     add     -1, d2
     bne     fp_loop
-    ret     [d2,d3,a2,a3], 8
+    ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================
 # DrawPoint: d0 = x, d1 = y, colour in DRAW_COLOR. page[y*320 + x] = colour.
 DrawPoint:
     movm    [d2,d3,a2,a3], (sp)
-    add     -8, sp
+    add     -0x10, sp
     mov     d1, d2
     asl     8, d2                   # y*256
     mov     d1, a2
@@ -44,7 +44,7 @@ DrawPoint:
     add     d2, a2
     movbu   (DRAW_COLOR), d0
     movbu   d0, (a2)
-    ret     [d2,d3,a2,a3], 8
+    ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
 # DrawSpanN: fill the current scanline (CUR_LINE) from min(X1,X2) to max(X1,X2).
@@ -81,7 +81,7 @@ ds_loop:
     inc     a2
     add     -1, d0
     bne     ds_loop
-    ret     [d2,d3,a2,a3], 8
+    ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================
 # CalcStep(a0 = &STEP, a1 = &p1, a2 = &p2): STEP = (p2.x - p1.x) * (0x4000/dy) * 4,
@@ -117,7 +117,7 @@ cs_dy_le_0:
     mul     d1, d0                  # d0 = dx * v (signed enough for our range)
     asl     2, d0                   # * 4
     mov     d0, (a3)                # STEP = dx*v*4
-    ret     [d2,d3,a2,a3], 0x10
+    ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
 # FillPolygon(d0 = cx, d1 = cy, colour in DRAW_COLOR): fill the polygon whose
@@ -321,4 +321,4 @@ poly_hzero:                         # POLY_H==0: advance edges once, next edge p
     bra     poly_raster
 
 poly_done:
-    ret     [d2,d3,a2,a3], 0x20
+    ret     [d2,d3,a2,a3], 0x30

@@ -27,7 +27,7 @@
 
 # ---- task ----------------------------------------------------------------------
 .equ TASK_ID,         10            # a free task slot (9, 10 unused by the firmware)
-.equ TASK_PRI,        3             # the firmware's task priority
+.equ TASK_PRI,        5             # below the firmware's priority 3, so we never starve it
 .equ TASK_STACK,      0x4000
 
 # ---- display: LCD frame, 640x240 RGB565, 1280 bytes/row ------------------------

@@ -56,7 +56,7 @@ StartTask:
     mov     STA_TSK, a1
     calls   (a1)
 st_done:
-    ret     [d2,d3,a2,a3], 0x10
+    ret     [d2,d3,a2,a3], 0x20
 
 # =================================================================================
 GameTask:
@@ -104,35 +104,39 @@ gi_clear:
     inc     a2
     add     -1, d2
     bne     gi_clear
-    # a diamond: bbox 100x100, 4 points around the perimeter
+    # A solid trapezoid, bbox 100x100. Another World orders a polygon's vertices by
+    # scanline pairs -- pt[0]=top-right, pt[1]=bottom-right, pt[2]=bottom-left,
+    # pt[3]=top-left -- so fillPolygon walks the right edge (pt0->pt1) against the
+    # left edge (pt3->pt2). This one is narrow at the top (x30..70) and widens to the
+    # full 100 at the bottom, exercising both edge slopes in opposite directions.
     mov     100, d0
     movhu   d0, (POLY_BBOX_W)
     movhu   d0, (POLY_BBOX_H)
     mov     4, d0
     movbu   d0, (POLY_NUM_POINTS)
     mov     POLY_POINTS, a0
-    mov     50, d0
-    movhu   d0, (a0)                # p0 = (50,0)
+    mov     70, d0
+    movhu   d0, (a0)                # p0 = (70,0)    top-right
     clr     d0
     movhu   d0, (2, a0)
     mov     100, d0
-    movhu   d0, (4, a0)             # p1 = (100,50)
-    mov     50, d0
+    movhu   d0, (4, a0)             # p1 = (100,100) bottom-right
+    mov     100, d0
     movhu   d0, (6, a0)
-    mov     50, d0
-    movhu   d0, (8, a0)             # p2 = (50,100)
+    clr     d0
+    movhu   d0, (8, a0)             # p2 = (0,100)   bottom-left
     mov     100, d0
     movhu   d0, (10, a0)
+    mov     30, d0
+    movhu   d0, (12, a0)            # p3 = (30,0)    top-left
     clr     d0
-    movhu   d0, (12, a0)            # p3 = (0,50)
-    mov     50, d0
     movhu   d0, (14, a0)
     mov     11, d0                  # colour index 11
     movbu   d0, (DRAW_COLOR)
     mov     160, d0                 # centre (160,100)
     mov     100, d1
     call    FillPolygon, 0, 0
-    ret     [d2,d3,a2,a3], 8
+    ret     [d2,d3,a2,a3], 0x18
 
 GameFrame:
     add     -8, sp
@@ -169,7 +173,7 @@ bp_px:
     mov     d0, a3
     add     -1, d3
     bne     bp_row
-    ret     [d2,d3,a2,a3], 0x10
+    ret     [d2,d3,a2,a3], 0x20
 
 # =================================================================================
     .align  4
