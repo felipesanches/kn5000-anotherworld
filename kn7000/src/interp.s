@@ -414,6 +414,57 @@ rig_nu:
     beq     rig_nf
     or      0x80, d2
 rig_nf:
+    # --- fold the held keybed notes into the mask (polyphonic; see vm.inc) ---
+    # For each of the 128 voice slots whose held-bit is set, read its MIDI note and OR the
+    # matching AW mask bit. Note <= 60 (bass range + C4) = action; F5 left, A5 down, C6
+    # right, Ab5/Bb5 up. Keyboard and panel share d2, so holding either (or both) works.
+    mov     TG_NODE_BASE, a2        # a2 = voice node pointer
+    clr     d3                      # d3 = slot index 0..127
+rkb_loop:
+    mov     TG_HELD_MASK, a3
+    mov     d3, d0
+    lsr     3, d0                   # byte = slot >> 3
+    add     d0, a3
+    movbu   (a3), d0                # held-bitmap byte for this slot's group
+    mov     d3, d1
+    and     7, d1                   # bit = slot & 7
+    lsr     d1, d0
+    and     1, d0
+    beq     rkb_next                # slot not held
+    movbu   (TG_NODE_NOTE, a2), d0  # MIDI note of this held voice
+    cmp     KBD_ACTION_MAX, d0
+    ble     rkb_act                 # note <= 60 -> action (bass range + C4)
+    cmp     KBD_LEFT_NOTE, d0
+    beq     rkb_left
+    cmp     KBD_UP_NOTE_A, d0
+    beq     rkb_up
+    cmp     KBD_UP_NOTE_B, d0
+    beq     rkb_up
+    cmp     KBD_DOWN_NOTE, d0
+    beq     rkb_down
+    cmp     KBD_RIGHT_NOTE, d0
+    beq     rkb_right
+    bra     rkb_next
+rkb_act:
+    or      0x80, d2
+    bra     rkb_next
+rkb_left:
+    or      2, d2
+    bra     rkb_next
+rkb_up:
+    or      8, d2
+    bra     rkb_next
+rkb_down:
+    or      4, d2
+    bra     rkb_next
+rkb_right:
+    or      1, d2
+rkb_next:
+    add     TG_NODE_STRIDE, a2
+    inc     d3
+    cmp     128, d3
+    bne     rkb_loop
+    # d2 = panel mask | keybed mask; now derive the hero variables
     # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
     mov     VAR_HERO_LR, d0
     mov     d2, d1

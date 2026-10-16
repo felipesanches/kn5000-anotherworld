@@ -151,3 +151,20 @@
 .equ VAR_HERO_POS_MASK, 0xFD         # OR of all held inputs' masks
 .equ VAR_HERO_ACTION,   0xFA         # fire button down -> 1
 .equ VAR_HERO_ACT_MASK, 0xFE         # POS_MASK (the button mask is already in it)
+
+# Keybed gameplay mapping (polyphonic held-note read; probes/PLUGIN-INPUT-INTERFACES.md).
+# The TG voice allocator keeps a 128-bit held-slot bitmap and, per slot, the MIDI note.
+# Verified in-game (probes/awkeyread.lua). Read each frame and OR'd into the panel mask,
+# so keyboard and panel both work and either source can supply diagonals / move+fire.
+.equ TG_HELD_MASK,    0x500D288C     # 16 bytes: bit per voice slot, set while its key is held
+.equ TG_NODE_BASE,    0x500D1278     # voice node array; MIDI note at +0x0C, stride 0x2C
+.equ TG_NODE_STRIDE,  0x2C
+.equ TG_NODE_NOTE,    0x0C
+# Note numbers (C4 = 60). Any note <= C4 is ACTION -- the whole bass/left-hand range plus
+# C4 itself. The right-hand cluster is the D-pad; Ab5 and Bb5 both map to UP.
+.equ KBD_ACTION_MAX,  60             # <= 60 (bass range + C4) -> action
+.equ KBD_LEFT_NOTE,   77             # F5
+.equ KBD_UP_NOTE_A,   80             # Ab5 (G#5)
+.equ KBD_UP_NOTE_B,   82             # Bb5 (A#5)
+.equ KBD_DOWN_NOTE,   81             # A5
+.equ KBD_RIGHT_NOTE,  84             # C6

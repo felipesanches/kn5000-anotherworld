@@ -98,10 +98,12 @@ feedback.
 
 ## Bottom line for the port
 
-- **Keybed gameplay is viable after all** — read held notes from `0x500D288C` +
-  `0x500D1278+slot*0x2C+0x0C`, map note (or note ranges) to directions/fire. Polyphonic,
-  so diagonals and move+fire come for free, and it honours the original "play from the
-  keybed" intent.
+- **Keybed gameplay is implemented** (ReadInput, part 0x3E82): held notes are read from
+  `0x500D288C` + `0x500D1278+slot*0x2C+0x0C` each frame and OR'd into the same mask the
+  panel feeds. Mapping: any note **<= 60** (C4 and the whole bass/left-hand range) =
+  action; **F5** left, **A5** down, **C6** right, **Ab5 or Bb5** up. Polyphonic, so
+  diagonals and move+fire work (verified in-game, `awkbdmap.lua`). The keybed also handles
+  same-instant presses better than the panel (the TG allocates both voices at once).
 - **Panel** already works and supports multiple buttons; no API change needed.
 - Neither needs a new exported helper; both are plain work-RAM polls a plug-in can do
   each `XapSlot0C` pass (or, as now, from the ride-along hook).
