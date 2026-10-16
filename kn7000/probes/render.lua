@@ -16,6 +16,9 @@ emu.register_periodic(function()
       sp:read_u32(0x44060000), sp:read_u32(S+0x2C), sp:read_u32(S+0x30), (function() local v=sp:read_u16(S+0x1A); if v>=0x8000 then v=v-0x10000 end return v end)()))
     L(string.format("VM: NUM=%d XMIN=%d XMAX=%d YMIN=%d YMAX=%d HLINEY=%d",
       sp:read_u8(S), s16(S+6),s16(S+8),s16(S+0xA),s16(S+0xC),s16(S+0xE)))
+    L(string.format("points = (%d,%d)(%d,%d)(%d,%d)(%d,%d)  X1init region: see STEP",
+      sp:read_u16(S+0x40),sp:read_u16(S+0x42),sp:read_u16(S+0x44),sp:read_u16(S+0x46),
+      sp:read_u16(S+0x48),sp:read_u16(S+0x4A),sp:read_u16(S+0x4C),sp:read_u16(S+0x4E)))
     local nz=0; for i=0,63999 do if sp:read_u8(0x44100000+i)~=0 then nz=nz+1 end end
     L("page-0 non-zero bytes: "..nz)
     for y=0,199,8 do
