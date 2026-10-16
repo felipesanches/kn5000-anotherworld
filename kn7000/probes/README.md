@@ -28,6 +28,8 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `awvoices.lua`                                | does one key sound more than one note (arranger chord)?     | no -- one key = one voice, correct note (C2..C6 -> 36..84). Rules out harmony/split contamination |
 | `awalloc.lua`                                 | is a slot's note correct the frame it appears?              | **yes** at VM-frame granularity (APPEAR+0 note already right) -- the 'stale note' was sub-frame, never sampled by ReadInput |
 | `awcancel.lua`                                | diagonals kept, opposing pairs cancelled?                   | **yes** -- F5+A5 -> left+down (FD=06); F5+C6 and Ab5+A5 -> neutral (switch-lag fix) |
+| `awlatency.lua`                               | how fast does a key press/release reach the mask?           | press ~17 ms, release ~50 ms -- the slow release is the 'extra kick' on a direction change |
+| `awgone.lua`                                  | is there a faster release signal than the sustain mask?     | no -- the gone mask 0x500D287C never sets for these voices; release stays ~50 ms |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can

@@ -36,8 +36,17 @@ worse.
   untouched — verified: F5+A5 → left+down (`FD=06`), F5+C6 → neutral, Ab5+A5 → neutral
   (`awcancel.lua`).
 
-**Residual.** The ~1-frame firmware input latency itself can't be removed from a
-ride-along module; input is correct but ~30 ms delayed, like any frame-sampled input.
+**Residual — the one remaining oddity ("an extra kick on direction change").** Measured
+(`awlatency.lua`): a press appears in the held mask in **~17 ms**, but a release takes
+**~50 ms** (~1.5 game frames) to clear — the firmware's note-off is slower than its
+note-on. So after kicking in one direction, that direction lingers ~1-2 frames after you
+let go, which reads as one extra "kick" just as you press the next direction. There is no
+faster release signal exposed: the "gone" mask `0x500D287C` never sets for these voices
+and the voice node enters release at the same ~50 ms, not sooner (`awgone.lua`); and the
+module can't hurry the firmware's note-off without yielding another whole frame, which
+would slow the game. It is a ~1-frame artifact on direction changes, not a wrong
+direction, and there is no clean fix that preserves diagonals (a switch like up->left
+can't be told apart from a deliberate up+left diagonal at the moment the new key appears).
 
 ## Bug 2 — dynamic elements periodically disappear (background stays)
 
