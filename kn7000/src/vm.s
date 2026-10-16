@@ -1,17 +1,28 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# Another World VM -- the polygon rasterizer, ported from the KN5000 TLCS-900
-# source (src/another_world_vm.asm) to the MN10300. This is the first VM component;
-# the bytecode interpreter follows. The algorithm (a convex-polygon scanline fill
-# walking two edges in 16.16 fixed point) and the variable names match the KN5000
-# version so the two can be read together.
+# Another World VM -- the polygon pipeline, ported from the KN5000 TLCS-900 source
+# (another_world_vm.asm) to the MN10300: the recursive polygon-hierarchy reader, the
+# vertex reader (with zoom scaling), and the convex-polygon scanline rasterizer that
+# walks two edges in 16.16 fixed point. Variable names mirror the KN5000 version.
 #
-# Signed 16-bit values are held in d-registers and sign-extended with `exth` where
-# a comparison or multiply needs the full 32 bits.
+# Convention: d0,d1,a0,a1 caller-saved args/scratch; d2,d3,a2,a3 callee-saved.
+# ret adj = locals + 0x10 (pops locals AND the four movm-saved registers). Signed
+# 16-bit values are sign-extended with `exth` before a comparison/multiply.
 
 # ================================================================================
-# FillPage(d0 = colour): memset the current page to a colour index.
+# Scale(d0 = byte) -> d0 = (byte * CUR_ZOOM) >> 6. Zoom scaling for bbox/vertices.
+Scale:
+    movm    [a2,a3], (sp)
+    add     -8, sp
+    and     0xff, d0
+    movhu   (CUR_ZOOM), d1
+    mulu    d1, d0                  # product < 2^24, fits in d0
+    lsr     6, d0
+    ret     [a2,a3], 0x10
+
+# ================================================================================
+# FillPage(d0 = colour): memset CUR_PAGE to a colour index.
 FillPage:
     movm    [d2,d3,a2,a3], (sp)
     add     -8, sp
@@ -26,29 +37,43 @@ fp_loop:
     ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================
-# DrawPoint: d0 = x, d1 = y, colour in DRAW_COLOR. page[y*320 + x] = colour.
+# DrawPoint(d0 = x, d1 = y): CUR_PAGE[y*320 + x] = DRAW_COLOR. Clipped to the page
+# (the KN5000 source does not clip; we do, to protect the scratch RAM from stray
+# off-screen "point" polygons -- on-screen output is identical).
 DrawPoint:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    mov     d1, d2
-    asl     8, d2                   # y*256
-    mov     d1, a2
+    mov     d0, d2                  # x
+    exth    d2
+    cmp     0, d2
+    blt     dp_ret
+    cmp     320, d2
+    bge     dp_ret
+    mov     d1, d3                  # y
+    exth    d3
+    cmp     0, d3
+    blt     dp_ret
+    cmp     200, d3
+    bge     dp_ret
+    mov     d3, d0                  # y*320
+    asl     8, d0                   # y*256
+    mov     d3, a2
     add     a2, a2
     add     a2, a2
     add     a2, a2
     add     a2, a2
     add     a2, a2                  # a2 = y*64
-    add     a2, d2                  # d2 = y*320
-    add     d0, d2
+    add     a2, d0                  # d0 = y*320
+    add     d2, d0                  # + x
     mov     (CUR_PAGE), a2
-    add     d2, a2
+    add     d0, a2
     movbu   (DRAW_COLOR), d0
     movbu   d0, (a2)
+dp_ret:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
-# DrawSpanN: fill the current scanline (CUR_LINE) from min(X1,X2) to max(X1,X2).
-# Colour in DRAW_COLOR. (The "N" line routine: a flat colour span.)
+# DrawSpanN: flat-colour span on CUR_LINE from min(X1,X2) to max(X1,X2), DRAW_COLOR.
 DrawSpanN:
     movm    [d2,d3,a2,a3], (sp)
     add     -8, sp
@@ -56,36 +81,121 @@ DrawSpanN:
     exth    d0
     movhu   (X2), d1
     exth    d1
-    cmp     d1, d0                  # xmin = min(X1,X2)
-    ble     ds_min_ok
+    cmp     d1, d0
+    ble     dn_min
     mov     d1, d2
-    bra     ds_have_min
-ds_min_ok:
-    mov     d0, d2                  # d2 = xmin
-ds_have_min:
+    bra     dn_hmin
+dn_min:
+    mov     d0, d2                  # xmin
+dn_hmin:
     movhu   (X1), d0
     exth    d0
     movhu   (X2), d1
     exth    d1
-    cmp     d1, d0                  # xmax = max(X1,X2)
-    bge     ds_max_ok
+    cmp     d1, d0
+    bge     dn_max
     mov     d1, d0
-ds_max_ok:
-    sub     d2, d0                  # d0 = xmax - xmin
-    add     1, d0                   # inclusive span width
+dn_max:
+    sub     d2, d0
+    add     1, d0                   # inclusive width
     mov     (CUR_LINE), a2
-    add     d2, a2                  # a2 = CUR_LINE + xmin
+    add     d2, a2
     movbu   (DRAW_COLOR), d1
-ds_loop:
+dn_loop:
     movbu   d1, (a2)
     inc     a2
     add     -1, d0
-    bne     ds_loop
+    bne     dn_loop
+    ret     [d2,d3,a2,a3], 0x18
+
+# ================================================================================
+# DrawSpanP: copy a span from PAGE_BITMAP_0 to CUR_LINE (drawLineP: "transparent to
+# the background" segments copy the backdrop page through).
+DrawSpanP:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -8, sp
+    movhu   (X1), d0
+    exth    d0
+    movhu   (X2), d1
+    exth    d1
+    cmp     d1, d0
+    ble     dpn_min
+    mov     d1, d2
+    bra     dpn_hmin
+dpn_min:
+    mov     d0, d2
+dpn_hmin:
+    movhu   (X1), d0
+    exth    d0
+    movhu   (X2), d1
+    exth    d1
+    cmp     d1, d0
+    bge     dpn_max
+    mov     d1, d0
+dpn_max:
+    sub     d2, d0
+    add     1, d0
+    mov     d0, d3                  # width
+    mov     (CUR_LINE), a3
+    add     d2, a3                  # dst = CUR_LINE + xmin
+    movhu   (HLINEY), d0
+    exth    d0
+    mov     320, d1
+    mul     d1, d0                  # HLINEY*320
+    mov     PAGE_BITMAP_0, a2
+    add     d0, a2
+    add     d2, a2                  # src = page0 + HLINEY*320 + xmin
+dpn_loop:
+    movbu   (a2), d0
+    movbu   d0, (a3)
+    inc     a2
+    inc     a3
+    add     -1, d3
+    bne     dpn_loop
+    ret     [d2,d3,a2,a3], 0x18
+
+# ================================================================================
+# DrawSpanBlend: blend a span in place -- pixel = (pixel & 7) | 8 (half-bright).
+DrawSpanBlend:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -8, sp
+    movhu   (X1), d0
+    exth    d0
+    movhu   (X2), d1
+    exth    d1
+    cmp     d1, d0
+    ble     db_min
+    mov     d1, d2
+    bra     db_hmin
+db_min:
+    mov     d0, d2
+db_hmin:
+    movhu   (X1), d0
+    exth    d0
+    movhu   (X2), d1
+    exth    d1
+    cmp     d1, d0
+    bge     db_max
+    mov     d1, d0
+db_max:
+    sub     d2, d0
+    add     1, d0
+    mov     d0, d3
+    mov     (CUR_LINE), a3
+    add     d2, a3
+db_loop:
+    movbu   (a3), d0
+    and     7, d0
+    or      8, d0
+    movbu   d0, (a3)
+    inc     a3
+    add     -1, d3
+    bne     db_loop
     ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================
 # CalcStep(a0 = &STEP, a1 = &p1, a2 = &p2): STEP = (p2.x - p1.x) * (0x4000/dy) * 4,
-# dy = p2.y - p1.y, and sets POLY_H = dy. Fixed-point slope for one edge.
+# dy = p2.y - p1.y, and POLY_H = dy. Fixed-point slope for one edge.
 CalcStep:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
@@ -93,12 +203,12 @@ CalcStep:
     movhu   (a2), d0                # p2.x
     movhu   (a1), d1                # p1.x
     sub     d1, d0
-    exth    d0                      # d0 = dx (signed)
-    mov     d0, d3                  # keep dx
+    exth    d0                      # dx
+    mov     d0, d3
     movhu   (2, a2), d0             # p2.y
     movhu   (2, a1), d1             # p1.y
     sub     d1, d0
-    exth    d0                      # d0 = dy
+    exth    d0                      # dy
     movhu   d0, (POLY_H)
     mov     0x4000, d2              # v = 0x4000
     cmp     0, d0
@@ -114,21 +224,233 @@ cs_dy_le_0:
     mov     d2, d1                  # v
     exth    d0
     exth    d1
-    mul     d1, d0                  # d0 = dx * v (signed enough for our range)
+    mul     d1, d0                  # dx * v (signed)
     asl     2, d0                   # * 4
-    mov     d0, (a3)                # STEP = dx*v*4
+    mov     d0, (a3)                # STEP
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
-# FillPolygon(d0 = cx, d1 = cy, colour in DRAW_COLOR): fill the polygon whose
-# POLY_POINTS/BBOX are already set, centred at (cx, cy) in the current page.
-# Ported from fillPolygon. (The "point" fast-path and non-N line styles are left
-# for later; this draws flat-colour convex polygons, which is most of the game.)
+# ReadVertices(a0 = polygon data): read bbox_w, bbox_h, numPoints and the points
+# into the POLY_* fields, each coordinate scaled by CUR_ZOOM. Advances its own copy.
+ReadVertices:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     a0, a2                  # cursor
+    movbu   (a2), d0                # bbox_w
+    inc     a2
+    call    Scale, 0, 0
+    movhu   d0, (POLY_BBOX_W)
+    movbu   (a2), d0                # bbox_h
+    inc     a2
+    call    Scale, 0, 0
+    movhu   d0, (POLY_BBOX_H)
+    movbu   (a2), d0                # numPoints
+    inc     a2
+    mov     d0, d3
+    cmp     50, d3                  # cap to the POLY_POINTS capacity (50 pairs)
+    ble     rv_cap_ok
+    mov     50, d3
+rv_cap_ok:
+    movbu   d3, (POLY_NUM_POINTS)
+    cmp     0, d3                   # guard: num==0 would underflow the loop (~4 billion)
+    beq     rv_ret
+    mov     POLY_POINTS, a3         # dst
+rv_loop:
+    movbu   (a2), d0                # point.x
+    inc     a2
+    call    Scale, 0, 0
+    movhu   d0, (a3)
+    add     2, a3
+    movbu   (a2), d0                # point.y
+    inc     a2
+    call    Scale, 0, 0
+    movhu   d0, (a3)
+    add     2, a3
+    add     -1, d3
+    bne     rv_loop
+rv_ret:
+    ret     [d2,d3,a2,a3], 0x20
+
+# ================================================================================
+# ReadAndDrawPolygon(a0 = data, d0 = x, d1 = y, d2 = colour). If the first byte is
+# >= 0xC0 this is a leaf polygon: read its vertices and fill it. Otherwise it is a
+# hierarchy of child polygons offset from (x,y).
+ReadAndDrawPolygon:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     DRAW_BUDGET, a3         # anti-hang: bound total polygons per VIDEO op
+    mov     (a3), d3
+    inc     d3
+    mov     d3, (a3)
+    cmp     DRAW_BUDGET_MAX, d3
+    bgt     radp_done               # pathological tree (garbage data): bail out
+    mov     a0, a2                  # cursor
+    mov     d0, (0xc, sp)             # x
+    mov     d1, (4, sp)             # y
+    mov     d2, (8, sp)             # colour
+    movbu   (a2), d3                # marker
+    inc     a2
+    cmp     0xc0, d3
+    blt     radp_hier               # marker < 0xC0 -> hierarchy (values are 0..255)
+    # leaf: if the incoming colour has bit 7 set, colour = marker & 0x3F
+    mov     (8, sp), d0
+    and     0xff, d0
+    cmp     0x80, d0
+    blt     radp_color_ok
+    mov     d3, d0
+    and     0x3f, d0
+    mov     d0, (8, sp)
+radp_color_ok:
+    mov     a2, a0
+    call    ReadVertices, 0, 0
+    mov     (0xc, sp), d0
+    mov     (4, sp), d1
+    mov     (8, sp), d2
+    call    FillPolygon, 0, 0
+    bra     radp_done
+radp_hier:
+    mov     a2, a0
+    mov     (0xc, sp), d0
+    mov     (4, sp), d1
+    mov     (8, sp), d2
+    call    ReadAndDrawPolygonHierarchy, 0, 0
+radp_done:
+    ret     [d2,d3,a2,a3], 0x20
+
+# ================================================================================
+# ReadAndDrawPolygonHierarchy(a0 = data, d0 = x, d1 = y, d2 = colour): parent point
+# (x,y) is first offset by two scaled bytes, then each child polygon is read at
+# (offset, scaled dx, scaled dy, optional colour) and drawn recursively.
+# a2 holds the data cursor; it survives the recursive ReadAndDrawPolygon call because
+# that callee preserves a2.
+# locals: (0)=ptx (4)=pty (8)=childCount (0x10)=childOffset (0x14)=pox (0x18)=poy (0x1c)=childColor
+ReadAndDrawPolygonHierarchy:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    # recursion-depth guard: protect the task stack from deep/garbage hierarchies
+    mov     DRAW_DEPTH, a3
+    mov     (a3), d3
+    inc     d3
+    mov     d3, (a3)
+    cmp     DRAW_DEPTH_MAX, d3
+    bgt     rdh_exit                # too deep: unwind (depth is decremented at rdh_exit)
+    mov     a0, a2                  # cursor
+    # ptx = x - scale(*cursor++)
+    mov     d0, (0xc, sp)
+    mov     d1, (4, sp)
+    movbu   (a2), d0
+    inc     a2
+    call    Scale, 0, 0
+    mov     (0xc, sp), d1
+    sub     d0, d1
+    mov     d1, (0xc, sp)             # ptx
+    # pty = y - scale(*cursor++)
+    movbu   (a2), d0
+    inc     a2
+    call    Scale, 0, 0
+    mov     (4, sp), d1
+    sub     d0, d1
+    mov     d1, (4, sp)             # pty
+    # childCount = *cursor++ + 1
+    movbu   (a2), d0
+    inc     a2
+    add     1, d0
+    mov     d0, (8, sp)
+rdh_loop:
+    # childOffset = big-endian word ; cursor += 2
+    movbu   (a2), d0
+    movbu   (1, a2), d1
+    add     2, a2
+    asl     8, d0
+    or      d1, d0
+    mov     d0, (0x10, sp)
+    # pox = ptx + scale(*cursor++)
+    movbu   (a2), d0
+    inc     a2
+    call    Scale, 0, 0
+    mov     (0xc, sp), d1
+    add     d0, d1
+    mov     d1, (0x14, sp)
+    # poy = pty + scale(*cursor++)
+    movbu   (a2), d0
+    inc     a2
+    call    Scale, 0, 0
+    mov     (4, sp), d1
+    add     d0, d1
+    mov     d1, (0x18, sp)
+    # colour = 0xFF, unless offset bit 15 set -> colour = (*cursor) & 0x7F, cursor += 2
+    mov     0xff, d2
+    mov     (0x10, sp), d0
+    and     0x8000, d0
+    beq     rdh_nocolor
+    movbu   (a2), d2
+    and     0x7f, d2
+    add     2, a2
+rdh_nocolor:
+    mov     d2, (0x1c, sp)
+    # childData = CUR_VIDEO_DATA + (offset & 0x7FFF) * 2
+    mov     (0x10, sp), d0
+    and     0x7fff, d0
+    asl     1, d0
+    mov     (CUR_VIDEO_DATA), a0
+    add     d0, a0
+    mov     (0x14, sp), d0          # pox
+    mov     (0x18, sp), d1          # poy
+    mov     (0x1c, sp), d2          # colour
+    call    ReadAndDrawPolygon, 0, 0
+    mov     (8, sp), d0             # --childCount
+    add     -1, d0
+    mov     d0, (8, sp)
+    bne     rdh_loop
+rdh_exit:
+    mov     DRAW_DEPTH, a3          # leaving this hierarchy level
+    mov     (a3), d3
+    add     -1, d3
+    mov     d3, (a3)
+    ret     [d2,d3,a2,a3], 0x30
+
+# ================================================================================
+# FillPolygon(d0 = x/cx, d1 = y/cy, d2 = colour): fill the polygon in POLY_* at the
+# centre (cx,cy) on CUR_PAGE_1. Selects the span routine from the colour, handles the
+# single-point fast path, then rasterizes edge pairs.
 FillPolygon:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
     mov     d0, (0x10, sp)          # cx
     mov     d1, (0x14, sp)          # cy
+    mov     (CUR_PAGE_1), a0        # draw to the current page
+    mov     a0, (CUR_PAGE)
+    and     0xff, d2
+    mov     d2, d0
+    movbu   d0, (DRAW_COLOR)
+    # draw function: ==0x10 blend, >0x10 copy (P), else flat (N). colour is 0..0x7F.
+    cmp     0x10, d2
+    beq     fp_blend
+    bgt     fp_lineP
+    clr     d0
+    bra     fp_setfunc
+fp_blend:
+    mov     2, d0
+    bra     fp_setfunc
+fp_lineP:
+    mov     1, d0
+fp_setfunc:
+    movbu   d0, (DRAW_FUNC)
+    # point fast path: bbox_w == 0 && bbox_h == 1 && numPoints == 4
+    movhu   (POLY_BBOX_W), d0
+    cmp     0, d0
+    bne     fp_poly
+    movhu   (POLY_BBOX_H), d0
+    cmp     1, d0
+    bne     fp_poly
+    movbu   (POLY_NUM_POINTS), d0
+    cmp     4, d0
+    bne     fp_poly
+    mov     (0x10, sp), d0          # cx
+    mov     (0x14, sp), d1          # cy
+    call    DrawPoint, 0, 0
+    bra     poly_done
+fp_poly:
     # xmin = cx - bbox_w/2 ; xmax = cx + bbox_w/2
     movhu   (POLY_BBOX_W), d2
     lsr     1, d2
@@ -147,7 +469,7 @@ FillPolygon:
     mov     (0x14, sp), d0
     add     d2, d0
     movhu   d0, (POLY_YMAX)
-    # clip whole polygon: if xmin>=320 || xmax<0 || ymin>=200 || ymax<0 return
+    # clip whole polygon
     movhu   (POLY_XMIN), d0
     exth    d0
     cmp     320, d0
@@ -167,13 +489,13 @@ FillPolygon:
     # HLINEY = ymin
     movhu   (POLY_YMIN), d0
     movhu   d0, (HLINEY)
-    # i = &points[0]; j = &points[num-1]
-    mov     POLY_POINTS, a2         # a2 = i
+    # i = &points[0] ; j = &points[num-1]
+    mov     POLY_POINTS, a2
     movbu   (POLY_NUM_POINTS), d0
     add     -1, d0
     asl     2, d0
     mov     POLY_POINTS, a3
-    add     d0, a3                  # a3 = j
+    add     d0, a3
     # x2 = points[i].x + xmin ; x1 = points[j].x + xmin
     movhu   (a2), d0
     movhu   (POLY_XMIN), d1
@@ -182,11 +504,11 @@ FillPolygon:
     movhu   (a3), d0
     add     d1, d0
     movhu   d0, (X1)
-    add     4, a2                   # i++
-    add     -4, a3                  # j--
-    mov     a2, (0x18, sp)          # save i
-    mov     a3, (0x1c, sp)          # save j
-    # cpt1 = X1<<16 ; cpt2 = X2<<16
+    add     4, a2
+    add     -4, a3
+    mov     a2, (0x18, sp)          # i
+    mov     a3, (0x1c, sp)          # j
+    # cpt1 = X1 << 16 ; cpt2 = X2 << 16
     movhu   (X1), d0
     exth    d0
     asl     16, d0
@@ -197,30 +519,29 @@ FillPolygon:
     mov     d0, (CPT2)
 
 poly_raster:
-    # num -= 2 ; if num==0 done
     movbu   (POLY_NUM_POINTS), d0
     add     -2, d0
+    cmp     0, d0                   # stop on <= 0 (signed): terminates for odd/garbage
+    ble     poly_done               # counts too, not just the exact-zero even case
     movbu   d0, (POLY_NUM_POINTS)
-    cmp     0, d0
-    beq     poly_done
     # step1 = CalcStep(&STEP1, points[j+1], points[j])
-    mov     (0x1c, sp), a3          # j
+    mov     (0x1c, sp), a3
     mov     STEP1, a0
     mov     a3, a1
-    add     4, a1                   # j+1
-    mov     a3, a2                  # j
+    add     4, a1
+    mov     a3, a2
     call    CalcStep, 0, 0
     # step2 = CalcStep(&STEP2, points[i-1], points[i])
-    mov     (0x18, sp), a2          # i
+    mov     (0x18, sp), a2
     mov     STEP2, a0
     mov     a2, a1
-    add     -4, a1                  # i-1
+    add     -4, a1
     call    CalcStep, 0, 0
-    # CUR_LINE = CUR_PAGE + HLINEY*320  (signed)
+    # CUR_LINE = CUR_PAGE + HLINEY*320
     movhu   (HLINEY), d0
     exth    d0
     mov     320, d1
-    mul     d1, d0                  # HLINEY*320 (signed via two's complement; ok)
+    mul     d1, d0
     mov     (CUR_PAGE), a2
     add     d0, a2
     mov     a2, (CUR_LINE)
@@ -240,7 +561,6 @@ poly_raster:
     and     0xffff0000, d0
     or      0x8000, d0
     mov     d0, (CPT2)
-    # if POLY_H == 0 -> still advance the edges once
     movhu   (POLY_H), d0
     exth    d0
     cmp     0, d0
@@ -250,14 +570,13 @@ poly_hloop:
     movhu   (HLINEY), d0
     exth    d0
     cmp     0, d0
-    blt     poly_after_draw         # HLINEY < 0: skip drawing this line
+    blt     poly_after_draw
     mov     (CPT1), d0
     lsr     16, d0
     movhu   d0, (X1)
     mov     (CPT2), d0
     lsr     16, d0
     movhu   d0, (X2)
-    # if X1<320 && X2>=0
     movhu   (X1), d0
     exth    d0
     cmp     320, d0
@@ -266,42 +585,53 @@ poly_hloop:
     exth    d0
     cmp     0, d0
     blt     poly_after_draw
-    movhu   (X1), d0                # clamp X1 >= 0
+    movhu   (X1), d0
     exth    d0
     cmp     0, d0
     bge     poly_x1ok
     clr     d0
     movhu   d0, (X1)
 poly_x1ok:
-    movhu   (X2), d0                # clamp X2 <= 319
+    movhu   (X2), d0
     exth    d0
     cmp     319, d0
     ble     poly_x2ok
     mov     319, d0
     movhu   d0, (X2)
 poly_x2ok:
+    movbu   (DRAW_FUNC), d0
+    cmp     0, d0
+    bne     pf_not0
     call    DrawSpanN, 0, 0
+    bra     poly_after_draw
+pf_not0:
+    cmp     2, d0
+    bne     pf_useP
+    call    DrawSpanBlend, 0, 0
+    bra     poly_after_draw
+pf_useP:
+    call    DrawSpanP, 0, 0
 
 poly_after_draw:
-    mov     (STEP1), d0             # cpt1 += step1
+    mov     (STEP1), d0
     mov     (CPT1), d1
     add     d0, d1
     mov     d1, (CPT1)
-    mov     (STEP2), d0             # cpt2 += step2
+    mov     (STEP2), d0
     mov     (CPT2), d1
     add     d0, d1
     mov     d1, (CPT2)
-    movhu   (HLINEY), d0            # HLINEY++
+    movhu   (HLINEY), d0
     add     1, d0
     movhu   d0, (HLINEY)
-    mov     (CUR_LINE), a2          # CUR_LINE += 320
+    mov     (CUR_LINE), a2
     add     320, a2
     mov     a2, (CUR_LINE)
-    movhu   (HLINEY), d0            # if HLINEY > 199 done
+    movhu   (HLINEY), d0
     exth    d0
     cmp     199, d0
     bgt     poly_done
-    movhu   (POLY_H), d0            # --POLY_H; loop while != 0
+    movhu   (POLY_H), d0
     add     -1, d0
     movhu   d0, (POLY_H)
     exth    d0
@@ -309,7 +639,7 @@ poly_after_draw:
     bne     poly_hloop
     bra     poly_raster
 
-poly_hzero:                         # POLY_H==0: advance edges once, next edge pair
+poly_hzero:
     mov     (STEP1), d0
     mov     (CPT1), d1
     add     d0, d1

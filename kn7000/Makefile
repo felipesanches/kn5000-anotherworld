@@ -12,10 +12,15 @@ SD_IMAGE    ?= ../../technics_roms/media/sp7001_activated_sdcard.img
 # The overlay ../../kn7000-emulator/kn7000 does NOT have it.
 MAME        ?= ../../mame-pr/kn7000
 ROMPATH     ?= ../../technics_romsets
+# The Another World intro resources (non-zero extracted data lives in src/resources/,
+# NOT game_data/MSDOS/ which holds empty placeholders). Each is loaded as its own SD
+# file because the firmware's fread has a 16-bit count and no sequential reads.
+RES_DIR     ?= ../../custom-kn5000-roms/anotherworld/src/resources
+SD_ADDFILE  := $(PYTHON) $(DISASM_REPO)/tools/sd_addfile.py
 
 all: build/BASEEXT.XAP
 
-build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc $(DISASM_REPO)/tools/xapasm.py
+build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc src/interp.s $(DISASM_REPO)/tools/xapasm.py
 	@mkdir -p build
 	$(XAPASM) src/main.s -I src -o $@ -m build/another.map
 
@@ -26,6 +31,10 @@ card: build/BASEEXT.XAP
 	cp $(SD_IMAGE) build/another_sd.img
 	chmod u+w build/another_sd.img
 	$(PYTHON) $(DISASM_REPO)/tools/sd_splice.py build/another_sd.img 'C:\TECHNICS\DATA\BASEEXT.XAP' build/BASEEXT.XAP
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWBYTE.AW' $(RES_DIR)/resource-0x18.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID1.AW' $(RES_DIR)/resource-0x19.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID2.AW' $(RES_DIR)/resource-0x11.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWPAL.AW'  $(RES_DIR)/resource-0x17.bin
 
 run: card
 	$(MAME) kn7000 -bios sp7001 -rompath $(ROMPATH) -harddisk build/another_sd.img -window
@@ -35,11 +44,14 @@ run: card
 # Reproduce the verification: run probes/render.lua, which presses SD CARD LOAD, lets
 # the game task draw, and dumps page-0 (+ a snapshot) to build/. -str <1..299> clears
 # the warning screen so the autoboot script runs (this tree lacks the -skip_gameinfo patch).
+# Scripted check: press SD CARD LOAD, let the VM run the intro, then dump the loaded
+# resources, VM state and page fills (and a snapshot) to build/. -str clears the warning
+# screen so the autoboot script runs (this tree lacks the -skip_gameinfo patch).
 test: card
-	RENDER_LOG=build/render.log $(MAME) kn7000 -bios sp7001 -rompath $(ROMPATH) \
-	  -harddisk build/another_sd.img -autoboot_script probes/render.lua \
-	  -snapshot_directory build -str 40 -window -nothrottle
-	@echo "---- build/render.log ----"; cat build/render.log
+	RENDER_LOG=build/awrun.log $(MAME) kn7000 -bios sp7001 -rompath $(ROMPATH) \
+	  -harddisk build/another_sd.img -autoboot_script probes/awrun.lua \
+	  -snapshot_directory build -str 50 -window -nothrottle
+	@echo "---- build/awrun.log ----"; cat build/awrun.log
 
 clean:
 	rm -rf -- build

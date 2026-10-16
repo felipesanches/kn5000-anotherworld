@@ -26,9 +26,14 @@
 .equ FCLOSE,          0x48585E65    #      fclose_api(a0 = FILE)
 
 # ---- task ----------------------------------------------------------------------
-.equ TASK_ID,         10            # a free task slot (9, 10 unused by the firmware)
-.equ TASK_PRI,        5             # below the firmware's priority 3, so we never starve it
-.equ TASK_STACK,      0x4000
+# micro-ITRON is priority-preemptive: a task below the firmware's priority 3 is never
+# scheduled while the firmware's (always-ready) tasks exist, so we MUST run at 3 and
+# round-robin with them -- the per-frame dly_tsk is what keeps the firmware alive.
+# Slots 10 then 9 are free; 11 would overrun the TCB table.
+.equ TASK_ID_FIRST,   10
+.equ TASK_ID_LAST,    9
+.equ TASK_PRI,        3
+.equ TASK_STACK,      0x2000         # room for the VM's polygon-hierarchy recursion
 
 # ---- display: LCD frame, 640x240 RGB565, 1280 bytes/row ------------------------
 .equ FB,              0x9CE00000
@@ -47,6 +52,7 @@
 # writable scratch the firmware does not use, but the SD read cannot target it --
 # so the loader reads into a work-RAM staging buffer and copies to 0x44.
 .equ STAGING,         0x50300000    # work-RAM staging buffer for SD reads
+.equ STAGING_BIG,     0x50200000    # work-RAM buffer large enough for the whole AWDATA
 .equ GAME_RAM,        0x44000000    # the game image + page buffers live here
 .equ PAGE_BITMAP_0,   0x44100000    # four 320x200 pages, one per 0x10000
 .equ PAGE_BITMAP_1,   0x44110000

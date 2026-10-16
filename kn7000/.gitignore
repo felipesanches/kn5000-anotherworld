@@ -2,3 +2,5 @@ build/
 *.bin
 !probes/*
 game_data/
+cfg/
+nvram/

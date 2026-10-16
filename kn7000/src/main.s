@@ -7,13 +7,15 @@
 # (github.com/felipesanches/kn5000-anotherworld, TLCS-900) to the KN7000's
 # Panasonic MN10300, running as a ride-along module in the SP7001 SD plug-in.
 #
-# This file is the platform layer; the VM is being ported into vm.s. What is
-# proven to work here (see ../README.md):
-#   * the hook runs on the firmware's loading task, where the file API is valid;
-#   * a task of ours blits a 320x200 8-bit-indexed page to the 640x240 RGB565
-#     frame, through a 16-colour palette, and it persists on the static screen.
-# The current build blits a test page to demonstrate the platform; the VM will
-# fill the page instead.
+# Flow (see ../README.md):
+#   * The hook runs as BASEEXT's XapEntry, on the firmware's loading task -- the
+#     only context where the SD file API is valid. It loads AWDATA.AW (the intro's
+#     bytecode + polygon + palette resources) from the card into the 0x44 scratch
+#     window, starts our game task, then resumes XapEntry so BASEEXT still works.
+#   * The game task runs the VM: GameReset, then ExecuteInstruction forever. The VM
+#     blits its front page to the 640x240 RGB565 LCD frame through a 16-colour
+#     palette; it persists on the static SP7001 screen (the firmware repaints only
+#     what changes). The per-frame yield lives in NextThread.
 
 .include "platform.inc"
 .include "vm.inc"
@@ -21,9 +23,7 @@
 
 # =================================================================================
 # The hook. Entered exactly as BASEEXT's XapEntry (a0 = framework, a1 = context,
-# d0/d1 = &compile/&plug-in id), on the firmware's loading task. We start our task,
-# run the two displaced instructions, and resume XapEntry so BASEEXT still works.
-# (SD loading will go here too, where the file API is valid.)
+# d0/d1 = &compile/&plug-in id), on the firmware's loading task.
 Hook:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
@@ -31,6 +31,7 @@ Hook:
     mov     d1, (0x14, sp)
     mov     a0, (0x18, sp)
     mov     a1, (0x1c, sp)
+    call    LoadGameData, 0, 0      # SD load here, where the file API is valid
     call    StartTask, 0, 0
     mov     (0x10, sp), d0
     mov     (0x14, sp), d1
@@ -42,16 +43,24 @@ Hook:
     add     -8, sp
     jmp     XAP_RESUME
 
+# Create and start the game task, trying slot 10 then 9 (once per power-on).
 StartTask:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    mov     TASK_ID, d0
+    mov     TASK_ID_FIRST, d2
+st_try:
+    mov     d2, d0
     mov     game_ctsk, a0
     mov     CRE_TSK_X, a1
     calls   (a1)
-    cmp     0, d0
-    bne     st_done
-    mov     TASK_ID, d0
+    cmp     0, d0                    # E_OK
+    beq     st_start
+    add     -1, d2
+    cmp     TASK_ID_LAST, d2
+    bge     st_try
+    bra     st_done
+st_start:
+    mov     d2, d0
     clr     d1
     mov     STA_TSK, a1
     calls   (a1)
@@ -59,93 +68,203 @@ st_done:
     ret     [d2,d3,a2,a3], 0x20
 
 # =================================================================================
-GameTask:
-    add     -0x10, sp
-    mov     2500, d0                # let the firmware finish loading first
-    mov     DLY_TSK, a1
-    calls   (a1)
-    call    GameInit, 0, 0
-gt_loop:
-    call    GameFrame, 0, 0
-    mov     20, d0                  # ~50 Hz
-    mov     DLY_TSK, a1
-    calls   (a1)
-    bra     gt_loop
+# LoadOneFile(a0 = path, a1 = dest in 0x44 window, d0 = byte count): fopen + a single
+# fread into work RAM + copy to dest + fclose. The firmware's fread has a 16-bit count
+# and no working sequential reads, so each resource is one file read whole in one call;
+# the SD DMA target must be work RAM (STAGING_BIG), not the 0x44 window.
+# CRITICAL: firmware file calls scribble on 0..0xF(sp), so locals live at 0x10+.
 
-# -------- VM test: clear page 0, fill a diamond polygon, blit ---------------------
-GameInit:
+# fopen_api/fread_api stash their arguments in the CALLER's frame at [sp+4 .. sp+0x10]
+# (per the disassembly of 0x48585E2A/0x48585E50), so persistent locals there get
+# clobbered. The firmware calls need a caller frame of at least 0x20; we use one and
+# keep dest/count/FILE*/diag only in the SAFE slots (0, 0x14, 0x18, 0x1c), all outside
+# the 4..0x10 stash range.
+LoadOneFile:
     movm    [d2,d3,a2,a3], (sp)
-    add     -8, sp
-    # 16-colour palette ramp (index 0 = black)
-    mov     palette, a0
-    clr     d2
-pi_loop:
-    mov     d2, d0
-    asl     1, d0
-    mov     d0, d1
-    asl     6, d1
-    or      d1, d0
-    mov     d2, d1
-    asl     11, d1
-    or      d1, d0
-    movhu   d0, (a0)
-    add     2, a0
-    add     1, d2
-    cmp     16, d2
-    bne     pi_loop
-    # page 0 is the draw target; clear to colour 0
-    mov     PAGE_BITMAP_0, a0
-    mov     a0, (CUR_PAGE)
-    mov     a0, a2                  # inline clear page to 0 (FillPage-via-call is flaky; TODO)
-    mov     PAGE_SIZE, d2
-gi_clear:
-    clr     d0
-    movbu   d0, (a2)
-    inc     a2
+    add     -0x20, sp
+    mov     a1, (0, sp)             # dest   (safe)
+    mov     d0, (0x14, sp)          # count  (safe)
+    mov     d1, (0x1c, sp)          # diag slot (safe)
+    mov     aw_mode, a1             # a0 still = path
+    mov     FOPEN, a3
+    calls   (a3)                    # a0 = FILE*
+    mov     (0x1c, sp), a3
+    mov     a0, (0, a3)             # diag: FILE*
+    cmp     0, a0
+    beq     lof_done
+    mov     a0, (0x18, sp)          # FILE*  (safe)
+    mov     STAGING_BIG, a0         # buffer (work RAM, DMA target)
+    mov     (0x18, sp), a1          # FILE*
+    mov     1, d0                   # size = 1
+    mov     (0x14, sp), d1          # count = byte count
+    mov     FREAD, a3
+    calls   (a3)                    # d0 = bytes read
+    mov     (0x1c, sp), a3
+    mov     d0, (4, a3)             # diag: bytes read
+    cmp     0, d0
+    beq     lof_close
+    mov     d0, d2                  # copy counter
+    mov     STAGING_BIG, a0         # src
+    mov     (0, sp), a1             # dest (safe slot -- not clobbered by fread)
+lof_copy:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
     add     -1, d2
-    bne     gi_clear
-    # A solid trapezoid, bbox 100x100. Another World orders a polygon's vertices by
-    # scanline pairs -- pt[0]=top-right, pt[1]=bottom-right, pt[2]=bottom-left,
-    # pt[3]=top-left -- so fillPolygon walks the right edge (pt0->pt1) against the
-    # left edge (pt3->pt2). This one is narrow at the top (x30..70) and widens to the
-    # full 100 at the bottom, exercising both edge slopes in opposite directions.
-    mov     100, d0
-    movhu   d0, (POLY_BBOX_W)
-    movhu   d0, (POLY_BBOX_H)
-    mov     4, d0
-    movbu   d0, (POLY_NUM_POINTS)
-    mov     POLY_POINTS, a0
-    mov     70, d0
-    movhu   d0, (a0)                # p0 = (70,0)    top-right
-    clr     d0
-    movhu   d0, (2, a0)
-    mov     100, d0
-    movhu   d0, (4, a0)             # p1 = (100,100) bottom-right
-    mov     100, d0
-    movhu   d0, (6, a0)
-    clr     d0
-    movhu   d0, (8, a0)             # p2 = (0,100)   bottom-left
-    mov     100, d0
-    movhu   d0, (10, a0)
-    mov     30, d0
-    movhu   d0, (12, a0)            # p3 = (30,0)    top-left
-    clr     d0
-    movhu   d0, (14, a0)
-    mov     11, d0                  # colour index 11
-    movbu   d0, (DRAW_COLOR)
-    mov     160, d0                 # centre (160,100)
-    mov     100, d1
-    call    FillPolygon, 0, 0
-    ret     [d2,d3,a2,a3], 0x18
+    bne     lof_copy
+lof_close:
+    mov     (0x18, sp), a0          # FILE*
+    mov     FCLOSE, a3
+    calls   (a3)
+lof_done:
+    ret     [d2,d3,a2,a3], 0x30
 
-GameFrame:
-    add     -8, sp
-    mov     PAGE_BITMAP_0, a0
-    call    BlitPage, 0, 0
-    ret     0, 8
+# LoadGameData: preload the intro part's four resources (eager per-part load, like the
+# KN5000 initForPart). One-shot, guarded by AW_LOADED_FLAG. Runs on the firmware task.
+# The firmware file calls only work when invoked DIRECTLY on the hook's own call chain
+# (a nested helper's fread returns a count but never fills the buffer -- the file API
+# stashes its arguments up the stack in a way the extra frame breaks). So the four
+# resource loads are inlined here rather than factored into a helper.
+# Safe stack slot: (0x18,sp) for FILE* (outside fopen/fread's [sp+4..sp+0x10] stash).
+LoadGameData:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     (AW_LOADED_FLAG), d0
+    cmp     0x600D, d0
+    beq     lgd_done
+    # --- bytecode ---
+    mov     path_byte, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_v1
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_BYTECODE_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_BYTECODE, a1
+lgd_c0:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c0
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- video1 ---
+lgd_v1:
+    mov     path_vid1, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_v2
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_VIDEO1_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_VIDEO1, a1
+lgd_c1:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c1
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- video2 ---
+lgd_v2:
+    mov     path_vid2, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_pal
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_VIDEO2_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_VIDEO2, a1
+lgd_c2:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c2
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- palettes ---
+lgd_pal:
+    mov     path_pal, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_flag
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_PALETTES_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_PALETTES, a1
+lgd_c3:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c3
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+lgd_flag:
+    mov     0x600D, d0
+    mov     AW_LOADED_FLAG, a0
+    mov     d0, (a0)
+lgd_done:
+    ret     [d2,d3,a2,a3], 0x30
 
 # =================================================================================
-# BlitPage: a0 = a 320x200 8-bit-indexed page. Draw it centred into the 640x240
+# The game task: let the firmware settle, reset the VM, then run it forever.
+GameTask:
+    add     -0x10, sp
+    mov     2500, d0                # let the firmware reach its static screen first
+    mov     DLY_TSK, a1
+    calls   (a1)
+    call    GameReset, 0, 0
+gt_loop:
+    call    ExecuteInstruction, 0, 0
+    bra     gt_loop
+
+# =================================================================================
+# BlitPage(a0 = a 320x200 8-bit-indexed page): draw it centred into the 640x240
 # RGB565 frame through the 16-entry palette, one source pixel per frame pixel.
 BlitPage:
     movm    [d2,d3,a2,a3], (sp)
@@ -187,4 +306,20 @@ game_ctsk:
     .align  4
 palette:
     .space  16*2, 0
+path_byte:
+    .asciz "C:\TECHNICS\DATA\AWBYTE.AW"
+    .align 2
+path_vid1:
+    .asciz "C:\TECHNICS\DATA\AWVID1.AW"
+    .align 2
+path_vid2:
+    .asciz "C:\TECHNICS\DATA\AWVID2.AW"
+    .align 2
+path_pal:
+    .asciz "C:\TECHNICS\DATA\AWPAL.AW"
+    .align 2
+aw_mode:
+    .asciz "rb"
+    .align 4
 .include "vm.s"
+.include "interp.s"
