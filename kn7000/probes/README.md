@@ -19,6 +19,7 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `awnotediff.lua`, `awkeycal.lua`              | (wrong region) keybed held-note in `0x50148000..`           | nothing stable there — only phase caches; superseded by the probes below |
 | `awnodes.lua`, `awnode2.lua`, `awkeyread.lua` | can a plug-in read held keybed notes?                       | **yes, polyphonic** — held-slot bitmap `0x500D288C` + note at `0x500D1278+slot*0x2C+0x0C`; 3 notes read at once in-game. See [PLUGIN-INPUT-INTERFACES.md](PLUGIN-INPUT-INTERFACES.md) |
 | `awkbdmap.lua`                                | does the keybed gameplay mapping write the right hero vars? | **yes** — F5 left, C6 right, A5 down, Ab5/Bb5 up, C4/bass action; move+fire together, all match the oracle |
+| `awmiditest.lua` + `gen_held_mid.py`          | do USB-MIDI-IN notes reach the game's keybed read?          | **yes** — a SMF on `-midiin1` shows C4/G4/E4 in the TG held mask; a controller drives the game like the keys |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can
