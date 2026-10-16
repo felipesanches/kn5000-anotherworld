@@ -16,6 +16,7 @@
 # fill the page instead.
 
 .include "platform.inc"
+.include "vm.inc"
 .mnbase 0x502B6000                  # where xap_addon.py places this module
 
 # =================================================================================
@@ -60,6 +61,9 @@ st_done:
 # =================================================================================
 GameTask:
     add     -0x10, sp
+    mov     2500, d0                # let the firmware finish loading first
+    mov     DLY_TSK, a1
+    calls   (a1)
     call    GameInit, 0, 0
 gt_loop:
     call    GameFrame, 0, 0
@@ -68,11 +72,12 @@ gt_loop:
     calls   (a1)
     bra     gt_loop
 
-# -------- platform demo: a test page + palette; the VM will replace this ----------
+# -------- VM test: clear page 0, fill a diamond polygon, blit ---------------------
 GameInit:
     movm    [d2,d3,a2,a3], (sp)
     add     -8, sp
-    mov     palette, a0             # a 16-colour ramp
+    # 16-colour palette ramp (index 0 = black)
+    mov     palette, a0
     clr     d2
 pi_loop:
     mov     d2, d0
@@ -88,22 +93,45 @@ pi_loop:
     add     1, d2
     cmp     16, d2
     bne     pi_loop
-    mov     PAGE_BITMAP_0, a2       # page 0 = (x xor y) & 15 plaid
-    clr     d3
-gi_y:
-    clr     d2
-gi_x:
-    mov     d2, d0
-    xor     d3, d0
-    and     15, d0
+    # page 0 is the draw target; clear to colour 0
+    mov     PAGE_BITMAP_0, a0
+    mov     a0, (CUR_PAGE)
+    mov     a0, a2                  # inline clear page to 0 (FillPage-via-call is flaky; TODO)
+    mov     PAGE_SIZE, d2
+gi_clear:
+    clr     d0
     movbu   d0, (a2)
     inc     a2
-    add     1, d2
-    cmp     AW_W, d2
-    bne     gi_x
-    add     1, d3
-    cmp     AW_H, d3
-    bne     gi_y
+    add     -1, d2
+    bne     gi_clear
+    # a diamond: bbox 100x100, 4 points around the perimeter
+    mov     100, d0
+    movhu   d0, (POLY_BBOX_W)
+    movhu   d0, (POLY_BBOX_H)
+    mov     4, d0
+    movbu   d0, (POLY_NUM_POINTS)
+    mov     POLY_POINTS, a0
+    mov     50, d0
+    movhu   d0, (a0)                # p0 = (50,0)
+    clr     d0
+    movhu   d0, (2, a0)
+    mov     100, d0
+    movhu   d0, (4, a0)             # p1 = (100,50)
+    mov     50, d0
+    movhu   d0, (6, a0)
+    mov     50, d0
+    movhu   d0, (8, a0)             # p2 = (50,100)
+    mov     100, d0
+    movhu   d0, (10, a0)
+    clr     d0
+    movhu   d0, (12, a0)            # p3 = (0,50)
+    mov     50, d0
+    movhu   d0, (14, a0)
+    mov     11, d0                  # colour index 11
+    movbu   d0, (DRAW_COLOR)
+    mov     160, d0                 # centre (160,100)
+    mov     100, d1
+    call    FillPolygon, 0, 0
     ret     [d2,d3,a2,a3], 8
 
 GameFrame:
@@ -155,3 +183,4 @@ game_ctsk:
     .align  4
 palette:
     .space  16*2, 0
+.include "vm.s"

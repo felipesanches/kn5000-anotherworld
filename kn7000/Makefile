@@ -13,7 +13,7 @@ ROMPATH     ?= ../../technics_romsets
 
 all: build/BASEEXT.XAP
 
-build/another.bin: src/main.s src/platform.inc $(DISASM_REPO)/tools/xapasm.py
+build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc $(DISASM_REPO)/tools/xapasm.py
 	@mkdir -p build
 	$(XAPASM) src/main.s -I src -o $@ -m build/another.map
 
