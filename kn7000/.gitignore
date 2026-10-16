@@ -1,0 +1,4 @@
+build/
+*.bin
+!probes/*
+game_data/
