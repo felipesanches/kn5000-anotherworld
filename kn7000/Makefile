@@ -8,7 +8,9 @@ XAPASM      := $(PYTHON) $(DISASM_REPO)/tools/xapasm.py
 BASE_XAP    ?= $(DISASM_REPO)/baserom/sp7001_baseext.xap
 MODULE_AT   := 0x502B6000
 SD_IMAGE    ?= ../../technics_roms/media/sp7001_activated_sdcard.img
-MAME        ?= mame
+# The ONLY build with the sp7001 BIOS (driver: src/mame/matsushita/kn7000.cpp).
+# The overlay ../../kn7000-emulator/kn7000 does NOT have it.
+MAME        ?= ../../mame-pr/kn7000
 ROMPATH     ?= ../../technics_romsets
 
 all: build/BASEEXT.XAP
@@ -26,9 +28,20 @@ card: build/BASEEXT.XAP
 	$(PYTHON) $(DISASM_REPO)/tools/sd_splice.py build/another_sd.img 'C:\TECHNICS\DATA\BASEEXT.XAP' build/BASEEXT.XAP
 
 run: card
-	$(MAME) -rompath $(ROMPATH) kn7000 -bios sp7001 -harddisk build/another_sd.img -window
+	$(MAME) kn7000 -bios sp7001 -rompath $(ROMPATH) -harddisk build/another_sd.img -window
+	# mame-pr is an UNPATCHED tree: dismiss the red "known problems" warning with a
+	# keypress. For a scripted (headless) run use `make test`, which clears it with -str.
+
+# Reproduce the verification: run probes/render.lua, which presses SD CARD LOAD, lets
+# the game task draw, and dumps page-0 (+ a snapshot) to build/. -str <1..299> clears
+# the warning screen so the autoboot script runs (this tree lacks the -skip_gameinfo patch).
+test: card
+	RENDER_LOG=build/render.log $(MAME) kn7000 -bios sp7001 -rompath $(ROMPATH) \
+	  -harddisk build/another_sd.img -autoboot_script probes/render.lua \
+	  -snapshot_directory build -str 40 -window -nothrottle
+	@echo "---- build/render.log ----"; cat build/render.log
 
 clean:
 	rm -rf -- build
 
-.PHONY: all card run clean
+.PHONY: all card run test clean
