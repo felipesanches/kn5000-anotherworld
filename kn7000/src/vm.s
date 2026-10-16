@@ -58,12 +58,13 @@ DrawPoint:
     mov     d3, d0                  # y*320
     asl     8, d0                   # y*256
     mov     d3, a2
-    add     a2, a2
-    add     a2, a2
-    add     a2, a2
-    add     a2, a2
-    add     a2, a2                  # a2 = y*64
-    add     a2, d0                  # d0 = y*320
+    add     a2, a2                  # 2y
+    add     a2, a2                  # 4y
+    add     a2, a2                  # 8y
+    add     a2, a2                  # 16y
+    add     a2, a2                  # 32y
+    add     a2, a2                  # a2 = y*64 (six doublings)
+    add     a2, d0                  # d0 = y*256 + y*64 = y*320
     add     d2, d0                  # + x
     mov     (CUR_PAGE), a2
     add     d0, a2
@@ -661,8 +662,7 @@ poly_done:
 DrawString:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x18, sp
-    add     -1, d1
-    asl     3, d1                   # x = 8 * (col - 1)
+    asl     3, d1                   # x = 8 * col  (pixel column; matches the original VM)
     mov     d1, (4, sp)             # x
     mov     d1, (0xc, sp)           # x0 (line start)
     mov     d2, (8, sp)             # y

@@ -70,31 +70,55 @@ python3 -I probes/compare_frames.py our_checksums.log ref_checksums.log
   imperfections" reported. 143/149 at the first content frame fall inside drawn
   polygons; 82 of them land on one correctly-shaped polygon (`poly#77`).
 
-### Root cause: polygon overdraw (not the fill, not the inputs)
+### Root cause: DrawPoint writes to y*288 instead of y*320 (vm.s)
 
-- **The fill rasterizer is provably identical.** `fill_fuzz.py` renders all 175
-  real tick-2 city polygons through both ports of the algorithm → **0 pixels
-  differ**. CalcStep, the 0x7FFF/0x8000 edge rounding, inclusive spans, special
-  colours (0x10 blend, >0x10 copy-page0), the degenerate-point case, Scale,
-  ReadVertices, the hierarchy traversal and the 0x80/0x40 opcode decode all match.
-- **Per-polygon inputs are correct.** `awpolydump.lua` shows `poly#77`'s input
-  (`color=4 cx=160 cy=78 w=255 h=95 pts=…`) is **byte-identical** to the reference.
-- **VM variables are identical** at the frame start (`awvardump.lua`:
-  `3c=4660 54=129 bc=16 c6=128 c7=1 dc=33 e4=20 f2=4000 ff=1`).
-- **The hierarchy traversal is correct**: `awhiertrace`/`awchildtrace` show 22
-  hierarchy nodes with childCounts matching the reference's multiset exactly, 240
-  children, all valid offsets, depth 1 — no runaway recursion.
-- Yet our port issues **far more FillPolygon calls per frame than the reference**
-  (the reference draws ~175 for the city; our port draws the 175 correct ones
-  **plus** garbage: thousands of harmless `n=2` no-ops and ~680 malformed polygons
-  — real shapes at a wrong y, or truncated point counts). Those ~680 garbage polys
-  **overdraw** correctly-rendered pixels — e.g. they corrupt 82 px of the
-  correctly-drawn `poly#77` in the tick-3 frame.
+Everything *except* point rendering is byte-identical to the reference, verified
+by elimination:
 
-So the rendering differences come from **excess top-level polygon draws
-(overdraw)** — the drawing channel executes more VIDEO ops than it should within a
-frame — not from the rasterizer, the polygon inputs, the hierarchy, or the VM
-variables. Pinning the exact divergent bytecode branch needs a single-run
-executed-PC trace of the drawing channel (next step; `FRAME_NO`-keyed tick
-attribution jitters slightly across separate MAME runs, so it must be captured in
-one run).
+- **Control flow is identical** — same 63 instructions at the city tick, same
+  opcodes (VM_PC write-tap trace); the drawing channel kills itself at the same pc.
+- **Hierarchy traversal is correct** — 22 nodes, childCounts matching the
+  reference's multiset exactly, 240 children, depth 1 (`awhiertrace`/`awchildtrace`).
+- **VM variables are identical** at the frame start (`awvardump.lua`).
+- **The draw-set is identical** — 270 FillPolygon calls (175 non-point + 95
+  point), in the **same order**, with the **same colours and bounding boxes**
+  (`awseq.lua` → 0 mismatches vs the reference's `P2` dump).
+- **The scanline fill is correct** — a faithful replay of the exact 270-polygon
+  draw list (`replay270.py`) reproduces the reference page **pixel-perfectly (0
+  diff)**; a per-polygon pixel-write trace of a converging sliver (fill#2) is
+  **113/113 exact**. (An earlier "overdraw of ~3930 polygons" reading was a
+  measurement artifact: the POLY_YMAX tap shared a 32-bit word with HLINEY, so it
+  also fired on every scanline; likewise the per-scanline X1 tap read stale values
+  on the first scanline. Both were false — ignore them.)
+
+The real bug: comparing each polygon's actual PAGE_0 pixel coverage against the
+correct algorithm (`awpixall.lua` + per-fill set diff) shows the **only**
+divergent fills are the **point polygons** (90/270), each writing its single pixel
+to the **wrong offset**. `DrawPoint` (vm.s) computes `y*320` as `asl 8` (`y*256`)
+plus a shift-add intended to be `y*64` — but the loop had only **five** `add a2,a2`
+doublings (`a2 = y*32`), giving `y*256 + y*32 = y*288`. So a point at (cx,cy) landed
+at offset `y*288 + cx`, i.e. pixel `((y*288+cx) % 320, (y*288+cx) // 320)`.
+
+Confirmed exactly: point (195,83) → `83*288+195 = 24099` → pixel (99,75); point
+(203,82) → `23819` → (139,74); point (203,77) → `22379` → (299,69) — each matching
+our port's wrong pixel. **Fix:** add the sixth `add a2,a2` so `a2 = y*64` and
+`d0 = y*256 + y*64 = y*320`.
+
+This accounts for the whole signature: only point-heavy frames differ,
+by a scattered handful of single pixels whose colour varies with where the stray
+pixel lands in the gradient — the "~0.2%/frame imperfections."
+
+Also found (latent, not triggered in the intro): `DrawPoint` ignores the
+blend/copy draw-functions (always writes the raw DRAW_COLOR), so a point polygon
+with colour 0x10 (blend) or >0x10 (copy-from-page0) would render wrong too.
+
+### Second bug: DRAW_STRING x-origin off by one column
+
+After the DrawPoint fix, matching frames went 17% → 77.5%; the first remaining
+divergence moved to tick 1120 (the IDENTIFICATION title), a tight strip
+(x[169..285] y[16..22]) with a symmetric 2↔5 colour swap — a horizontal **text
+shift of 8 px**. `DrawString` (vm.s) computed `x = 8*(col-1)` (`add -1,d1; asl 3`),
+but the original VM uses `x = 8*col` (Fabien's drawChar indexes the page at
+`col*8`; rustyworld likewise). The `-1` shifted every string 8 px (one column)
+left. Fix: drop the `add -1,d1`. This fixes the remaining lab/text-scene ranges
+(1120–1897) that use DRAW_STRING.
