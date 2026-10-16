@@ -10,6 +10,11 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `ram_probe.lua`  | which large RAM windows an app can write              | writable: `0x44000000`, `0x4C000000`, `0x50000000–0x503FFFFF` (work RAM), `0x9CE00000` (LCD, 640×240 RGB565). Not writable: `0x56000000`, `0x96800000`, `0x45000000`, flash `0x48000000` |
 | `fileapi.lua`    | the framework object's file-method pointers           | `framework+0x2E1C` slots `+0x2D0/+0x2D8/+0x2DC` are `fopen_api`/`fread_api`/`fclose_api` |
 | `sdread.lua` + `sdread.s` | does reading a file from the SD card work?   | **yes** — from the hook, single-backslash path, buffer in work RAM: the exact file bytes appear |
+| `awpanelmap.lua` | each panel button's bit in the firmware switch-shadow | debounced, level-held bitmap: CPR_SEGn at `0x5006BE60+n`, CPL/CPC at `0x5006BE90+n`, bit = `1 << SWn`. See [PANEL-INPUT.md](PANEL-INPUT.md) |
+| `awcombo.lua`    | does the firmware report two panel buttons at once?   | **no** — one button at a time (menu panel, not a rollover matrix): no panel diagonals |
+| `awinputverify.lua` | do the panel buttons write the right hero variables? | all five single-button cases match rustyworld's `update_player` exactly |
+| `awmove.lua`     | does holding a direction change the game output?      | **yes** — displayed-page checksums diverge by direction (none vs UP vs LEFT) |
+| `awnotediff.lua`, `awkeycal.lua` | can the keybed give a held-note identity? | **no** — FIFO drained, no RAM byte equals the note, only free-running phase accumulators move. See [PANEL-INPUT.md](PANEL-INPUT.md) |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can

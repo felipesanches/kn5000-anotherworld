@@ -113,3 +113,41 @@
 .equ FRAME_NO,        0x4408007C     # current VM frame (tick) number
 .equ TRACE_BUF,       0x44800000     # 8 bytes/entry (up to ~1.6 MB here, clear of all else)
 .equ TRACE_MAX,       200000         # enough to hold the whole intro
+
+# ================================================================================
+# Player input (gameplay directional control for the water part, 0x3E82).
+#
+# The KN7000 firmware keeps a debounced control-panel button bitmap in work RAM: one
+# byte per CP serial segment, one bit per switch line (bit = 1 << SWn), held 1 for as
+# long as the physical button is down. The CPR half-panel's segments live at
+# PANEL_CPR+seg, the CPL/CPC half at PANEL_CPL+seg. Decoded (byte+bit per button, and
+# that it is level- not edge-held) by probes/awpanelmap.lua, which drives every cpanel
+# ioport in MAME and diffs this region -- see probes/PANEL-INPUT.md. The keybed cannot
+# serve here: its voice-event FIFO is drained by the firmware and the per-voice RAM
+# holds free-running phase accumulators, not a stable held-note identity (three probes:
+# probes/PANEL-INPUT.md). So gameplay directions come from five panel buttons instead.
+.equ PANEL_CPR,       0x5006BE60     # CPR_SEGn button bitmap at PANEL_CPR + n
+.equ PANEL_CPL,       0x5006BE90     # CPL_SEGn / CPC_SEGn button bitmap at PANEL_CPL + n
+
+# The Another World D-pad + fire. Buttons chosen for mnemonic labels and for landing in
+# distinct bytes, so any combination can be held and read at once.
+.equ BTN_LEFT_ADDR,   PANEL_CPR+2    # PART SELECT LEFT     (CPR_SEG2 SW0)
+.equ BTN_LEFT_BIT,    0x01
+.equ BTN_RIGHT_ADDR,  PANEL_CPR+1    # PART SELECT RIGHT 1  (CPR_SEG1 SW1)
+.equ BTN_RIGHT_BIT,   0x02
+.equ BTN_UP_ADDR,     PANEL_CPR+6    # R1/R2 OCTAVE +       (CPR_SEG6 SW1)
+.equ BTN_UP_BIT,      0x02
+.equ BTN_DOWN_ADDR,   PANEL_CPR+7    # R1/R2 OCTAVE -       (CPR_SEG7 SW1)
+.equ BTN_DOWN_BIT,    0x02
+.equ BTN_FIRE_ADDR,   PANEL_CPR+5    # SUSTAIN              (CPR_SEG5 SW3)
+.equ BTN_FIRE_BIT,    0x08
+
+# Another World hero-control variables (same indices as the DOS game). The mask bits and
+# signed values match rustyworld's update_player (our checksum oracle): RIGHT {1,+1},
+# LEFT {2,-1}, DOWN {4,+1}, UP {8,-1}, BUTTON {0x80,+1}; RIGHT beats LEFT, DOWN beats UP.
+.equ VAR_HERO_LR,       0xFC         # left/right position delta  (s16)
+.equ VAR_HERO_UD,       0xE5         # up/down position delta     (s16)
+.equ VAR_HERO_JUMP,     0xFB         # jump/down = copy of UD
+.equ VAR_HERO_POS_MASK, 0xFD         # OR of all held inputs' masks
+.equ VAR_HERO_ACTION,   0xFA         # fire button down -> 1
+.equ VAR_HERO_ACT_MASK, 0xFE         # POS_MASK (the button mask is already in it)

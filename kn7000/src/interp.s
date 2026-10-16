@@ -340,35 +340,131 @@ cp_loop:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
-# ReadInput: map the KN7000 keybed to the Another World fire button so the player
-# can skip the intro. The intro bytecode polls var[0xFE] (ACTION_MASK) and jumps to
-# the first playable part (0x3E82) when fire is pressed. We only drive input during
-# the intro; gameplay input mapping for the water part is a later step.
-# Source: the firmware's first voice-slot "key active" flag at 0x50149690 -- any held
-# keybed key sets it (0 while no key is down during the intro).
+# ReadInput: feed KN7000 controls to the Another World hero variables.
+#
+#   * Intro (0x3E81): any held keybed key -> fire, so the player can skip the intro.
+#     The intro bytecode polls var[0xFE] (ACTION_MASK) and jumps to the first playable
+#     part. Source: the firmware's voice "key active" flag at 0x50149690.
+#   * Water part (0x3E82): five control-panel buttons drive a full D-pad + fire. The
+#     firmware's debounced button bitmap (vm.inc: PANEL_CPR/BTN_*) is read directly; the
+#     six hero variables are written exactly as rustyworld's update_player does.
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
     movhu   (CURRENT_PART_ID), d0
-    cmp     0x3E81, d0              # intro only
-    bne     ri_ret
+    cmp     0x3E81, d0
+    beq     ri_intro
+    cmp     0x3E82, d0
+    beq     ri_gameplay
+    bra     ri_ret
+
+# ---- intro: any keybed key = fire (skip) ----
+ri_intro:
     mov     0x50149690, a0
     movhu   (a0), d0                # a keybed key is held?
     cmp     0, d0
     beq     ri_clear
-    mov     0xFA, d0               # var[0xFA] = 1  (HERO_ACTION)
+    mov     VAR_HERO_ACTION, d0     # var[0xFA] = 1
     mov     1, d1
     call    WriteVar, 0, 0
-    mov     0xFE, d0               # var[0xFE] = 0x80 (HERO_ACTION_MASK = fire)
+    mov     VAR_HERO_ACT_MASK, d0   # var[0xFE] = 0x80 (fire)
     mov     0x80, d1
     call    WriteVar, 0, 0
     bra     ri_ret
 ri_clear:
-    mov     0xFA, d0
+    mov     VAR_HERO_ACTION, d0
     clr     d1
     call    WriteVar, 0, 0
-    mov     0xFE, d0
+    mov     VAR_HERO_ACT_MASK, d0
     clr     d1
+    call    WriteVar, 0, 0
+    bra     ri_ret
+
+# ---- water part: panel D-pad + fire. Build the AW input mask in d2, then derive and
+#      write the six hero variables (d2 is preserved across WriteVar). ----
+ri_gameplay:
+    clr     d2                      # d2 = OR of held inputs' AW masks
+    mov     BTN_RIGHT_ADDR, a0      # RIGHT -> mask |= 1
+    movbu   (a0), d0
+    and     BTN_RIGHT_BIT, d0
+    beq     rig_nr
+    or      1, d2
+rig_nr:
+    mov     BTN_LEFT_ADDR, a0       # LEFT -> mask |= 2
+    movbu   (a0), d0
+    and     BTN_LEFT_BIT, d0
+    beq     rig_nl
+    or      2, d2
+rig_nl:
+    mov     BTN_DOWN_ADDR, a0       # DOWN -> mask |= 4
+    movbu   (a0), d0
+    and     BTN_DOWN_BIT, d0
+    beq     rig_nd
+    or      4, d2
+rig_nd:
+    mov     BTN_UP_ADDR, a0         # UP -> mask |= 8
+    movbu   (a0), d0
+    and     BTN_UP_BIT, d0
+    beq     rig_nu
+    or      8, d2
+rig_nu:
+    mov     BTN_FIRE_ADDR, a0       # FIRE -> mask |= 0x80
+    movbu   (a0), d0
+    and     BTN_FIRE_BIT, d0
+    beq     rig_nf
+    or      0x80, d2
+rig_nf:
+    # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
+    mov     VAR_HERO_LR, d0
+    mov     d2, d1
+    and     1, d1
+    bne     rig_lr_right
+    mov     d2, d1
+    and     2, d1
+    bne     rig_lr_left
+    clr     d1
+    bra     rig_lr_w
+rig_lr_right:
+    mov     1, d1
+    bra     rig_lr_w
+rig_lr_left:
+    mov     -1, d1
+rig_lr_w:
+    call    WriteVar, 0, 0
+    # var[0xE5] UP_DOWN: DOWN(4)? +1 : UP(8)? -1 : 0  (keep the value in d1 for 0xFB)
+    mov     VAR_HERO_UD, d0
+    mov     d2, d1
+    and     4, d1
+    bne     rig_ud_down
+    mov     d2, d1
+    and     8, d1
+    bne     rig_ud_up
+    clr     d1
+    bra     rig_ud_w
+rig_ud_down:
+    mov     1, d1
+    bra     rig_ud_w
+rig_ud_up:
+    mov     -1, d1
+rig_ud_w:
+    call    WriteVar, 0, 0
+    mov     VAR_HERO_JUMP, d0       # var[0xFB] = var[0xE5] (d1 still holds UD value)
+    call    WriteVar, 0, 0
+    mov     VAR_HERO_POS_MASK, d0   # var[0xFD] = full mask
+    mov     d2, d1
+    call    WriteVar, 0, 0
+    mov     VAR_HERO_ACTION, d0     # var[0xFA] = FIRE(0x80)? 1 : 0
+    mov     d2, d1
+    and     0x80, d1
+    beq     rig_act0
+    mov     1, d1
+    bra     rig_act_w
+rig_act0:
+    clr     d1
+rig_act_w:
+    call    WriteVar, 0, 0
+    mov     VAR_HERO_ACT_MASK, d0   # var[0xFE] = full mask (button bit already in it)
+    mov     d2, d1
     call    WriteVar, 0, 0
 ri_ret:
     ret     [d2,d3,a2,a3], 0x20
