@@ -8,31 +8,36 @@ reproduces it.
 
 ## Bug 1 — input mix-ups: a key occasionally reads as the wrong direction/action
 
-**Cause.** The keybed read scans the TG voice-allocator held-slot bitmap `0x500D288C` and
-reads each held slot's note at `0x500D1278 + slot*0x2C + 0x0C`. At note-on the firmware
-sets a slot's held bit **~1 VM frame before it writes that slot's note field**. During
-that one frame the slot reads either **note 0** (a fresh slot) → classified as action
-(`<= 60`), or the **stale note left from the slot's previous use** → a wrong direction.
-`ReadInput` runs once per VM frame (~30 ms) and only *occasionally* samples that narrow
-transient — hence "sometimes a different effect, but close to correct."
+The keybed read scans the TG voice-allocator held-slot bitmap `0x500D288C` and reads each
+held slot's note at `0x500D1278 + slot*0x2C + 0x0C`. Two refinements, after measuring what
+`ReadInput` actually sees at its once-per-VM-frame (~30 ms) sampling rate:
 
-`awinput_bug.lua` catches it directly (water part, rapid presses): e.g.
-`down={F5} held={64:0} mask=80` (fresh slot 64, note 0 → spurious action) and
-`down={C6} held={76:77}` (slot 76 still shows the previous F5's note 77 → a left flash
-when C6/right was pressed).
+**What is NOT the problem (a false lead I first chased).** Sub-frame probing suggested a
+slot's held bit is set ~1 frame before its note field is written, so a fresh slot would
+read note 0 (→ action) or a stale note (→ wrong direction). But at true VM-frame
+granularity the note is **already correct** the first frame a slot appears
+(`awalloc.lua`: `APPEAR+0 slot65 note=77`, `slot67 note=84` — never stale). A single key
+also sounds exactly one voice with the right note, no arranger chord/harmony/layer
+(`awvoices.lua`: C2→36, C3→48, C4→60, F5→77, A5→81, C6→84). So the stale/fresh transient
+is sub-frame noise the game never samples. A first attempt at a per-slot 2-frame debounce
+to filter it was **wrong and reverted**: it added a second frame of lag on top of the
+firmware's, which shifts short taps into their release phase and drops them — strictly
+worse.
 
-**Fix.** A per-slot 2-frame debounce (`vm.inc`: `KBD_PREV_MASK`, `KBD_STABLE`;
-`interp.s` passes A/B of the keybed scan): a slot's note is read only after its held bit
-has persisted a full VM frame — by then the note field is correct — so the 1-frame
-allocation transient is never acted on. Note 0 is also ignored defensively.
-`awinput_fix3.lua` quantifies it: press-context wrong-direction glitch-frames drop from
-(raw) to **0** with the debounce.
+**The real refinements:**
+- **Skip note 0.** A slot momentarily reads note 0 only while unallocated; note 0 would
+  classify as action (`<= 60`), so a slot with note 0 is skipped. Cheap guard.
+- **Cancel opposing directions.** The held bitmap lags physical key-up by ~1 frame
+  (firmware key-up processing; `awrelease.lua` shows the bit clearing ~50 ms after
+  release). So releasing left while pressing right briefly shows **both** for one frame,
+  and the derive's RIGHT-beats-LEFT (and DOWN-beats-UP) rule would jerk the wrong way for
+  that frame. When both bits of an axis are set, `ReadInput` now zeroes that axis (a
+  1-frame neutral instead of a wrong direction). Diagonals (non-opposing bits) are
+  untouched — verified: F5+A5 → left+down (`FD=06`), F5+C6 → neutral, Ab5+A5 → neutral
+  (`awcancel.lua`).
 
-**Residual (not a wrong direction).** The held bitmap lags physical key-up by ~1 VM
-frame (firmware key-up processing), so a released direction lingers ~30 ms — the *correct*
-direction, slightly extended (`awrelease.lua` shows the sounding mask clearing ~50 ms
-after key-up). That is firmware latency the ride-along module can't remove; it only
-causes a brief overlap when switching keys very fast, not a wrong input.
+**Residual.** The ~1-frame firmware input latency itself can't be removed from a
+ride-along module; input is correct but ~30 ms delayed, like any frame-sampled input.
 
 ## Bug 2 — dynamic elements periodically disappear (background stays)
 

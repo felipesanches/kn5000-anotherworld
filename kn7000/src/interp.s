@@ -470,47 +470,29 @@ rig_nu:
     or      0x80, d2
 rig_nf:
     # --- fold the held keybed notes into the mask (polyphonic; see vm.inc) ---
-    # Note <= 60 (bass range + C4) = action; F5 left, A5 down, C6 right, Ab5/Bb5 up.
-    # A held slot's note is read only once its held bit has survived a full VM frame
-    # (per-slot debounce), which skips the 1-frame note-on allocation transient (note 0
-    # or a stale note). Keyboard and panel share d2, so holding either (or both) works.
-    # Pass A: STABLE[i] = HELD[i] & PREV[i]; PREV[i] = HELD[i].  (i = 0..15)
-    clr     d0
-rkb_pa:
-    mov     TG_HELD_MASK, a2
-    add     d0, a2
-    movbu   (a2), d1                # cur = held bitmap byte
-    mov     KBD_PREV_MASK, a3
-    add     d0, a3
-    movbu   (a3), d3                # prev
-    movbu   d1, (a3)                # PREV[i] = cur
-    and     d1, d3                  # d3 = cur & prev
-    mov     KBD_STABLE, a2
-    add     d0, a2
-    movbu   d3, (a2)                # STABLE[i]
-    inc     d0
-    cmp     16, d0
-    bne     rkb_pa
-    # Pass B: classify the note of every slot whose STABLE bit is set.
+    # For each held voice slot (bit set in TG_HELD_MASK), read its MIDI note and OR the
+    # matching AW mask bit: note <= 60 (bass range + C4) = action; F5 left, A5 down,
+    # C6 right, Ab5/Bb5 up. note 0 = a slot being allocated (note not yet written) -- skip
+    # it, else a key press flashes a spurious action. Keyboard and panel share d2.
     clr     d3                      # keybed mask accumulator
     clr     d0
     mov     d0, (0, sp)             # slot = 0
     mov     TG_NODE_BASE, a2        # voice node pointer
-rkb_pb:
+rkb_loop:
     mov     (0, sp), d0             # slot
     mov     d0, d1
     lsr     3, d1                   # byte = slot >> 3
-    mov     KBD_STABLE, a3
+    mov     TG_HELD_MASK, a3
     add     d1, a3
-    movbu   (a3), d1                # STABLE byte
+    movbu   (a3), d1                # held bitmap byte
     mov     (0, sp), d0
     and     7, d0                   # bit = slot & 7
-    lsr     d0, d1                  # STABLE >> bit
+    lsr     d0, d1
     and     1, d1
-    beq     rkb_next                # slot not stably held
+    beq     rkb_next                # slot not held
     movbu   (TG_NODE_NOTE, a2), d0  # MIDI note of this held voice
     cmp     0, d0
-    beq     rkb_next                # ignore an unallocated slot (note 0)
+    beq     rkb_next                # skip a slot whose note is not written yet
     cmp     KBD_ACTION_MAX, d0
     ble     rkb_act                 # note <= 60 -> action (bass range + C4)
     cmp     KBD_LEFT_NOTE, d0
@@ -544,8 +526,25 @@ rkb_next:
     inc     d0
     mov     d0, (0, sp)
     cmp     128, d0
-    bne     rkb_pb
+    bne     rkb_loop
     or      d3, d2                  # fold keybed mask into the panel mask
+    # Opposing directions held at once are a 1-frame switch artifact (the held bitmap lags
+    # physical key-up by ~1 frame, so releasing left while pressing right briefly shows
+    # both). Cancel each axis when both of its bits are set, so a quick left<->right or
+    # up<->down switch gives a 1-frame neutral instead of jerking the wrong way (RIGHT/DOWN
+    # would otherwise win). Diagonals (non-opposing bits) are untouched.
+    mov     d2, d1
+    and     3, d1                   # LEFT(2) | RIGHT(1)
+    cmp     3, d1
+    bne     rig_lrok
+    and     0xFC, d2                # both held -> clear L and R
+rig_lrok:
+    mov     d2, d1
+    and     0xC, d1                 # DOWN(4) | UP(8)
+    cmp     0xC, d1
+    bne     rig_udok
+    and     0xF3, d2                # both held -> clear U and D
+rig_udok:
     # d2 = panel mask | keybed mask; now derive the hero variables
     # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
     mov     VAR_HERO_LR, d0

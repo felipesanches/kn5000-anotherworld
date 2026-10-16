@@ -168,11 +168,3 @@
 .equ KBD_UP_NOTE_B,   82             # Bb5 (A#5)
 .equ KBD_DOWN_NOTE,   81             # A5
 .equ KBD_RIGHT_NOTE,  84             # C6
-# Per-slot 2-frame debounce of the held-slot bitmap. At note-on the firmware sets a
-# slot's held bit ~1 frame before it writes the slot's note field, so for that one frame
-# the slot reads note 0 (-> a spurious action) or the stale note left from its previous
-# use (-> a wrong direction). Reading a slot's note only after its held bit has persisted
-# a full VM frame skips that transient (by then the note is correct). PREV = last frame's
-# bitmap, STABLE = this frame AND last frame. Each is 16 bytes (128 slots).
-.equ KBD_PREV_MASK,   0x44080024     # 16 bytes: held bitmap as of the previous VM frame
-.equ KBD_STABLE,      0x44080034     # 16 bytes: slots held this frame AND last frame

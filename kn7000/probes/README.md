@@ -25,6 +25,9 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `awinput_fix3.lua`                            | does the per-slot 2-frame debounce fix the press glitches?  | **yes** -- press-context wrong-direction glitch-frames drop to 0 |
 | `awdis.py`                                    | what page copies does the water bytecode emit?              | `python3 awdis.py resource-0x1b.bin` -> shows COPY src=0x83 (VSCROLL) at 0x01AC = the dynamic-layer carry. Bug-2 evidence |
 | `awcopytrace.lua`                             | does CopyPage resolve source pages correctly now?           | **yes** -- src=0x40->page 0, src=0x03->page 3 (so 0x83->page 3, not page 0) |
+| `awvoices.lua`                                | does one key sound more than one note (arranger chord)?     | no -- one key = one voice, correct note (C2..C6 -> 36..84). Rules out harmony/split contamination |
+| `awalloc.lua`                                 | is a slot's note correct the frame it appears?              | **yes** at VM-frame granularity (APPEAR+0 note already right) -- the 'stale note' was sub-frame, never sampled by ReadInput |
+| `awcancel.lua`                                | diagonals kept, opposing pairs cancelled?                   | **yes** -- F5+A5 -> left+down (FD=06); F5+C6 and Ab5+A5 -> neutral (switch-lag fix) |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can
