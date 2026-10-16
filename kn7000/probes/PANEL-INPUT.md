@@ -49,15 +49,29 @@ The five buttons chosen (distinct bytes, so any combination is independently rea
 | DOWN      | R1/R2 OCTAVE -       | CPR_SEG7 | `0x5006BE67` | 0x02 |
 | FIRE      | SUSTAIN              | CPR_SEG5 | `0x5006BE65` | 0x08 |
 
-## The limit: one panel button at a time (`awcombo.lua`)
+## Multiple buttons DO coexist — diagonals and move+fire work (`awcombo2.lua`, `awdiag.lua`, `awstagger.lua`)
 
-`awcombo.lua` presses two buttons at once and reads the shadow bits. The firmware reports
-**only one** pressed button at a time — every combo collapses to a single bit
-(RIGHT+FIRE→RIGHT only, UP+LEFT→LEFT only, DOWN+RIGHT→RIGHT only). The control panel is a
-menu panel, not a rollover game matrix. Consequence: no diagonals and no move+fire from
-the panel. The water part (swim up, then exit sideways; no gun yet) is playable with
-single-axis input; this is a measured hardware constraint, not a code limit — `ReadInput`
-ORs the mask bits and would pass a diagonal through if the firmware ever set two.
+An earlier reading (`awcombo.lua`) concluded "one button at a time, no diagonals." **That
+was wrong — a test artifact.** `awcombo.lua` re-pressed the combo every frame
+(`clearall()` then set), toggling each held button 0->1 many times per 4 ms panel scan;
+that churn races the scan and only one change survives. Pressing cleanly tells a different
+story:
+
+- `awdiag.lua` (both buttons set in the *same* frame, held steady): still collapses to one
+  — two switch-changes in a single 250 Hz scan cycle lose one.
+- `awcombo2.lua` / `awstagger.lua` (buttons pressed a few frames **apart**, as a human
+  does, then both held): **both bits set and persist.** All four diagonals register
+  (UP+RIGHT, UP+LEFT, DOWN+RIGHT, DOWN+LEFT) and move+fire registers (RIGHT+SUSTAIN).
+
+So the only thing that collapses is two presses landing in the *exact same* ~4 ms scan —
+impossible for human fingers, and most likely a MAME scan/tx timing artifact rather than
+real-hardware behaviour (MAME's `panel_scan` in `kn_cpanel.cpp` does emit a frame for
+every changed segment and queues them all). **Diagonals and move+fire are available for
+normal play**, and the shipped `ReadInput` already ORs the shadow bits, so no code change
+is needed to use them.
+
+(SUSTAIN registers fine as fire when pressed on its own or staggered; the single `F=0` in
+`awcombo2.lua`'s first line was only because fire was pressed in the *same* frame as RIGHT.)
 
 ## Correctness: the hero variables match the oracle (`awinputverify.lua`)
 
