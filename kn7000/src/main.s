@@ -223,7 +223,7 @@ lgd_pal:
     mov     FOPEN, a3
     calls   (a3)
     cmp     0, a0
-    beq     lgd_flag
+    beq     lgd_font
     mov     a0, (0x18, sp)
     mov     STAGING_BIG, a0
     mov     (0x18, sp), a1
@@ -241,6 +241,90 @@ lgd_c3:
     inc     a1
     add     -1, d2
     bne     lgd_c3
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- font (DRAW_STRING glyphs) ---
+lgd_font:
+    mov     path_font, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_stridx
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_FONT_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_FONT, a1
+lgd_c4:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c4
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- string index ---
+lgd_stridx:
+    mov     path_stridx, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_strdat
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_STRIDX_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_STRIDX, a1
+lgd_c5:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c5
+    mov     (0x18, sp), a0
+    mov     FCLOSE, a3
+    calls   (a3)
+    # --- string data ---
+lgd_strdat:
+    mov     path_strdat, a0
+    mov     aw_mode, a1
+    mov     FOPEN, a3
+    calls   (a3)
+    cmp     0, a0
+    beq     lgd_flag
+    mov     a0, (0x18, sp)
+    mov     STAGING_BIG, a0
+    mov     (0x18, sp), a1
+    mov     1, d0
+    mov     AW_STRDAT_SZ, d1
+    mov     FREAD, a3
+    calls   (a3)
+    mov     d0, d2
+    mov     STAGING_BIG, a0
+    mov     AW_STRDAT, a1
+lgd_c6:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    inc     a0
+    inc     a1
+    add     -1, d2
+    bne     lgd_c6
     mov     (0x18, sp), a0
     mov     FCLOSE, a3
     calls   (a3)
@@ -317,6 +401,15 @@ path_vid2:
     .align 2
 path_pal:
     .asciz "C:\TECHNICS\DATA\AWPAL.AW"
+    .align 2
+path_font:
+    .asciz "C:\TECHNICS\DATA\AWFONT.AW"
+    .align 2
+path_stridx:
+    .asciz "C:\TECHNICS\DATA\AWSTRIDX.AW"
+    .align 2
+path_strdat:
+    .asciz "C:\TECHNICS\DATA\AWSTRDAT.AW"
     .align 2
 aw_mode:
     .asciz "rb"

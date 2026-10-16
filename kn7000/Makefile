@@ -16,6 +16,9 @@ ROMPATH     ?= ../../technics_romsets
 # NOT game_data/MSDOS/ which holds empty placeholders). Each is loaded as its own SD
 # file because the firmware's fread has a 16-bit count and no sequential reads.
 RES_DIR     ?= ../../custom-kn5000-roms/anotherworld/src/resources
+# The 8x8 font and the string index/data tables (DRAW_STRING). These are the exact
+# blobs the KN5000 build binclude's; shared verbatim so the two renderers agree.
+FONT_DIR    ?= ../../custom-kn5000-roms/anotherworld/src/hardcoded_data
 SD_ADDFILE  := $(PYTHON) $(DISASM_REPO)/tools/sd_addfile.py
 
 all: build/BASEEXT.XAP
@@ -35,6 +38,9 @@ card: build/BASEEXT.XAP
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID1.AW' $(RES_DIR)/resource-0x19.bin
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID2.AW' $(RES_DIR)/resource-0x11.bin
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWPAL.AW'  $(RES_DIR)/resource-0x17.bin
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWFONT.AW'   $(FONT_DIR)/anotherworld_chargen.rom
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWSTRIDX.AW' $(FONT_DIR)/str_index.rom
+	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWSTRDAT.AW' $(FONT_DIR)/str_data.rom
 
 run: card
 	$(MAME) kn7000 -bios sp7001 -rompath $(ROMPATH) -harddisk build/another_sd.img -window

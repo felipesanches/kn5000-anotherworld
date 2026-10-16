@@ -652,3 +652,104 @@ poly_hzero:
 
 poly_done:
     ret     [d2,d3,a2,a3], 0x30
+
+# ================================================================================
+# DrawString(d0 = stringId, d1 = x [char column], d2 = y [pixels], d3 = colour):
+# render an Another World string from the str_index/str_data tables, 8x8 glyphs from
+# AW_FONT, onto CUR_PAGE_1. Ported from the KN5000 DRAW_STRING. Locals live at (4,sp)+
+# because `call DrawChar` writes its return address at (0,sp).
+DrawString:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x18, sp
+    add     -1, d1
+    asl     3, d1                   # x = 8 * (col - 1)
+    mov     d1, (4, sp)             # x
+    mov     d1, (0xc, sp)           # x0 (line start)
+    mov     d2, (8, sp)             # y
+    mov     d3, (0x10, sp)          # colour
+    and     0xffff, d0              # stringId
+    asl     1, d0
+    cmp     AW_STRIDX_SZ, d0        # guard: id out of the index table -> draw nothing
+    bge     dstr_done
+    mov     AW_STRIDX, a2
+    add     d0, a2
+    movhu   (a2), d0                # offset into str_data (LE u16)
+    cmp     AW_STRDAT_SZ, d0        # guard: offset out of str_data
+    bge     dstr_done
+    mov     AW_STRDAT, a2
+    add     d0, a2                  # char pointer
+dstr_loop:
+    movbu   (a2), d3                # char
+    inc     a2
+    cmp     0, d3
+    beq     dstr_done               # NUL terminator
+    cmp     10, d3                  # '\n'
+    bne     dstr_char
+    mov     (8, sp), d0             # y += 8
+    add     8, d0
+    mov     d0, (8, sp)
+    mov     (0xc, sp), d0           # x = x0
+    mov     d0, (4, sp)
+    bra     dstr_loop
+dstr_char:
+    mov     (4, sp), d0             # x
+    mov     (8, sp), d1             # y
+    mov     (0x10, sp), d2          # colour
+    call    DrawChar, 0, 0          # d3 = char (preserved across the call)
+    mov     (4, sp), d0             # x += 8
+    add     8, d0
+    mov     d0, (4, sp)
+    bra     dstr_loop
+dstr_done:
+    ret     [d2,d3,a2,a3], 0x28
+
+# ================================================================================
+# DrawChar(d0 = x, d1 = y, d2 = colour, d3 = char): plot an 8x8 glyph at (x,y) on
+# CUR_PAGE_1. Clipped to the 320x200 page (the KN5000 page is 320x240; ours is 200).
+DrawChar:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     d2, (0, sp)             # colour (no calls here, so (0,sp) is safe)
+    mov     d3, (4, sp)             # char
+    exth    d0
+    cmp     0, d0                   # clip x to [0, 311]
+    blt     dchr_ret
+    cmp     312, d0
+    bge     dchr_ret
+    exth    d1
+    cmp     0, d1                   # clip y to [0, 191]
+    blt     dchr_ret
+    cmp     192, d1
+    bge     dchr_ret
+    mov     (4, sp), d2             # char -> font pointer
+    and     0xff, d2
+    add     -0x20, d2
+    asl     3, d2
+    mov     AW_FONT, a2
+    add     d2, a2
+    mov     320, d2                 # dst = CUR_PAGE_1 + y*320 + x
+    mul     d2, d1
+    mov     (CUR_PAGE_1), a3
+    add     d1, a3
+    add     d0, a3
+    mov     8, d3                   # 8 rows
+dchr_jloop:
+    movbu   (a2), d1                # row bits (bit 7 = leftmost)
+    inc     a2
+    mov     8, d2                   # 8 columns
+dchr_iloop:
+    mov     d1, d0
+    and     0x80, d0
+    beq     dchr_noplot
+    movbu   (0, sp), d0             # colour
+    movbu   d0, (a3)
+dchr_noplot:
+    asl     1, d1
+    inc     a3
+    add     -1, d2
+    bne     dchr_iloop
+    add     312, a3                 # next scanline (back 8, down 320)
+    add     -1, d3
+    bne     dchr_jloop
+dchr_ret:
+    ret     [d2,d3,a2,a3], 0x20

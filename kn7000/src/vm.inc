@@ -81,10 +81,16 @@
 .equ AW_VIDEO1,       0x44420000     # resource 0x19, 65230 bytes
 .equ AW_VIDEO2,       0x44440000     # resource 0x11, 25108 bytes
 .equ AW_PALETTES,     0x44460000     # resource 0x17, 2048 bytes
+.equ AW_FONT,         0x44480000     # anotherworld_chargen.rom, 768 bytes (8x8, chars 0x20+)
+.equ AW_STRIDX,       0x44490000     # str_index.rom, 2048 bytes (LE u16 offset per string id)
+.equ AW_STRDAT,       0x444A0000     # str_data.rom, 4096 bytes (NUL-terminated strings)
 .equ AW_BYTECODE_SZ,  9871
 .equ AW_VIDEO1_SZ,    65230
 .equ AW_VIDEO2_SZ,    25108
 .equ AW_PALETTES_SZ,  2048
+.equ AW_FONT_SZ,      768
+.equ AW_STRIDX_SZ,    2048
+.equ AW_STRDAT_SZ,    4096
 .equ AW_LOADED_FLAG,  0x44080020     # set to 0x600D once all four are loaded
 
 .equ DRAW_BUDGET,     0x44080070     # per-VIDEO-op polygon budget (anti-hang guard)

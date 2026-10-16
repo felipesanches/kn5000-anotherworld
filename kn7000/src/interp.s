@@ -300,8 +300,18 @@ CopyPage:
     mov     d3, d0
     call    GetPagePtr, 0, 0
     mov     a0, a3                  # a3 = dst
+    # Resolve the source page id. srcId >= 0xFE (0xFE front / 0xFF back) is used
+    # UNMASKED; a normal page id has the 0x40 bit stripped. (The 0xBF-masked form
+    # with bit 7 set selects vertical-scroll copy mode, which the intro never uses;
+    # match the KN5000 by treating 0xFE/0xFF specially before masking.)
     mov     d2, d0
-    and     0xbf, d0                # mask off scroll bit for source select
+    and     0xff, d0
+    cmp     0xff, d0
+    beq     cp_src
+    cmp     0xfe, d0
+    beq     cp_src
+    and     0xbf, d0                # normal page: strip the 0x40 bit
+cp_src:
     call    GetPagePtr, 0, 0
     mov     a0, a2                  # a2 = src
     mov     PAGE_SIZE, d2
@@ -910,10 +920,17 @@ OpKillThread:
 
 # ---- 0x12 DRAW_STRING: stringId(BE), x, y, colour -----------------------------
 OpDrawString:
-    # Text rendering (str table) is not loaded in this build; consume the 5 bytes
-    # (word stringId, byte x, byte y, byte colour) and continue. Intro visuals are
-    # polygon-based; strings can be added later with the str_data/str_index blobs.
+    # operands: stringId (BE word), x (byte, char column), y (byte, pixels), colour.
+    # DrawString preserves a2 (its movm/ret save-set), so the cursor survives the call.
+    movbu   (a2), d0                # stringId hi
+    movbu   (1, a2), d1             # stringId lo
+    asl     8, d0
+    or      d1, d0                  # d0 = stringId
+    movbu   (2, a2), d1             # x (char column)
+    movbu   (3, a2), d2             # y (pixels)
+    movbu   (4, a2), d3             # colour
     add     5, a2
+    call    DrawString, 0, 0
     bra     ei_end
 
 # ---- 0x13 SUB: var[dst] -= var[src] -------------------------------------------
