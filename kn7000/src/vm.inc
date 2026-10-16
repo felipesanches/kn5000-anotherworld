@@ -96,5 +96,5 @@
 # bytes: frame(u16)@0, thread(u8)@2, opcode(u8)@3, pc(u16)@4. Dumped by probes/awtrace.lua.
 .equ TRACE_COUNT,     0x44080078     # entries logged so far
 .equ FRAME_NO,        0x4408007C     # current VM frame (tick) number
-.equ TRACE_BUF,       0x44800000     # 8 bytes/entry
-.equ TRACE_MAX,       40000
+.equ TRACE_BUF,       0x44800000     # 8 bytes/entry (up to ~1.6 MB here, clear of all else)
+.equ TRACE_MAX,       200000         # enough to hold the whole intro
