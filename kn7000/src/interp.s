@@ -322,6 +322,27 @@ gr_threads:
     call    WriteVar, 0, 0
     clr     d0
     movhu   d0, (REQ_NEXT_PART)
+    mov     (NO_SPLASH), d0         # a probe asked for the old start: the intro at tick 0
+    mov     NO_SPLASH_MAGIC, d1
+    cmp     d1, d0
+    beq     gr_intro
+    # Splash, as the KN5000 port: the copy-protection part's logo and credits sequence, which
+    # loads the intro when it ends (or when action is pressed). Thread 0 starts at SPLASH_PC
+    # instead of 0x0000 (whose thread 20 is the code wheel); 0x0000 would also have started the
+    # display loop on thread 60 and set var[0xFF] = 2, so do those here.
+    mov     PART_PROTECTION, d0
+    call    InitForPart, 0, 0
+    mov     THREADS_DATA, a2
+    mov     SPLASH_PC, d1
+    movhu   d1, (PC_OFFSET, a2)
+    movhu   d1, (VM_PC)             # thread 0 is the one about to run: its live PC too
+    mov     SPLASH_LOOP_PC, d1
+    movhu   d1, (60 * 4 + PC_OFFSET, a2)
+    mov     VAR_PAUSE_SLICES, d0
+    mov     2, d1
+    call    WriteVar, 0, 0
+    ret     [d2,d3,a2,a3], 0x20
+gr_intro:
     mov     0x3E81, d0              # GAME_PART_INTRO
     call    InitForPart, 0, 0
     ret     [d2,d3,a2,a3], 0x20
@@ -526,6 +547,22 @@ cp_ret:
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    movbu   (BTN_HELP_ADDR), d0     # HELP: pause and show the help screens (help.s)
+    and     BTN_HELP_BIT, d0
+    beq     ri_nohelp
+    call    HelpScreen, 0, 0
+ri_nohelp:
+    movbu   (BTN_CODES_ADDR), d0    # OTHER PART & FR: the level-code screen, as the DOS
+    and     BTN_CODES_BIT, d0       # game's C key -- not from the protection or code screens
+    beq     ri_nocodes
+    movhu   (CURRENT_PART_ID), d0
+    cmp     PART_PROTECTION, d0
+    beq     ri_nocodes
+    cmp     PART_PASSWORD, d0
+    bge     ri_nocodes              # 0x3E88 / 0x3E89 (the last part ids)
+    mov     PART_PASSWORD, d0
+    movhu   d0, (REQ_NEXT_PART)
+ri_nocodes:
     movhu   (CURRENT_PART_ID), d0
     cmp     0x3E81, d0
     bne     ri_gameplay

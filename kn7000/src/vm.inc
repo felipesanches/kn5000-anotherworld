@@ -149,6 +149,38 @@
 .equ BTN_FIRE_ADDR,   PANEL_CPR+5    # SUSTAIN              (CPR_SEG5 SW3)
 .equ BTN_FIRE_BIT,    0x08
 
+# The port's own buttons (measured with probes/awbtnmap5.lua, as above): HELP shows the help
+# screens, OTHER PART & FR opens the password (level code) screen, PAGE UP/DOWN and EXIT drive
+# the help screens.
+.equ BTN_HELP_ADDR,   PANEL_CPL+5    # HELP                 (CPC_SEG5 SW1)
+.equ BTN_HELP_BIT,    0x02
+.equ BTN_CODES_ADDR,  PANEL_CPL+5    # OTHER PART & FR      (CPC_SEG5 SW0)
+.equ BTN_CODES_BIT,   0x01
+.equ BTN_PAGE_ADDR,   PANEL_CPL+11   # PAGE UP / PAGE DOWN / EXIT (CPC_SEG11 SW4 / SW5 / SW7)
+.equ BTN_PAGEUP_BIT,  0x10
+.equ BTN_PAGEDN_BIT,  0x20
+.equ BTN_EXIT_BIT,    0x80
+.equ PART_PASSWORD,   0x3E88         # the level-code screen (rawgl kPartPassword)
+.equ PART_PROTECTION, 0x3E80         # the copy-protection part, whose start is the splash
+
+# Help screen state. The pages are drawn into their own 320x200 buffer, clear of the four VM
+# pages, and shown through their own 4-colour palette; the game's palette is saved and put back.
+.equ HELP_BUF,        0x44140000     # 64000 bytes (the pages end at 0x44140000)
+.equ HELP_PAGE_NO,    0x4408005C     # u32: the help page shown (0..HELP_PAGES-1)
+.equ HELP_PAL_SAVE,   0x44080100     # 32 bytes: the game's palette while the help is up
+.equ HELP_PAGES,      3
+.equ HELP_TICK,       0x44080120     # u32: help polls since the page was last shown
+.equ HELP_REFRESH,    16             # re-show the page every 16 polls (~0.5 s)
+
+# Splash: by default the game starts like the KN5000 port, at the copy-protection part's logo and
+# credits sequence (bytecode 0x007B), which then loads the intro. A probe that needs the old start
+# (the intro at tick 0, as every recorded fixture assumes) writes NO_SPLASH_MAGIC to NO_SPLASH
+# before the game task starts; a random power-on value will not match it.
+.equ NO_SPLASH,       0x44080058     # u32
+.equ NO_SPLASH_MAGIC, 0x5EED0FF0
+.equ SPLASH_PC,       0x007B         # part 0x3E80: the logo / credits sequence (thread 0)
+.equ SPLASH_LOOP_PC,  0x10A3         # part 0x3E80: its display loop (thread 60), as 0x0000 sets up
+
 # Another World hero-control variables (same indices as the DOS game). The mask bits and
 # signed values match rustyworld's update_player (our checksum oracle): RIGHT {1,+1},
 # LEFT {2,-1}, DOWN {4,+1}, UP {8,-1}, BUTTON {0x80,+1}; RIGHT beats LEFT, DOWN beats UP.

@@ -20,7 +20,7 @@
 .include "platform.inc"
 .include "vm.inc"
 .include "awres.inc"                # generated: RES_COUNT, RES_BASE, RES_END
-.mnbase 0x502B6000                  # where xap_addon.py places this module
+.mnbase 0x502B4D80                  # where xap_addon.py places this module (Makefile MODULE_AT)
 
 # =================================================================================
 # The hook. Entered exactly as BASEEXT's XapEntry (a0 = framework, a1 = context,
@@ -337,7 +337,52 @@ bp_px:
     mov     d0, a3
     add     -1, d3
     bne     bp_row
+    call    FillBorder, 0, 0
     ret     [d2,d3,a2,a3], 0x20
+
+# FillBorder: paint everything around the 320x200 game window black -- the 20-row bands above
+# and below it and the 160-pixel strips beside it -- so the SP7001 screen behind the game never
+# shows. Done on every blit: the firmware repaints the whole frame now and then (e.g. when the
+# R1/R2 OCTAVE buttons, the panel's UP/DOWN, are pressed). 32-bit stores, 8 per loop.
+FillBorder:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    clr     d0
+    mov     FB, a0                  # top band: rows 0..AW_Y0-1, full width
+    mov     AW_Y0 * FB_STRIDE / 32, d1
+    call    fb_run, 0, 0
+    mov     FB + (AW_Y0 + AW_H) * FB_STRIDE, a0   # bottom band
+    mov     (FB_H - AW_Y0 - AW_H) * FB_STRIDE / 32, d1
+    call    fb_run, 0, 0
+    mov     FB + AW_Y0 * FB_STRIDE, a1            # side strips, one row at a time
+    mov     AW_H, d2
+fb_row:
+    mov     a1, a0                  # left strip: x 0..AW_X0-1
+    mov     AW_X0 * 2 / 32, d1
+    call    fb_run, 0, 0
+    mov     a1, a0                  # right strip: x AW_X0+AW_W..FB_W-1
+    add     (AW_X0 + AW_W) * 2, a0
+    mov     (FB_W - AW_X0 - AW_W) * 2 / 32, d1
+    call    fb_run, 0, 0
+    add     FB_STRIDE, a1
+    add     -1, d2
+    bne     fb_row
+    ret     [d2,d3,a2,a3], 0x20
+
+# fb_run(a0 = start, d1 = 32-byte blocks, d0 = 0): store d1 * 8 zero words from a0. Leaf.
+fb_run:
+    mov     d0, (a0)
+    mov     d0, (4, a0)
+    mov     d0, (8, a0)
+    mov     d0, (12, a0)
+    mov     d0, (16, a0)
+    mov     d0, (20, a0)
+    mov     d0, (24, a0)
+    mov     d0, (28, a0)
+    add     32, a0
+    add     -1, d1
+    bne     fb_run
+    rets
 
 # =================================================================================
     .align  4
@@ -370,4 +415,5 @@ aw_mode:
     .align 4
 .include "vm.s"
 .include "interp.s"
+.include "help.s"
 .include "awres_tab.s"              # generated: ResAddr, ResSize, ResType

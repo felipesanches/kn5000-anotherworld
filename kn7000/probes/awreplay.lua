@@ -11,6 +11,9 @@
 --     -autoboot_script probes/awreplay.lua -str <N> -window -nothrottle
 local M = manager.machine
 local sp = M.devices[":maincpu"].spaces["program"]
+-- The port starts with the splash unless NO_SPLASH (0x44080058) holds the magic 0x5EED0FF0; the
+-- recorded fixtures and reference logs start at the intro, so write it (AW_SPLASH=1 keeps the splash).
+if os.getenv("AW_SPLASH") ~= "1" then sp:write_u32(0x44080058, 0x5EED0FF0) end
 local function field(tag,name) local p=M.ioport.ports[tag]; if p then for _,f in pairs(p.fields) do if f.name==name then return f end end end end
 local SD = field(":cpanel:CPR_SEG1","SD CARD LOAD (SW7)")
 local CUR_PAGE_2=0x4407100C; local FRAME_NO=0x4408007C

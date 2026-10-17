@@ -6,7 +6,8 @@ DISASM_REPO ?= ../../kn7000_disassembly
 PYTHON      ?= python3
 XAPASM      := $(PYTHON) $(DISASM_REPO)/tools/xapasm.py
 BASE_XAP    ?= $(DISASM_REPO)/baserom/sp7001_baseext.xap
-MODULE_AT   := 0x502B6000
+# The start of BASEEXT.XAP's free tail (xap_addon.py): room for a 12,928-byte module.
+MODULE_AT   := 0x502B4D80
 SD_IMAGE    ?= ../../technics_roms/media/sp7001_activated_sdcard.img
 # The ONLY build with the sp7001 BIOS (driver: src/mame/matsushita/kn7000.cpp).
 # The overlay ../../kn7000-emulator/kn7000 does NOT have it.
@@ -29,7 +30,7 @@ $(RES_OUT)/awres.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
 	@mkdir -p $(RES_OUT)
 	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $@
 
-build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc src/interp.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
+build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
 	@mkdir -p build
 	$(XAPASM) src/main.s -I src -I $(RES_OUT) -o $@ -m build/another.map
 

@@ -29,6 +29,20 @@ The `0x44` window is mapped as 16 MB by the MAME driver; the game now uses it up
   already resident, so nothing to do until audio exists.
 - `copyPage` with a vertical scroll outside ±199 now skips the copy, as raw/rawgl do (the port
   used to clamp to 199; the final part scrolls past the range).
+- `ReadInput` maps the controls in **every** part after the intro (it used to do so only in the
+  lake, so the prison got no input at all). Prison check: `probes/awpartkeys.lua` rocks the cage
+  from the part start; 0 of 677 ticks differ from the canonical handling of the keys and the replay
+  matches rustyworld 600/600 (`START_PART=0x3E83`; fixture `sessions/2026-10-17-prison-shake-*`).
+- From the KN5000 port: the **splash** (part 0x3E80's logo and credits sequence at 0x007B, display
+  loop on thread 60 at 0x10A3, var 0xFF = 2 -- the code wheel, thread 20, is not started); it
+  matches rustyworld started the same way (`AW_SPLASH=1`) for 1200/1200 ticks, splash and intro.
+  Probes that need the intro at tick 0 write `NO_SPLASH_MAGIC` (vm.inc) unless `AW_SPLASH=1`.
+  **HELP** shows three help pages (`src/help.s`); **OTHER PART & FR** requests the code screen
+  0x3E88. The LCD around the game window is painted black on every blit (`FillBorder`), because
+  the firmware repaints the whole frame on some panel presses (`probes/awfbwrites.lua`).
+- The module now starts at `0x502B4D80` (BASEEXT.XAP's whole free tail, 12,928 bytes; it is
+  10,192). Bigger additions (e.g. an audio player) will need code or data loaded into the `0x44`
+  window instead.
 
 ## 3. Each part's needs (`tools/aw_partinfo.py build/res --compact`)
 
@@ -80,9 +94,9 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    arena/baths → final; the lake's normal exit is `LOAD 3E83` (bytecode 0x10CF). The game starts
    at the intro with the copy-protection bypass vars set in `GameReset` (0xBC=16, 0xC6=128,
    0xDC=33, 0xF2=4000 -- the same values the reference starts with).
-2. **Password screen input (0x3E88/89).** It reads var 0xDA, the last typed character, so it needs
-   a way to type letters; the current input map has only the D-pad and action. A note map or panel
-   scheme for letters is a design choice to make. This also gives a way to jump to any part.
+2. **Password screen (0x3E88/89).** OTHER PART & FR opens it. Its code also reads var 0xDA, the
+   last typed character (the DOS keyboard path); the port does not set that var, so letters come
+   only from the screen's own D-pad letter grid.
 3. **Sound effects** (103 resources; opcode 0x18 PLAY_SOUND id/frequency/volume/channel). The
    format is 8-bit signed PCM after an 8-byte header (length and loop length in words), played
    on 4 channels at one of 40 frequencies (rustyworld `rodio.rs`). How the KN7000 can output raw
@@ -95,9 +109,19 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    produces marks.
 5. **Pacing in the big parts.** City and baths have the largest code and polygon sets (62 KB and
    51 KB of bytecode, 65 KB of video1 each); measure each part's frame work time against
-   `var[0xFF] × 20 ms` once they are played through.
+   `var[0xFF] × 20 ms` once they are played through. A lead: the module blits the 320x200 page to
+   the LCD about 33 times a second (`probes/awfbwrites.lua`), more often than the VM shows frames,
+   and its inner loop is 11 instructions per pixel (~700k per blit, from the code) -- blitting only when the shown page changes would
+   free a lot of CPU.
 6. **Real hardware.** Confirm the `0x44` window's size (the game needs ~4.6 MB of it) and the SD
    load time on the instrument.
+
+**Kept for later, only if it is needed — load on demand.** If the real `0x44` window is smaller
+than ~4.6 MB (or the 10.6 s startup becomes a problem), load each part's resources when the part
+starts, as the original engine does, instead of everything at boot: the largest part, the city,
+references 502,227 bytes of resources (code, polygons, palette, video2, its sounds and bitmaps).
+The catch to solve first: the firmware's file API only works on the hook's call chain (the
+firmware loading task), so the game task would need a way to get loads done in that context.
 
 ## 6. Differences between the reference and the original engine (found here)
 
