@@ -171,6 +171,15 @@
 .equ TG_NODE_BASE,    0x500D1278     # voice node array; MIDI note at +0x0C, stride 0x2C
 .equ TG_NODE_STRIDE,  0x2C
 .equ TG_NODE_NOTE,    0x0C
+# Active-voice ring (the FAST, symmetric key signal). Head cell holds a pointer to the
+# first node's link field (node+0x10); from a link L the note is at (L-4)=node+0x0C and
+# the next link at (L). A released note leaves the ring in ~17 ms -- symmetric with
+# key-on, unlike the sustain mask's ~50 ms key-off (that asymmetry was the "extra kick").
+# Walk guarded by bounds + a node cap so a bad pointer can't hang the VM.
+.equ TG_RING_HEAD,    0x500D1050     # u32: head link of the class-0 active-voice ring (0=empty)
+.equ TG_RING_LO,      0x500D1000     # sane address bounds for a ring link
+.equ TG_RING_HI,      0x500D3000
+.equ TG_RING_CAP,     64             # max nodes to walk
 # Note numbers (C4 = 60). Any note <= C4 is ACTION -- the whole bass/left-hand range plus
 # C4 itself. The right-hand cluster is the D-pad; Ab5 and Bb5 both map to UP.
 .equ KBD_ACTION_MAX,  60             # <= 60 (bass range + C4) -> action

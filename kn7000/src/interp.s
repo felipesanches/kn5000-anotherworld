@@ -481,30 +481,30 @@ rig_nu:
     beq     rig_nf
     or      0x80, d2
 rig_nf:
-    # --- fold the held keybed notes into the mask (polyphonic; see vm.inc) ---
-    # For each held voice slot (bit set in TG_HELD_MASK), read its MIDI note and OR the
-    # matching AW mask bit: note <= 60 (bass range + C4) = action; F5 left, A5 down,
-    # C6 right, Ab5/Bb5 up. note 0 = a slot being allocated (note not yet written) -- skip
-    # it, else a key press flashes a spurious action. Keyboard and panel share d2.
+    # --- fold the held keybed notes into the mask by walking the active-voice ring ---
+    # The ring (vm.inc TG_RING_*) drops a released note in ~17 ms, symmetric with key-on,
+    # so direction changes are crisp (the old TG_HELD_MASK scan lagged key-off ~50 ms).
+    # For each link L: note = (L-4); map note <= 60 (bass + C4) = action; F5 left, A5 down,
+    # C6 right, Ab5/Bb5 up. Bounds + a node cap guard against a corrupt pointer.
     clr     d3                      # keybed mask accumulator
+    mov     (TG_RING_HEAD), a2      # a2 = L = ring head link (0 = no keys)
     clr     d0
-    mov     d0, (0, sp)             # slot = 0
-    mov     TG_NODE_BASE, a2        # voice node pointer
+    mov     d0, (4, sp)             # node count (loop has no calls, so a stack local is safe)
 rkb_loop:
-    mov     (0, sp), d0             # slot
-    mov     d0, d1
-    lsr     3, d1                   # byte = slot >> 3
-    mov     TG_HELD_MASK, a3
-    add     d1, a3
-    movbu   (a3), d1                # held bitmap byte
-    mov     (0, sp), d0
-    and     7, d0                   # bit = slot & 7
-    lsr     d0, d1
-    and     1, d1
-    beq     rkb_next                # slot not held
-    movbu   (TG_NODE_NOTE, a2), d0  # MIDI note of this held voice
+    mov     a2, d0
     cmp     0, d0
-    beq     rkb_next                # skip a slot whose note is not written yet
+    beq     rkb_done                # L == 0 -> end of ring
+    mov     TG_RING_LO, d1
+    cmp     d1, d0
+    blt     rkb_done                # L below bounds -> stop (corrupt)
+    mov     TG_RING_HI, d1
+    cmp     d1, d0
+    bge     rkb_done                # L above bounds -> stop
+    mov     a2, a0                  # note = *(u8)(L - 4)
+    add     -4, a0
+    movbu   (a0), d0
+    cmp     0, d0
+    beq     rkb_adv                 # skip an unallocated node
     cmp     KBD_ACTION_MAX, d0
     ble     rkb_act                 # note <= 60 -> action (bass range + C4)
     cmp     KBD_LEFT_NOTE, d0
@@ -517,28 +517,30 @@ rkb_loop:
     beq     rkb_down
     cmp     KBD_RIGHT_NOTE, d0
     beq     rkb_right
-    bra     rkb_next
+    bra     rkb_adv
 rkb_act:
     or      0x80, d3
-    bra     rkb_next
+    bra     rkb_adv
 rkb_left:
     or      2, d3
-    bra     rkb_next
+    bra     rkb_adv
 rkb_up:
     or      8, d3
-    bra     rkb_next
+    bra     rkb_adv
 rkb_down:
     or      4, d3
-    bra     rkb_next
+    bra     rkb_adv
 rkb_right:
     or      1, d3
-rkb_next:
-    add     TG_NODE_STRIDE, a2
-    mov     (0, sp), d0
+rkb_adv:
+    mov     (a2), d0                # L = next link = *(u32)(L)
+    mov     d0, a2
+    mov     (4, sp), d0             # cap the walk
     inc     d0
-    mov     d0, (0, sp)
-    cmp     128, d0
+    mov     d0, (4, sp)
+    cmp     TG_RING_CAP, d0
     bne     rkb_loop
+rkb_done:
     or      d3, d2                  # fold keybed mask into the panel mask
     # Opposing directions held at once are a 1-frame switch artifact (the held bitmap lags
     # physical key-up by ~1 frame, so releasing left while pressing right briefly shows

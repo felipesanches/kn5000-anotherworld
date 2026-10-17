@@ -8,9 +8,10 @@ reproduces it.
 
 ## Bug 1 — input mix-ups: a key occasionally reads as the wrong direction/action
 
-The keybed read scans the TG voice-allocator held-slot bitmap `0x500D288C` and reads each
-held slot's note at `0x500D1278 + slot*0x2C + 0x0C`. Two refinements, after measuring what
-`ReadInput` actually sees at its once-per-VM-frame (~30 ms) sampling rate:
+The keybed read walks the TG active-voice **ring** from `0x500D1050` (per link `L`: note at
+`L-4`, next at `L`) — see the "fast signal" note below; it originally scanned the slower
+held-slot bitmap `0x500D288C`. Refinements, after measuring what `ReadInput` actually sees
+at its once-per-VM-frame sampling rate:
 
 **What is NOT the problem (a false lead I first chased).** Sub-frame probing suggested a
 slot's held bit is set ~1 frame before its note field is written, so a fresh slot would
@@ -35,6 +36,21 @@ worse.
   1-frame neutral instead of a wrong direction). Diagonals (non-opposing bits) are
   untouched — verified: F5+A5 → left+down (`FD=06`), F5+C6 → neutral, Ab5+A5 → neutral
   (`awcancel.lua`).
+- **Fast, symmetric key signal (the real cut to the "extra kick").** The sustain bitmap
+  `0x500D288C` is *set* on key-down in ~17 ms but *cleared* on key-up in ~50 ms (variable
+  33–50). That asymmetry is the stray kick: a released direction lingers while you switch.
+  The TG's active-voice **ring** (head `0x500D1050`) clears a released note in ~17 ms —
+  **symmetric** with key-on (`awringlat.lua`, 4 trials) — and is polyphonic/per-note
+  (C4+G4 → {60,67}; release C4 → {67} within a frame, `awring.lua`). Switching `ReadInput`
+  to walk the ring (bounds + node cap against a bad pointer) roughly **halves** the
+  wrong-direction frames on deliberate switches — clean A/B via the same applied-mask tap:
+  sustain = 23/99, ring = 13/99 (`awstray.lua`). Found by the fast-signal investigation
+  (`research-scratch/awkeyscan*/awcheck/awring*`). Caveats: the ring is *sounding* voices
+  (cleared fast here because the AW keybed sound has ~0 release; a long-release patch could
+  keep a voice ringed) and reflects all sounding voices (part-filter needed in general;
+  during AW nothing else sounds); head `0x500D1050` is the class-0 ring, correct for the AW
+  keybed sound. It does not *eliminate* the kick — the residual ~13/99 is the 1-frame
+  sampling quantization at the 80 ms water pace, which no key signal removes.
 
 **Residual — the one remaining oddity ("an extra kick on direction change").** Measured
 (`awlatency.lua`): a press appears in the held mask in **~17 ms**, but a release takes
