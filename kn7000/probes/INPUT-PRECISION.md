@@ -90,7 +90,25 @@ The only lever left for a more responsive *feel* is a **faster frame pace** (low
 or a smaller `var[0xFF]`), which makes the whole game run faster — i.e. trading authenticity
 for responsiveness. That is a product choice, not a bug fix.
 
+## The actual "wrong direction" bug — found after, and fixed
+
+The signal analysis above is about *latency/source* and holds. But Felipe pinned the symptom:
+**wrong direction, intermittent, on both the keybed and USB-MIDI** (which both feed the same
+ring). That is not a signal problem — it was the **newest-key-wins** heuristic in the derive.
+It assumed the ring is ordered oldest→newest (newest at the tail). `awringorder.lua` disproved
+it: the voice allocator reuses freed slots, so after sustained play the ring is in *slot*
+order, and **~15 % of overlaps are mis-ordered** (`newest=+1 right`, but `ring={84,77}` → the
+walk picks left). Newest-wins therefore flipped Lester the wrong way intermittently.
+
+**Fix:** resolve opposing keys with **no recency** — a sticky rule. The ring walk just ORs
+held bits; the derive gives one direction alone the axis, keeps the **last-applied** direction
+(`PREV_*_BITS`) while both are held, and 0 for neither. `awsticky.lua`: brush-proof (0 flips)
+and clean switches resolve correctly. See GAMEPLAY-BUGFIXES.md "Bug 1 … sticky rule". This is
+why the earlier `awhumanplay`/`awwrongframes` runs looked clean — they did not churn the
+allocator enough to scramble the ring order the way sustained play does.
+
 ### Probes
 `awfifotap.lua`, `awfiforate.lua`, `awfifopc.lua`, `awfifogap.lua`, `awlat2.lua`,
-`awringpure.lua`, `awhumanplay.lua`, `awwrongframes.lua`, `awreach.lua`, `awtiming.lua`
-(research-scratch). Firmware addresses from `kn7000_disassembly` (unidasm, base `0x48400000`).
+`awringpure.lua`, `awhumanplay.lua`, `awwrongframes.lua`, `awringorder.lua`, `awsticky.lua`,
+`awreach.lua`, `awtiming.lua` (research-scratch). Firmware addresses from `kn7000_disassembly`
+(unidasm, base `0x48400000`).

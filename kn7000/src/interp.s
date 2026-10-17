@@ -75,6 +75,11 @@ InitForPart:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
     movhu   d0, (CURRENT_PART_ID)
+    mov     PREV_LR_BITS, a0        # reset the sticky direction state on a part switch
+    clr     d1
+    movhu   d1, (a0)
+    mov     PREV_UD_BITS, a0
+    movhu   d1, (a0)
     mov     VM_STACK, a0
     mov     a0, (VM_SP_PTR)
     # all threads inactive, unfrozen
@@ -144,6 +149,10 @@ GameReset:
     mov     d0, (a0)
     mov     FRAME_NO, a0
     mov     d0, (a0)
+    mov     PREV_LR_BITS, a0        # reset the sticky direction state
+    movhu   d0, (a0)
+    mov     PREV_UD_BITS, a0
+    movhu   d0, (a0)
     call    VideoStart, 0, 0
     # zero 256 vars (512 bytes)
     mov     VM_VARIABLES, a2
@@ -482,25 +491,20 @@ rig_nu:
     or      0x80, d2
 rig_nf:
     # --- fold the held keybed notes into the mask by walking the active-voice ring ---
-    # The ring (vm.inc TG_RING_*) drops a released note in ~17 ms, symmetric with key-on,
-    # so direction changes are crisp (the old TG_HELD_MASK scan lagged key-off ~50 ms).
-    # For each link L: note = (L-4); map note <= 60 (bass + C4) = action; F5 left, A5 down,
-    # C6 right, Ab5/Bb5 up. Bounds + a node cap guard against a corrupt pointer.
+    # The ring (vm.inc TG_RING_*) drops a released note in ~6 ms, symmetric with key-on
+    # (awlat2.lua), so direction changes are crisp. For each link L: note = (L-4); map note
+    # <= 60 (bass + C4) = action; F5 left, A5 down, C6 right, B5/D6 up. Bounds + a node cap
+    # guard against a corrupt pointer.
     #
-    # Newest-key-wins per axis. The ring is allocation-ordered (head = oldest sounding
-    # voice, new voices appended at the tail), so walking head->tail visits held keys from
-    # oldest to newest. For an opposing pair held at once (a human switch holds the new key
-    # before releasing the old), the LAST direction seen on an axis is the most recent, so
-    # we OVERWRITE that axis's bit as we walk -- whichever of left/right (or up/down) the
-    # player pressed most recently wins. Action is OR'd (polyphonic), and the two axes are
-    # tracked independently so diagonals (left+down) keep both. (8,sp) = newest L/R bit,
-    # (0xC,sp) = newest U/D bit; d3 accumulates the action bit.
-    clr     d3                      # keybed action accumulator (0x80)
+    # Just OR every held direction's bit into d3 -- NO recency logic here. The ring's order
+    # does NOT reliably reflect which key was pressed last (the voice allocator reuses freed
+    # slots, so after churn the order is slot order, not press order -- awringorder.lua found
+    # ~15% of overlaps mis-ordered). So an opposing pair is left for the sticky derive below to
+    # resolve deterministically; the two axes are independent, so diagonals keep both bits.
+    clr     d3                      # keybed mask accumulator
     mov     (TG_RING_HEAD), a2      # a2 = L = ring head link (0 = no keys)
     clr     d0
     mov     d0, (4, sp)             # node count (loop has no calls, so a stack local is safe)
-    mov     d0, (8, sp)             # newest L/R bit so far (0 = none)
-    mov     d0, (0xC, sp)           # newest U/D bit so far (0 = none)
 rkb_loop:
     mov     a2, d0
     cmp     0, d0
@@ -530,23 +534,19 @@ rkb_loop:
     beq     rkb_right
     bra     rkb_adv
 rkb_act:
-    or      0x80, d3                # action: polyphonic, just OR the bit
+    or      0x80, d3
     bra     rkb_adv
 rkb_left:
-    mov     2, d1                   # L/R axis: newest wins -> overwrite
-    mov     d1, (8, sp)
+    or      2, d3
     bra     rkb_adv
 rkb_up:
-    mov     8, d1                   # U/D axis: newest wins -> overwrite
-    mov     d1, (0xC, sp)
+    or      8, d3
     bra     rkb_adv
 rkb_down:
-    mov     4, d1
-    mov     d1, (0xC, sp)
+    or      4, d3
     bra     rkb_adv
 rkb_right:
-    mov     1, d1
-    mov     d1, (8, sp)
+    or      1, d3
 rkb_adv:
     mov     (a2), d0                # L = next link = *(u32)(L)
     mov     d0, a2
@@ -556,71 +556,84 @@ rkb_adv:
     cmp     TG_RING_CAP, d0
     bne     rkb_loop
 rkb_done:
-    mov     (8, sp), d0             # fold the newest L/R bit into the keybed mask
-    or      d0, d3
-    mov     (0xC, sp), d0           # and the newest U/D bit
-    or      d0, d3
     or      d3, d2                  # fold keybed mask into the panel mask
-    # d2 = panel mask | keybed mask. The keybed walk already resolved each axis to a single
-    # bit (newest key wins), so an opposing pair held at once never both reach the derive
-    # from the keybed -- a left<->right or up<->down switch tracks whichever key the player
-    # pressed most recently, in BOTH switch directions, and Lester keeps moving (no stop; the
-    # old opposing-cancel made him freeze mid-switch -- awoverlap2.lua). The derive below is
-    # the AW VM's own priority (rustyworld update_player: RIGHT beats LEFT, DOWN beats UP),
-    # which now only arbitrates the rare case of the panel D-pad and keybed held in opposite
-    # directions at the same instant (the panel is a level bitmap with no recency). Diagonals
-    # are untouched: the two axes are tracked independently, so left+down keeps both.
-    # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
+    # d2 = panel mask | keybed mask (bits R=1 L=2 D=4 U=8 A=0x80), possibly with BOTH bits of
+    # an axis set when opposing keys are held at once. Resolve each axis with a STICKY rule:
+    # one direction alone wins; both held keeps the LAST-APPLIED direction (PREV_*_BITS) until a
+    # key is released; neither = 0. No recency is consulted -- the ring's order is not a
+    # reliable recency signal (awringorder.lua), so newest-wins mis-picked ~15% of overlaps and
+    # flipped Lester the wrong way. Sticky is deterministic and brush-proof: a quick brush of
+    # the opposite key never changes the direction you are already holding. d3 accumulates the
+    # RESOLVED mask (one bit per axis + action) for var[0xFD]/[0xFE], matching the hero deltas
+    # the way a joystick (which cannot hold opposing directions) would. Diagonals (different
+    # axes) keep both.
+    clr     d3                      # resolved-mask accumulator
+    # --- L/R (var[0xFC]) ---
+    mov     d2, d1
+    and     3, d1                   # d1 = L/R bits held (0/1/2/3)
+    cmp     3, d1
+    bne     rig_lr_ok
+    movhu   (PREV_LR_BITS), d1      # both held -> keep the last-applied L/R bit
+rig_lr_ok:
+    movhu   d1, (PREV_LR_BITS)      # remember the resolved bit
+    or      d1, d3                  # resolved mask |= L/R bit
+    cmp     1, d1                   # right(1) -> +1, left(2) -> -1, else 0
+    beq     rig_lr_vr
+    cmp     2, d1
+    beq     rig_lr_vl
+    clr     d1
+    bra     rig_lr_vw
+rig_lr_vr:
+    mov     1, d1
+    bra     rig_lr_vw
+rig_lr_vl:
+    mov     -1, d1
+rig_lr_vw:
     mov     VAR_HERO_LR, d0
-    mov     d2, d1
-    and     1, d1
-    bne     rig_lr_right
-    mov     d2, d1
-    and     2, d1
-    bne     rig_lr_left
-    clr     d1
-    bra     rig_lr_w
-rig_lr_right:
-    mov     1, d1
-    bra     rig_lr_w
-rig_lr_left:
-    mov     -1, d1
-rig_lr_w:
     call    WriteVar, 0, 0
-    # var[0xE5] UP_DOWN: DOWN(4)? +1 : UP(8)? -1 : 0  (keep the value in d1 for 0xFB)
+    # --- U/D (var[0xE5]) ---
+    mov     d2, d1
+    and     0xC, d1                 # d1 = U/D bits held (0/4/8/0xC)
+    cmp     0xC, d1
+    bne     rig_ud_ok
+    movhu   (PREV_UD_BITS), d1      # both held -> keep the last-applied U/D bit
+rig_ud_ok:
+    movhu   d1, (PREV_UD_BITS)
+    or      d1, d3                  # resolved mask |= U/D bit
+    cmp     4, d1                   # down(4) -> +1, up(8) -> -1, else 0
+    beq     rig_ud_vd
+    cmp     8, d1
+    beq     rig_ud_vu
+    clr     d1
+    bra     rig_ud_vw
+rig_ud_vd:
+    mov     1, d1
+    bra     rig_ud_vw
+rig_ud_vu:
+    mov     -1, d1
+rig_ud_vw:
     mov     VAR_HERO_UD, d0
-    mov     d2, d1
-    and     4, d1
-    bne     rig_ud_down
-    mov     d2, d1
-    and     8, d1
-    bne     rig_ud_up
-    clr     d1
-    bra     rig_ud_w
-rig_ud_down:
-    mov     1, d1
-    bra     rig_ud_w
-rig_ud_up:
-    mov     -1, d1
-rig_ud_w:
     call    WriteVar, 0, 0
-    mov     VAR_HERO_JUMP, d0       # var[0xFB] = var[0xE5] (d1 still holds UD value)
+    mov     VAR_HERO_JUMP, d0       # var[0xFB] = var[0xE5] (d1 still holds the UD value)
     call    WriteVar, 0, 0
-    mov     VAR_HERO_POS_MASK, d0   # var[0xFD] = full mask
-    mov     d2, d1
-    call    WriteVar, 0, 0
-    mov     VAR_HERO_ACTION, d0     # var[0xFA] = FIRE(0x80)? 1 : 0
+    # --- action (var[0xFA]) ---
     mov     d2, d1
     and     0x80, d1
     beq     rig_act0
+    or      0x80, d3                # resolved mask |= action bit
     mov     1, d1
     bra     rig_act_w
 rig_act0:
     clr     d1
 rig_act_w:
+    mov     VAR_HERO_ACTION, d0
     call    WriteVar, 0, 0
-    mov     VAR_HERO_ACT_MASK, d0   # var[0xFE] = full mask (button bit already in it)
-    mov     d2, d1
+    # --- masks: var[0xFD] and var[0xFE] = the resolved mask (d3) ---
+    mov     VAR_HERO_POS_MASK, d0
+    mov     d3, d1
+    call    WriteVar, 0, 0
+    mov     VAR_HERO_ACT_MASK, d0
+    mov     d3, d1
     call    WriteVar, 0, 0
 ri_ret:
     ret     [d2,d3,a2,a3], 0x20

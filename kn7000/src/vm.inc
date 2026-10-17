@@ -113,6 +113,14 @@
 # getting time for the keybed/panel. SLICE_MS = 20 is authentic AW; lower it to run faster.
 .equ KERNEL_MS,       0x500D3C68     # firmware 1 kHz millisecond counter (u32)
 .equ FRAME_START_MS,  0x44080044     # u32 scratch: KERNEL_MS at the start of this frame
+
+# Last-applied direction bits per axis, for the sticky opposing-key rule. When both keys of an
+# axis are held at once (ambiguous -- and the voice ring's order does NOT reliably say which was
+# pressed last, so newest-wins mis-picks ~15% of the time, awringorder.lua), we keep whichever
+# direction was already applied until that key is released. 0 = none, LR: 1 right/2 left, UD: 4
+# down/8 up. Deterministic and brush-proof, unlike the ring-order newest-wins it replaces.
+.equ PREV_LR_BITS,    0x44080048     # u16: last-applied L/R bit (0 / 1 / 2)
+.equ PREV_UD_BITS,    0x4408004A     # u16: last-applied U/D bit (0 / 4 / 8)
 .equ VAR_PAUSE_SLICES, 0xFF          # var index holding the per-frame slice count
 .equ SLICE_MS,        20             # ms per slice (authentic AW)
 .equ MIN_YIELD_MS,    8              # never yield less than this (firmware must run)

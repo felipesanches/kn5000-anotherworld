@@ -28,28 +28,26 @@ worse.
 **The real refinements:**
 - **Skip note 0.** A slot momentarily reads note 0 only while unallocated; note 0 would
   classify as action (`<= 60`), so a slot with note 0 is skipped. Cheap guard.
-- **Newest-key-wins per axis (the overlap fix — 2026-10-17).** An earlier version zeroed an
-  axis when both its bits were set, on the theory that opposing pairs are a 1-frame key-up
-  lag. **That was wrong and is reverted.** Re-evaluating the "bad inputs reasonably easily"
-  complaint from scratch showed the opposing case is not a 1-frame blip but a real,
-  sustained span: a human switching direction presses the new key *before* fully releasing
-  the old one, so both bits are held together for the whole overlap. Cancelling that span
-  made Lester **stop** mid-switch — `awoverlap2.lua` (reading the applied hero vars, not a
-  re-model) showed F5+C6 held → `LR=0` / `dir=NEUTRAL` for the entire 1 s overlap. That
-  neutral-stop was itself the frequently-hit bad input. The fix uses the **ring's recency
-  order**: the active-voice ring is allocation-ordered (head = oldest sounding voice, new
-  voices appended at the tail), so walking head→tail visits held keys oldest→newest, and the
-  walk now *overwrites* each axis's bit as it goes — whichever of left/right (or up/down) was
-  pressed **most recently wins**, in *both* switch directions. Verified (`awoverlap3.lua`,
-  reading applied `var[0xFC]`): L→R overlap ring `{77,84}` → `LR=+1` (right); R→L overlap
-  ring `{84,77}` → `LR=−1` (left). This is better than the AW oracle's fixed RIGHT/DOWN
-  priority, which gave the *wrong* direction on a right→left or up→down switch; here the newer
-  key always wins. The two axes are tracked independently, so diagonals are untouched —
-  F5+A5 → left+down (`FD=06`), and adding C6 flips only the L/R axis to right while down
-  stays (`LR=+1 UD=+1 FD=05`, `awdiag_nw.lua`). Action is OR'd (polyphonic), so move+fire
-  still works (C6+C3 → `FD=81 FA=1`, `awkbdmap.lua`, 8/8). The derive below keeps the AW
-  oracle's fixed priority, which now only arbitrates the rare panel-D-pad-vs-keybed opposing
-  case (the panel is a level bitmap with no recency).
+- **Opposing directions: a STICKY rule (the real overlap fix — 2026-10-17).** This went
+  through three wrong turns before landing. (1) An *opposing-cancel* that zeroed an axis when
+  both bits were set — made Lester **stop** mid-switch (`awoverlap2.lua`: F5+C6 → `LR=0`
+  neutral for the whole overlap). Reverted. (2) **Newest-key-wins** via the ring's order — the
+  active-voice ring was *assumed* allocation-ordered (oldest at head, newest at tail), so the
+  walk overwrote each axis's bit to let the most-recently-pressed key win. It passed clean
+  2-key tests but **the assumption is false**: the voice allocator reuses freed slots, so after
+  churn the ring is in *slot* order, not press order. `awringorder.lua` found **~15 % of
+  overlaps mis-ordered** (`newest=+1 right` but `ring={84,77}` → walk picks left) — i.e.
+  intermittent **wrong direction**, which is exactly what Felipe reported ("wrong direction,
+  intermittent, on both the keybed and USB-MIDI"). Reverted. (3) The fix that holds: resolve
+  each axis with **no recency at all**. The ring walk just ORs every held bit; the derive then
+  applies a sticky rule per axis — **one direction alone wins; both held keeps the
+  last-applied direction (`PREV_*_BITS`) until a key is released; neither = 0**. Deterministic
+  and brush-proof: `awsticky.lua` — holding right with a left brush stays right, holding left
+  with a right brush stays left (**0 flips**), and a clean right→left switch resolves `+1`
+  then `−1`. Diagonals (different axes) keep both, and the mask `var[0xFD]/[0xFE]` is the
+  **resolved** mask (one bit per axis + action, like a joystick that cannot hold opposing
+  directions). Mapping + run+jump combos unchanged — `awkbdmap.lua` 10/10 (`FD=89`/`FD=8a`).
+  `PREV_*_BITS` are cleared on reset and on every part switch.
 - **Fast, symmetric key signal (the real cut to the "extra kick").** The sustain bitmap
   `0x500D288C` is *set* on key-down in ~17 ms but *cleared* on key-up in ~50 ms (variable
   33–50). That asymmetry is the stray kick: a released direction lingers while you switch.
