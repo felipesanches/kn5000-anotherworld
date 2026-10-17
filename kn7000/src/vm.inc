@@ -189,14 +189,16 @@
 .equ TG_RING_HI,      0x500D3000
 .equ TG_RING_CAP,     64             # max nodes to walk
 # Note numbers (C4 = 60). Any note <= C4 is ACTION -- the whole bass/left-hand range plus
-# C4 itself. The right-hand cluster is the D-pad; Ab5 and Bb5 both map to UP.
+# C4 itself. The right-hand cluster is the D-pad; two notes map to UP.
 .equ KBD_ACTION_MAX,  60             # <= 60 (bass range + C4) -> action
 .equ KBD_LEFT_NOTE,   77             # F5
-# UP was Ab5(80)/Bb5(82), but both GHOST against the run/direction keys in the keybed scan
-# matrix (awrun_diag.lua/awupnote.lua: Ab5/Bb5/Db6/Eb6 vanish from the firmware held mask
-# whenever another key is held, so run-right-and-jump was impossible). B5 and D6 survive the
-# action+direction combos cleanly, so UP uses those.
-.equ KBD_UP_NOTE_A,   83             # B5  (ghost-free with action + left/right)
-.equ KBD_UP_NOTE_B,   86             # D6  (ghost-free alternate)
+# UP: Bb5 is Felipe's chosen note and works for everything up to TWO keys (the water swim is
+# action+up, and up+a single direction) -- two keys never ghost. BUT Bb5 GHOSTS in the THREE-key
+# run+jump combo (action + a direction + Bb5 vanishes from the firmware held mask -- keybed scan
+# matrix, awrun_diag.lua/awupnote.lua: Ab5/Bb5/Db6/Eb6 all do this). B5 survives that combo, so it
+# is kept as the second UP note specifically for run-and-jump. Use Bb5 normally; use B5 when
+# holding action + direction + up at once.
+.equ KBD_UP_NOTE_A,   82             # Bb5 (A#5) -- primary up (fine for swim / up+one direction)
+.equ KBD_UP_NOTE_B,   83             # B5  -- ghost-free up for the 3-key run+jump combo
 .equ KBD_DOWN_NOTE,   81             # A5
 .equ KBD_RIGHT_NOTE,  84             # C6

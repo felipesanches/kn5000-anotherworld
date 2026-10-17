@@ -1,5 +1,5 @@
 -- Verify the keybed gameplay mapping: hold each mapped key in the water part and read
--- back the hero vars. action = bass/C4 (<=60); F5 left, A5 down, C6 right, B5/D6 up.
+-- back the hero vars. action = bass/C4 (<=60); F5 left, A5 down, C6 right, Bb5/B5 up.
 -- Also checks the run+jump combos (action+direction+up held at once) -- these need up on a
 -- note that does not ghost against the other keys in the keybed scan matrix (see vm.inc).
 local M=manager.machine
@@ -9,7 +9,7 @@ local function Fany(name) for _,tag in ipairs({":KEYS0",":KEYS1",":KEYS2",":KEYS
   print("MISSING KEY",name); return nil end
 local SD=Fany and nil
 do local p=M.ioport.ports[":cpanel:CPR_SEG1"]; for _,f in pairs(p.fields) do if f.name=="SD CARD LOAD (SW7)" then SD=f end end end
-local K={ F5=Fany("F5"), A5=Fany("A5"), C6=Fany("C6"), B5=Fany("B5"), D6=Fany("D6"),
+local K={ F5=Fany("F5"), A5=Fany("A5"), C6=Fany("C6"), Bb5=Fany("A5#"), B5=Fany("B5"),
           C4=Fany("C4"), C3=Fany("C3") }
 local VARS=0x44070000
 local function v(i) return sp:read_u16(VARS+2*i) end
@@ -19,8 +19,8 @@ local T={
  {"F5=left",   {"F5"},        0xFFFF,0,0,0x02,0,0x02},
  {"C6=right",  {"C6"},        1,0,0,0x01,0,0x01},
  {"A5=down",   {"A5"},        0,1,1,0x04,0,0x04},
+ {"Bb5=up",    {"Bb5"},       0,0xFFFF,0xFFFF,0x08,0,0x08},
  {"B5=up",     {"B5"},        0,0xFFFF,0xFFFF,0x08,0,0x08},
- {"D6=up",     {"D6"},        0,0xFFFF,0xFFFF,0x08,0,0x08},
  {"C4=action", {"C4"},        0,0,0,0x80,1,0x80},
  {"C3=action", {"C3"},        0,0,0,0x80,1,0x80},
  {"C6+C3(R+fire)",{"C6","C3"},1,0,0,0x81,1,0x81},
