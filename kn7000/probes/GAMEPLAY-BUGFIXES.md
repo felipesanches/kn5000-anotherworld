@@ -188,6 +188,22 @@ permanent regression: `C3+C6+B5 (run-R-jump)` → `FC=1 E5=ffff FB=ffff FD=89 FA
 single-key/move+fire cases. The dynamic tap test (`awrunjump2.lua`) confirms the B5 jump
 enters the ring (`{48,84,83}`) while action+right stay held.
 
+**The ghosting is timing-dependent (follow-up, Felipe: "can't escape the lake tentacles
+with action+up").** The lake escape is a swim-up: holding *up* keeps Lester rising and he
+reaches land; **no input drowns him** (the "PRESS BUTTON … / ACCESS CODE" continue screen),
+reaction window ~3–6 s (`awwatch.lua` under no/`up`/`actup` holds and `AW_DELAY`; snapshots
+in `awswimshot.lua`). `action+up` delivers the right vars, sustained (`awactionup.lua`:
+`FA=1 E5=-1`), and *does* escape in a clean test — but a wider sweep (`awbassghost.lua`,
+`awbassghost2.lua`) shows up-note ghosting against **three-or-more-key** holds is **not
+deterministic**: the same `D6 + C3+E3+G3` triad ghosted in one run and not another, because
+masking depends on the order keys hit the scan. So holding *action* (especially a loose bass
+*chord*) together with *up* can intermittently drop the up — matching "can't *seem* to".
+**B5** survived every combo tested (most robust); D6/E6 ghost on some. **Two keys or fewer
+never ghost** (a rectangle needs ≥3), so the robust play for a single input is one key, and
+for the lake swim specifically: **hold only up (B5)** — action is not needed to swim. This is
+a usage property of the real keybed matrix, not a code bug; the B5 mapping is already the
+most robust up note, so no code change followed.
+
 ### Probes (bugs 1 & 4)
 `awinput_bug.lua`, `awrelease.lua`, `awinput_fix3.lua` (early bug-1 leads); `awoverlap2.lua`
 (opposing-cancel → neutral-stop), `awoverlap3.lua` (newest-key-wins both directions),
