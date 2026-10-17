@@ -156,3 +156,42 @@ fire is set only when some bit is set (a real held key). The held mask stays 0 w
 **Verified.** No key for 6 s → stays in the intro; then C4 → water in 0.15 s
 (`awskipok.lua`). And the intro now matches `ref_checksums.log` **100%** again (0/151
 mismatches, `awcksum.lua` + `cksum_pages.py`) — the divergence is gone.
+
+## Bug 4 — run+jump lost the jump: keybed matrix ghosting on the up note (2026-10-17)
+
+**Symptom (Felipe's scenario).** Hold *action* (a bass note) to run, hold *right* (C6) for
+direction, and tap *up* (the old Ab5) to jump while running — the jump never happened.
+
+**Cause — not the VM, the keybed.** Reading the firmware held-slot bitmap `0x500D288C`
+directly (`awrun_diag.lua`, not just the active-voice ring) showed the firmware *itself*
+never reports the up key when another key is held:
+
+| held | firmware held notes |
+|------|---------------------|
+| C3 + C6 (action + right)        | `{48,84}` ✓ |
+| C3 + C6 + **Ab5** (+ up)        | `{48,84}` — **Ab5 dropped** |
+| C6 + **Ab5**                    | `{84}` — **Ab5 dropped** |
+| F5 + A5 + C3 (left+down+action) | `{48,77,81}` ✓ all three |
+
+So it is **not** a voice/polyphony limit (three keys coexist in the last row) and not the
+module — it is **keybed scan-matrix ghosting**: note Ab5 (80) is masked whenever another key
+shares its matrix lines. A sweep of candidate up notes against both running combos
+(`awupnote.lua`) found Ab5(80), Bb5(82), Db6(85), Eb6(87) all ghost, while **B5(83), D6(86),
+E6(88)** survive the action+direction holds cleanly. (This is faithfully-emulated hardware
+behaviour; whether a real KN7000 keybed masks the identical set is untested — the hardware is
+abroad.)
+
+**Fix.** Remap *up* from Ab5/Bb5 to **B5 (`KBD_UP_NOTE_A`) / D6 (`KBD_UP_NOTE_B`)** in
+`vm.inc`. Run-and-jump now registers all three inputs at once — `awkbdmap.lua` has it as a
+permanent regression: `C3+C6+B5 (run-R-jump)` → `FC=1 E5=ffff FB=ffff FD=89 FA=1` and
+`C3+F5+B5 (run-L-jump)` → `FC=ffff E5=ffff FB=ffff FD=8a FA=1`, both pass, alongside the 8
+single-key/move+fire cases. The dynamic tap test (`awrunjump2.lua`) confirms the B5 jump
+enters the ring (`{48,84,83}`) while action+right stay held.
+
+### Probes (bugs 1 & 4)
+`awinput_bug.lua`, `awrelease.lua`, `awinput_fix3.lua` (early bug-1 leads); `awoverlap2.lua`
+(opposing-cancel → neutral-stop), `awoverlap3.lua` (newest-key-wins both directions),
+`awdiag_nw.lua` (diagonals under newest-wins); `awrun_diag.lua` (ghosting isolated via the
+firmware held mask), `awupnote.lua` (ghost-free up-note sweep), `awrunjump2.lua` (dynamic
+run+jump), `awkbdmap.lua` (mapping + run+jump regression). The last three live in
+`research-scratch/` except `awkbdmap.lua`. Oracle: rustyworld `update_player`.

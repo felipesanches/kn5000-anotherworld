@@ -184,7 +184,11 @@
 # C4 itself. The right-hand cluster is the D-pad; Ab5 and Bb5 both map to UP.
 .equ KBD_ACTION_MAX,  60             # <= 60 (bass range + C4) -> action
 .equ KBD_LEFT_NOTE,   77             # F5
-.equ KBD_UP_NOTE_A,   80             # Ab5 (G#5)
-.equ KBD_UP_NOTE_B,   82             # Bb5 (A#5)
+# UP was Ab5(80)/Bb5(82), but both GHOST against the run/direction keys in the keybed scan
+# matrix (awrun_diag.lua/awupnote.lua: Ab5/Bb5/Db6/Eb6 vanish from the firmware held mask
+# whenever another key is held, so run-right-and-jump was impossible). B5 and D6 survive the
+# action+direction combos cleanly, so UP uses those.
+.equ KBD_UP_NOTE_A,   83             # B5  (ghost-free with action + left/right)
+.equ KBD_UP_NOTE_B,   86             # D6  (ghost-free alternate)
 .equ KBD_DOWN_NOTE,   81             # A5
 .equ KBD_RIGHT_NOTE,  84             # C6
