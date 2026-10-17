@@ -325,13 +325,13 @@ CopyPage:
 cp_novscroll:
     cmp     0, d3
     bne     cp_scrolled
-    # plain full-page copy
-    mov     PAGE_SIZE, d2
+    # plain full-page copy, 32-bit words (pages are 0x10000-aligned, PAGE_SIZE % 4 == 0)
+    mov     PAGE_SIZE/4, d2
 cp_loop:
-    movbu   (a2), d0
-    movbu   d0, (a3)
-    inc     a2
-    inc     a3
+    mov     (a2), d0
+    mov     d0, (a3)
+    add     4, a2
+    add     4, a3
     add     -1, d2
     bne     cp_loop
     bra     cp_ret
@@ -382,13 +382,14 @@ cp_off:
 cp_up:
     add     a1, a2
 cp_scopy:
+    lsr     2, d2                   # n_words = n_bytes / 4 (both offsets are 320-aligned)
     cmp     0, d2
     beq     cp_ret
 cp_sloop:
-    movbu   (a2), d0
-    movbu   d0, (a3)
-    inc     a2
-    inc     a3
+    mov     (a2), d0
+    mov     d0, (a3)
+    add     4, a2
+    add     4, a3
     add     -1, d2
     bne     cp_sloop
 cp_ret:
@@ -623,9 +624,31 @@ nt_loop:
     movhu   (a2), d0
     inc     d0
     movhu   d0, (a2)
-    mov     30, d0                  # ~30 ms/frame: paces the VM and yields to firmware
+    # Pace to the AW model: this frame should last var[0xFF] * SLICE_MS ms. Sleep only
+    # the remainder after the work already done this frame (measured with the firmware's
+    # 1 kHz KERNEL_MS), clamped to [MIN_YIELD_MS, MAX_YIELD_MS] so the firmware always
+    # gets time and a bad slice count can't freeze us. Then stamp the next frame's start.
+    mov     VAR_PAUSE_SLICES, d0
+    call    ReadVar, 0, 0           # d0 = var[0xFF] (slice count)
+    and     0xffff, d0
+    mov     SLICE_MS, d1
+    mul     d1, d0                  # d0 = target_ms = slices * SLICE_MS
+    mov     (KERNEL_MS), d1         # now
+    mov     (FRAME_START_MS), d2    # start of this frame
+    sub     d2, d1                  # d1 = elapsed work ms
+    sub     d1, d0                  # d0 = sleep_ms = target - elapsed
+    cmp     MIN_YIELD_MS, d0
+    bge     nt_minok
+    mov     MIN_YIELD_MS, d0
+nt_minok:
+    cmp     MAX_YIELD_MS, d0
+    ble     nt_maxok
+    mov     MAX_YIELD_MS, d0
+nt_maxok:
     mov     DLY_TSK, a1
-    calls   (a1)
+    calls   (a1)                    # yield sleep_ms to the firmware
+    mov     (KERNEL_MS), d0
+    mov     d0, (FRAME_START_MS)    # next frame starts now (after the sleep)
     call    ReadInput, 0, 0         # map the keybed to the fire button (intro skip)
     # deferred part switch, requested by OpLoad (0x19 with id >= 0x3E80). The intro
     # issues it at its end, or immediately when the player presses fire (skip).

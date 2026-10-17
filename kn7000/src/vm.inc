@@ -107,6 +107,17 @@
 .equ DRAW_DEPTH,      0x44080074     # polygon-hierarchy recursion depth (stack guard)
 .equ DRAW_DEPTH_MAX,  12             # AW hierarchies are shallow; cap to protect the stack
 
+# Frame pacing, the Another World way: a frame lasts var[0xFF] (PAUSE_SLICES) * SLICE_MS,
+# the bytecode setting var[0xFF] each frame. We sleep only the remainder after the frame's
+# work (measured via the firmware's 1 kHz counter), with a floor so the firmware keeps
+# getting time for the keybed/panel. SLICE_MS = 20 is authentic AW; lower it to run faster.
+.equ KERNEL_MS,       0x500D3C68     # firmware 1 kHz millisecond counter (u32)
+.equ FRAME_START_MS,  0x44080044     # u32 scratch: KERNEL_MS at the start of this frame
+.equ VAR_PAUSE_SLICES, 0xFF          # var index holding the per-frame slice count
+.equ SLICE_MS,        20             # ms per slice (authentic AW)
+.equ MIN_YIELD_MS,    8              # never yield less than this (firmware must run)
+.equ MAX_YIELD_MS,    400            # safety cap on a single frame's sleep
+
 # VM instruction trace (for diffing against the vm-gui reference). Each entry is 8
 # bytes: frame(u16)@0, thread(u8)@2, opcode(u8)@3, pc(u16)@4. Dumped by probes/awtrace.lua.
 .equ TRACE_COUNT,     0x44080078     # entries logged so far
