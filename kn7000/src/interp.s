@@ -415,10 +415,21 @@ ReadInput:
     bra     ri_ret
 
 # ---- intro: any keybed key = fire (skip) ----
+# A held key = any set bit in the TG held-slot bitmap (TG_HELD_MASK, 16 bytes). The old
+# signal 0x50149690 is a noisy firmware "activity" flag that is nonzero with no key down,
+# so it skipped the intro immediately; the held mask is 0 until a key is actually held.
 ri_intro:
-    mov     0x50149690, a0
-    movhu   (a0), d0                # a keybed key is held?
-    cmp     0, d0
+    mov     TG_HELD_MASK, a0
+    clr     d1                      # OR of all 16 mask bytes
+    clr     d2                      # byte index
+ri_iscan:
+    movbu   (a0), d0
+    or      d0, d1
+    inc     a0
+    inc     d2
+    cmp     16, d2
+    bne     ri_iscan
+    cmp     0, d1                   # any key held?
     beq     ri_clear
     mov     VAR_HERO_ACTION, d0     # var[0xFA] = 1
     mov     1, d1

@@ -30,6 +30,8 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 | `awcancel.lua`                                | diagonals kept, opposing pairs cancelled?                   | **yes** -- F5+A5 -> left+down (FD=06); F5+C6 and Ab5+A5 -> neutral (switch-lag fix) |
 | `awlatency.lua`                               | how fast does a key press/release reach the mask?           | press ~17 ms, release ~50 ms -- the slow release is the 'extra kick' on a direction change |
 | `awgone.lua`                                  | is there a faster release signal than the sustain mask?     | no -- the gone mask 0x500D287C never sets for these voices; release stays ~50 ms |
+| `awskipbug.lua`                               | why did the intro skip with no key?                         | 0x50149690 is a noisy firmware flag (nonzero with no key); the held mask 0x500D288C stays 0 -> use that |
+| `awskipok.lua`                                | intro-skip: no false skip, real key still skips?            | **yes** -- 6s no-key stays in intro; C4 -> water in 0.15s |
 
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can

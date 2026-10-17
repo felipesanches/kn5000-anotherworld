@@ -28,6 +28,6 @@ one-tick capture-alignment shift from the altered startup timing, same content
 (`probes/awcksum.lua` + `cksum_pages.py`). The word-copy encodes to MAME's 32-bit
 `mov (aM),Dn` / `mov Dn,(aM)` (opcodes 0x72/0x63), byte-exact with the old `movbu` loop.
 
-Note (separate, pre-existing): the intro no longer matches `ref_checksums.log` as captured
-(the committed build diverges too, first at tick ~4) — unrelated to this pacing/word-copy
-change; to be investigated on its own.
+Note: the intro-vs-`ref_checksums.log` divergence seen while verifying this change was a
+separate pre-existing bug (the intro-skip reading the noisy `0x50149690` flag) — fixed, see
+GAMEPLAY-BUGFIXES.md bug 3; the intro now matches the reference 100% again.

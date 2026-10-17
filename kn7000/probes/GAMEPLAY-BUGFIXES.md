@@ -90,3 +90,20 @@ resolution and the bytecode evidence (`awdis.py`) pin the cause and the fix.
 evidence — run `python3 awdis.py <resource-0x1b.bin>`), `awcopytrace.lua` (bug-2 live page
 resolution). Oracle: rustyworld `video.rs` `PageSelector::from` / `copy_page`, `vm.rs`
 opcode `0xF` + `VAR_SCROLL_Y`.
+
+## Bug 3 — the intro skipped immediately, with no key pressed (2026-10-17)
+
+**Cause.** The intro-skip read `0x50149690` as "a keybed key is held". That address is a
+noisy firmware "activity" flag (metronome-adjacent): `awskipbug.lua` shows it toggling to
+`0x0001` from frame 2 with **no key pressed**, so the intro fired its own fire-to-skip and
+was already in the water part (`0x3E82`) by frame 6. This was also the intro-vs-reference
+checksum divergence flagged in PACING.md — same root cause.
+
+**Fix.** Base the skip on the TG held-slot bitmap (`TG_HELD_MASK` = `0x500D288C`, 16 bytes)
+— the same reliable signal gameplay uses. `ReadInput`'s intro branch ORs the 16 bytes;
+fire is set only when some bit is set (a real held key). The held mask stays 0 with no key
+(`awskipbug.lua`).
+
+**Verified.** No key for 6 s → stays in the intro; then C4 → water in 0.15 s
+(`awskipok.lua`). And the intro now matches `ref_checksums.log` **100%** again (0/151
+mismatches, `awcksum.lua` + `cksum_pages.py`) — the divergence is gone.
