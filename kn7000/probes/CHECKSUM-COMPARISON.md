@@ -195,3 +195,40 @@ KN7000's `OpKillThread`/`DELETE_THREAD` → `PC=0xFFFF` — never revive a kille
 `Running`↔`Paused`. **Result: play 381/381 (100%) and intro 2612/2612 (100%).** The KN7000 VM is
 pixel-faithful across the whole input repertoire the reported bugs involved; the discrepancy was
 the reference's.
+
+### Felipe's own played session (USB-MIDI, 2026-10-17): 1176/1176 identical
+
+Felipe played with `awmonitor.lua` via a USB-MIDI controller (`kb=[]`, notes arrive through the
+ring). Recording: `sessions/2026-10-17-felipe-midi-aw-inputs.csv` (1175 rows: intro skip at
+frame 96, then 1101 water-part frames covering idle, left, right, up, down, diagonals, and
+action+direction combos) and the monitor log beside it (confirmed anomalies VALUE=0 GHOST=0
+NODIR=0). Replayed through both VMs: **1176/1176 frames identical**; the two checksum logs are
+byte-identical (sha256 `9209556e…05d21e`).
+
+Getting there exposed two bugs in `awreplay.lua` (the KN7000-side replayer), not in either VM:
+1. **Off-by-one feed.** `ReadInput` runs after `FRAME_NO` is bumped to V, and its vars render
+   as tick V; the csv row that drives tick V is frame V+1 (awmonitor logs each FRAME_NO change
+   before that frame's ReadInput, so row F holds tick F-1's vars). The replayer looked up row V,
+   feeding every input one frame late: first divergence at tick 95 = the intro-skip frame.
+2. **Clobbered var 0xFE.** The override tap fires on the write to var 0xFE *before* MAME commits
+   it, so a `write_u16` to 0xFE inside the tap was overwritten by `ReadInput`'s own value (0 —
+   no keys are down during a replay). The fix returns the replacement as the tap's data, and
+   ignores writes to var 0xFF (the other half of the same 32-bit word). The lost `0xFE=0x80` at
+   the intro skip left non-input vars (0x37, 0x3d–0x3f, 0x84, 0x88) different from tick ~96 on,
+   which first showed in the picture at tick 185.
+
+Reproduce:
+```
+T=~/compartilhado/tmp; S=probes/sessions/2026-10-17-felipe-midi-aw-inputs.csv
+AW_INPUTS=$S AWCK_BIN=$T/f.bin AWCK_IDX=$T/f.idx AWCK_MAX=1175 ../../mame-pr/kn7000 kn7000 -bios sp7001 \
+  -rompath ../../technics_romsets -harddisk build/another_sd.img -autoboot_script probes/awreplay.lua -str 299 -window -nothrottle
+python3 -I probes/cksum_pages.py $T/f.bin $T/f.idx $T/kn.log
+(cd ~/compartilhado/tmp/kn7000-aw-reference/run && .../replaycksum <abs path to $S> $T/ref.log 1176)
+python3 -I probes/compare_frames.py $T/kn.log $T/ref.log
+```
+
+What this proves, and what it doesn't: given the inputs **as recorded**, the KN7000 VM and the
+reference behave identically for 1176 frames — the VM layer is faithful. awmonitor samples the
+applied vars from a periodic callback, so a recorded row could in principle sit ±1 frame from the
+live game; that would not affect this replay-vs-replay comparison, but it bounds how exactly the
+replay reproduces the live run.
