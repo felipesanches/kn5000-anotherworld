@@ -49,6 +49,16 @@ Reproduce (from `kn7000/`, after `make card`):
     #             -skip_gameinfo -window kn7000 -bios sp7001 -harddisk build/another_sd.img
     python3 -I probes/raw_vs_applied.py ~/compartilhado/tmp/aw-repro     # and aw-kbrepro
 
+With `awmonitor.lua` now checking the module's tracked notes against the raw key events,
+both re-performances log `VALUE=0 GHOST=0 STUCK=0 NODIR=0`.
+
+**Cost.** `awricost.lua` traces one water-part `ReadInput` (frame 302 of the keybed
+re-performance) in the MAME debugger: **127** instructions in the voice-ring build, **805** in
+this one (`NotePoll` 75, `NotesAnyHeld` 583 — the 61-note action range, both trackers), plus
+~25 per MIDI byte received. At the driver's 32 MHz that is ~+21 µs on a ~80 ms frame, about
+0.03 %. The water-part frame pace of the keybed re-performance is unchanged: mean 87.29 ms,
+median 80.05 ms in both builds (`R` lines of the events files).
+
 The sections below are the earlier analysis of the TG-voice-based source, kept as history.
 
 ## The ideal source — and why it is blocked on this platform

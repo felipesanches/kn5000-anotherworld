@@ -2,8 +2,10 @@
 --
 -- Runs while YOU play (it never drives game input; it only auto-presses SD CARD LOAD once to
 -- launch). Every VM frame it records, and correlates:
---   * your keybed keypresses        (the :KEYS ports -- physical/host keys; MIDI-in is NOT here)
---   * what the tone generator sees  (the active-voice ring 0x500D1050 -- keybed AND MIDI-in)
+--   * the keys you hold               (rebuilt from the raw key events below: the keybed FIFO
+--                                      0x98050004 and the MIDI UART, as the firmware reads them)
+--   * the module's tracked notes      (vm.inc NOTES_*: what ReadInput parsed from the firmware's
+--                                      MIDI rings -- the keys the game actually sees)
 --   * the panel D-pad shadow         (so the prediction matches ReadInput exactly)
 --   * the applied hero variables     (var 0xFC LR, 0xE5 UD, 0xFB jump, 0xFA action, 0xFD mask)
 --   * the module's sticky state       (PREV_LR_BITS 0x44080048 / PREV_UD_BITS 0x4408004A)
@@ -11,10 +13,11 @@
 --
 -- It then PREDICTS what the hero vars should be from the inputs (the keybed map + the sticky
 -- opposing-key rule) and FLAGS any frame where reality disagrees:
---   GHOST   a keybed key you pressed is missing from the ring (voice dropped / matrix ghost)
+--   GHOST   a mapped key you hold is missing from the module's tracked notes
+--   STUCK   the module tracks a mapped note you are not holding
 --   STICKY  the module's resolved direction != the sticky rule's expectation
 --   VALUE   the applied var != the value implied by the resolved bits
---   NODIR   the ring holds a single clear direction but the applied direction is 0
+--   NODIR   the tracked notes give a single clear direction but the applied direction is 0
 -- Output, one set per session (AW_SESSION=<name>; default a timestamp), in ~/compartilhado/tmp/:
 --   aw-<session>-monitor.log  human per-frame log (flags also print to the console)
 --   aw-<session>-events.csv   RAW input events (keybed/MIDI make/break + panel at each ReadInput)
@@ -38,10 +41,7 @@ local REQPART  = 0x4407102C
 local FRAMENO  = 0x4408007C
 local PREV_LR  = 0x44080048
 local PREV_UD  = 0x4408004A
-local RING     = 0x500D1050
-local RING_LO, RING_HI = 0x500D1000, 0x500D3000
-local HELD     = 0x500D288C
-local NODE     = 0x500D1278   -- note at +slot*0x2C+0x0C
+local NOTES_MASKS = { 0x44081010, 0x44081210 }  -- vm.inc NOTES_MIDI/NOTES_KBD + NS_MASK: u16[128]
 -- panel D-pad shadow (CPR_SEGn at PANEL_CPR+n); matches vm.inc BTN_* addrs
 local BTN = { {a=0x5006BE62,b=0x01,bit=2,name="L"},   -- left   -> mask 2
               {a=0x5006BE61,b=0x02,bit=1,name="R"},   -- right  -> mask 1
@@ -65,26 +65,18 @@ local function noteName(n) return NAMES[(n%12)+1]..tostring(math.floor(n/12)-1) 
 
 -- ---- readers ---------------------------------------------------------------------------
 local function s16(a) local v=sp:read_u16(a); if v>=0x8000 then v=v-0x10000 end; return v end
-local function keybedNotes()  -- user's physical keybed presses, via :KEYS ports
+-- keys held per the raw event stream, per source (filled by the FIFO / UART taps below)
+local rawHeld = { kb = {}, midi = {} }
+local function keyNotes()
   local t={}
-  for p=0,3 do
-    local port=M.ioport.ports[":KEYS"..p]
-    if port then local v=port:read()
-      for bit=0,15 do if (v>>bit)&1==1 then t[#t+1]=(p*16+bit)+36 end end end
+  for n=0,127 do if rawHeld.kb[n] or rawHeld.midi[n] then t[#t+1]=n end end
+  return t
+end
+local function moduleNotes()  -- notes the module's trackers hold (any channel, either ring)
+  local t={}
+  for n=0,127 do
+    if (sp:read_u16(NOTES_MASKS[1]+2*n) | sp:read_u16(NOTES_MASKS[2]+2*n)) ~= 0 then t[#t+1]=n end
   end
-  return t
-end
-local function ringNotes()
-  local L=sp:read_u32(RING); local n=0; local seen={}; local t={}
-  while L~=0 and not seen[L] and n<64 and L>=RING_LO and L<RING_HI do
-    seen[L]=true; t[#t+1]=sp:read_u8(L-4); L=sp:read_u32(L); n=n+1 end
-  return t
-end
-local function heldNotes()
-  local t={}
-  for byte=0,15 do local b=sp:read_u8(HELD+byte)
-    if b~=0 then for bit=0,7 do if (b>>bit)&1==1 then local sl=byte*8+bit
-      t[#t+1]=sp:read_u8(NODE+sl*0x2C+0x0C) end end end end
   return t
 end
 local function panelMask()
@@ -107,7 +99,7 @@ local BASE = os.getenv("HOME").."/compartilhado/tmp/aw-"..SESSION
 local LOGPATH = BASE.."-monitor.log"
 local log = io.open(LOGPATH, "w")
 local function w(line) if log then log:write(line.."\n"); log:flush() end end
-w("# awmonitor -- frame | part | keybed-keys | ring(TG) | panel | applied LR/UD/JMP/ACT mask="..
+w("# awmonitor -- frame | part | keys held | module-tracked notes | panel | applied LR/UD/JMP/ACT mask="..
   "resolved | prevBits | FLAGS")
 -- (a) Applied-vars log: the six hero variables THIS VM applied, one row per ReadInput. Logged at
 -- the exact instant ReadInput writes var 0xFE (its last write), so it is jitter-free. Row frame
@@ -134,8 +126,10 @@ we("# kind,emu_time,frame_no,... (K=key event: note,on,vel ; R=ReadInput: part,p
 AWMON_FIFO = sp:install_read_tap(0x98050004, 0x98050007, "awmon_fifo", function(offset, data, mask)
   if data ~= 0xffff and data ~= 0 then
     local low = data & 0xff
+    local note, on = (low & 0x7f) + 36, (low & 0x80) == 0
+    rawHeld.kb[note] = on or nil
     we(string.format("K,%.6f,%d,%d,%d,%d,kb", M.time:as_double(), sp:read_u16(FRAMENO),
-      (low & 0x7f) + 36, ((low & 0x80) == 0) and 1 or 0, (data >> 8) & 0xff))
+      note, on and 1 or 0, (data >> 8) & 0xff))
   end
   return data
 end)
@@ -155,6 +149,7 @@ AWMON_MIDI = sp:install_read_tap(0x34000818, 0x3400081B, "awmon_midi", function(
   if #mdata < (((hi == 0xC0) or (hi == 0xD0)) and 1 or 2) then return end
   if hi == 0x90 or hi == 0x80 then
     local on = (hi == 0x90 and mdata[2] > 0) and 1 or 0
+    rawHeld.midi[mdata[1]] = (on == 1) or nil
     we(string.format("K,%.6f,%d,%d,%d,%d,midi", M.time:as_double(), sp:read_u16(FRAMENO), mdata[1], on, mdata[2]))
   end
   mdata = {}                                               -- running status: keep mst
@@ -179,11 +174,11 @@ print("awmonitor:   applied vars   -> "..INPUTS.."  (play normally; flags print 
 -- ---- per-frame correlation -------------------------------------------------------------
 local ph="sd"; local lf=-1
 local lastResLR, lastResUD = 0, 0     -- previous frame's module-resolved bits (sticky reference)
-local nFrames, nGhost, nValue, nNodir = 0,0,0,0
-local ghostStreak, nodirStreak = 0, 0
-local CONFIRM = 3                     -- a GHOST/NODIR must hold this many frames to be "confirmed"
-                                      -- (the ring is read a hair after ReadInput saw it, so a
-                                      -- 1-frame mismatch on a transition is a race, not a bug)
+local nFrames, nGhost, nStuck, nValue, nNodir = 0,0,0,0,0
+local ghostStreak, stuckStreak, nodirStreak = 0, 0, 0
+local CONFIRM = 3                     -- a GHOST/STUCK/NODIR must hold this many frames to be
+                                      -- "confirmed": the trackers are as of the last ReadInput, so a
+                                      -- 1-frame mismatch on a transition is a race, not a bug
 local function csv(t) local s={} for _,n in ipairs(t) do s[#s+1]=tostring(n) end return table.concat(s,",") end
 
 emu.register_periodic(function()
@@ -199,11 +194,10 @@ emu.register_periodic(function()
   if fn==lf then return end
   lf=fn; nFrames=nFrames+1
 
-  local kb   = keybedNotes()
-  local ring = ringNotes()
-  local held = heldNotes()
+  local kb   = keyNotes()
+  local mod  = moduleNotes()
   local pmask= panelMask()
-  local rmask= maskOf(ring)
+  local rmask= maskOf(mod)
   local full = rmask | pmask
 
   local aLR=s16(VMVARS+0xFC*2); local aUD=s16(VMVARS+0xE5*2); local aJMP=s16(VMVARS+0xFB*2)
@@ -219,20 +213,25 @@ emu.register_periodic(function()
   -- Raw conditions: all are written to the log every frame (full detail). Only the RELIABLE ones
   -- raise a console alarm / count, to avoid transition-race false positives.
   local raw={}
-  -- GHOST: a keybed key is held but its note is absent from the ring (held-key drop / matrix
-  -- ghost). Needs persistence (a fresh press is in the ring ~6 ms later, < 1 frame).
-  local ghost=false
+  -- GHOST / STUCK: a mapped key held but not tracked by the module, or tracked but not held.
+  -- Needs persistence (the trackers update at the next ReadInput, < 1 frame later).
+  local ghost, stuck = false, false
+  local inmod, inkb = {}, {}
+  for _,n in ipairs(mod) do inmod[n]=true end
+  for _,n in ipairs(kb) do inkb[n]=true end
   for _,n in ipairs(kb) do
-    local inring=false; for _,rn in ipairs(ring) do if rn==n then inring=true break end end
-    if not inring and noteToMask(n)~=0 then raw[#raw+1]="GHOST:"..noteName(n); ghost=true end
+    if not inmod[n] and noteToMask(n)~=0 then raw[#raw+1]="GHOST:"..noteName(n); ghost=true end
+  end
+  for _,n in ipairs(mod) do
+    if not inkb[n] and noteToMask(n)~=0 then raw[#raw+1]="STUCK:"..noteName(n); stuck=true end
   end
   -- VALUE: applied var != value implied by the module's resolved bits. Both are the module's own
   -- state this frame -> race-free -> alarms immediately. A hit here is a real derive bug.
   local value=false
   if aLR~=lrVal(mPrevLR) then raw[#raw+1]=string.format("VALUE-LR(app=%d bits=%d)",aLR,mPrevLR); value=true end
   if aUD~=udVal(mPrevUD) then raw[#raw+1]=string.format("VALUE-UD(app=%d bits=%d)",aUD,mPrevUD); value=true end
-  -- NODIR: a single clear direction in the ring but nothing applied (input not reaching the
-  -- game). Needs persistence (a 1-frame lag at a switch is normal).
+  -- NODIR: a single clear direction in the tracked notes but nothing applied (input not reaching
+  -- the game). Needs persistence (a 1-frame lag at a switch is normal).
   local nodir=false
   if lrBits==1 and aLR~=1 then raw[#raw+1]="NODIR-R"; nodir=true end
   if lrBits==2 and aLR~=-1 then raw[#raw+1]="NODIR-L"; nodir=true end
@@ -245,20 +244,22 @@ emu.register_periodic(function()
   if mPrevUD~=expUD then raw[#raw+1]=string.format("sticky?UD(mod=%d exp=%d)",mPrevUD,expUD) end
 
   ghostStreak = ghost and (ghostStreak+1) or 0
+  stuckStreak = stuck and (stuckStreak+1) or 0
   nodirStreak = nodir and (nodirStreak+1) or 0
   local confirmed={}
   if value              then confirmed[#confirmed+1]="VALUE"; nValue=nValue+1 end
   if ghostStreak==CONFIRM then confirmed[#confirmed+1]="GHOST(held)"; nGhost=nGhost+1 end
+  if stuckStreak==CONFIRM then confirmed[#confirmed+1]="STUCK(held)"; nStuck=nStuck+1 end
   if nodirStreak==CONFIRM then confirmed[#confirmed+1]="NODIR(stuck)"; nNodir=nNodir+1 end
 
   local line=string.format(
-    "f=%d t=%.2f part=%04X kb=[%s]%s ring=%s held=%s pnl=%s | LR=%+d UD=%+d JMP=%+d ACT=%d mask=0x%02X(%s) prev=%d/%d%s",
-    fn, t, part, csv(kb), fmtNotes(kb), fmtNotes(ring), fmtNotes(held), fmtmask(pmask),
+    "f=%d t=%.2f part=%04X keys=[%s]%s mod=%s pnl=%s | LR=%+d UD=%+d JMP=%+d ACT=%d mask=0x%02X(%s) prev=%d/%d%s",
+    fn, t, part, csv(kb), fmtNotes(kb), fmtNotes(mod), fmtmask(pmask),
     aLR, aUD, aJMP, aACT, aMASK, fmtmask(full), mPrevLR, mPrevUD,
     (#raw>0) and ("  <<< "..table.concat(raw," ")) or "")
   w(line)
-  if #confirmed>0 then print(string.format("[f=%d part=%04X] %s | kb=%s ring=%s LR=%+d UD=%+d ACT=%d",
-    fn, part, table.concat(confirmed," "), fmtNotes(kb), fmtNotes(ring), aLR, aUD, aACT)) end
+  if #confirmed>0 then print(string.format("[f=%d part=%04X] %s | keys=%s mod=%s LR=%+d UD=%+d ACT=%d",
+    fn, part, table.concat(confirmed," "), fmtNotes(kb), fmtNotes(mod), aLR, aUD, aACT)) end
 
   lastResLR, lastResUD = mPrevLR, mPrevUD
 end)
@@ -267,8 +268,8 @@ end)
 -- in current builds, emu.register_stop in older ones); if neither exists, skip it -- both logs are
 -- flushed after every line, so nothing is lost without the hook.
 local function summary()
-  local s=string.format("awmonitor summary: %d frames; confirmed anomalies: VALUE=%d GHOST=%d NODIR=%d",
-    nFrames, nValue, nGhost, nNodir)
+  local s=string.format("awmonitor summary: %d frames; confirmed anomalies: VALUE=%d GHOST=%d STUCK=%d NODIR=%d",
+    nFrames, nValue, nGhost, nStuck, nNodir)
   w("# "..s); print(s); if log then log:close() end; if inlog then inlog:close() end; if evlog then evlog:close() end
 end
 if emu.add_machine_stop_notifier then AWMON_STOP = emu.add_machine_stop_notifier(summary)
