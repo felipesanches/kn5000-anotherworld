@@ -15,12 +15,17 @@
 --   STICKY  the module's resolved direction != the sticky rule's expectation
 --   VALUE   the applied var != the value implied by the resolved bits
 --   NODIR   the ring holds a single clear direction but the applied direction is 0
--- Full per-frame log -> ~/compartilhado/tmp/aw-monitor.log ; flags also print to the console.
+-- Output, one set per session (AW_SESSION=<name>; default a timestamp), in ~/compartilhado/tmp/:
+--   aw-<session>-monitor.log  human per-frame log (flags also print to the console)
+--   aw-<session>-events.csv   RAW input events (keybed/MIDI make/break + panel at each ReadInput)
+--                             -> replay in the reference through ITS input handling
+--   aw-<session>-inputs.csv   the hero vars this VM applied -> VM-vs-VM differential replay
 --
--- Run (normal speed so you can play; NO -nothrottle):
---   cd ~/compartilhado/kn5000-anotherworld/kn7000
---   ../../mame-pr/kn7000 kn7000 -bios sp7001 -rompath ../../technics_romsets \
---     -harddisk build/another_sd.img -autoboot_script probes/awmonitor.lua -str 290 -window
+-- Run (normal speed so you can play: no -nothrottle, and no -str, which would end the session):
+--   AW_SESSION=mytest ~/compartilhado/mame-pr/kn7000 -rompath ~/compartilhado/technics_romsets \
+--     -skip_gameinfo -window kn7000 -bios sp7001 \
+--     -harddisk ~/compartilhado/kn5000-anotherworld/kn7000/build/another_sd.img \
+--     -autoboot_script ~/compartilhado/kn5000-anotherworld/kn7000/probes/awmonitor.lua
 -- Add -midiin1 "<port>" to also drive it from a USB-MIDI controller.
 
 local M  = manager.machine
@@ -96,22 +101,80 @@ local function fmtmask(m) local s=""
   if m&4~=0 then s=s.."D" end; if m&8~=0 then s=s.."U" end
   if m&0x80~=0 then s=s.."A" end; return s=="" and "-" or s end
 
--- ---- log file --------------------------------------------------------------------------
-local LOGPATH = os.getenv("HOME").."/compartilhado/tmp/aw-monitor.log"
+-- ---- log files (one set per session: AW_SESSION=<name>, default a timestamp) ------------------
+local SESSION = os.getenv("AW_SESSION") or os.date("%Y%m%d-%H%M%S")
+local BASE = os.getenv("HOME").."/compartilhado/tmp/aw-"..SESSION
+local LOGPATH = BASE.."-monitor.log"
 local log = io.open(LOGPATH, "w")
 local function w(line) if log then log:write(line.."\n"); log:flush() end end
 w("# awmonitor -- frame | part | keybed-keys | ring(TG) | panel | applied LR/UD/JMP/ACT mask="..
   "resolved | prevBits | FLAGS")
--- Replayable input-event log: the exact per-frame hero variables this VM applied, for feeding a
--- reference Another World VM so the two can be run on identical inputs and compared (see
--- probes/aw-differential/README). One row per VM frame: everything after `part` is what the
--- reference's updateInput() should write (var 0xFC,0xE5,0xFB,0xFD,0xFA,0xFE).
-local INPUTS = os.getenv("HOME").."/compartilhado/tmp/aw-inputs.csv"
+-- (a) Applied-vars log: the six hero variables THIS VM applied, one row per ReadInput. Logged at
+-- the exact instant ReadInput writes var 0xFE (its last write), so it is jitter-free. Row frame
+-- V+1 holds the vars ReadInput set while FRAME_NO=V, which drive tick V -- the "row F drives tick
+-- F-1" convention replaycksum and awreplay use. Replaying THIS file reproduces the KN7000's own
+-- input handling (including any mishandling) -- useful for VM-vs-VM, not for judging inputs.
+local INPUTS = BASE.."-inputs.csv"
 local inlog = io.open(INPUTS, "w")
 local function wi(line) if inlog then inlog:write(line.."\n"); inlog:flush() end end
 wi("frame,part,lr(0xFC),ud(0xE5),jump(0xFB),posmask(0xFD),action(0xFA),actmask(0xFE)")
-print("awmonitor: human log -> "..LOGPATH)
-print("awmonitor: replay input log -> "..INPUTS.."  (play normally; flags print below)")
+-- (b) RAW input events: what the player physically did, before any of this port's input handling.
+--   K,<emu_time>,<FRAME_NO>,<midi_note>,<1=on|0=off>,<velocity>,<kb|midi>  every make/break:
+--        keybed (host keys) tapped as the firmware reads the key FIFO 0x98050004; MIDI-in tapped
+--        as the firmware reads the MIDI UART (SIO1) receive register -- see below
+--   R,<emu_time>,<FRAME_NO>,<part>,<panel_mask>                    each ReadInput instant (the input
+--        drives tick FRAME_NO) with the panel D-pad state (R1 L2 D4 U8 A0x80) at that moment
+-- A reference VM replays these through ITS OWN input mapping, answering "does a correct AW engine
+-- handle these presses the same way?".
+local EVENTS = BASE.."-events.csv"
+local evlog = io.open(EVENTS, "w")
+local function we(line) if evlog then evlog:write(line.."\n"); evlog:flush() end end
+we("# kind,emu_time,frame_no,... (K=key event: note,on,vel ; R=ReadInput: part,panel_mask)")
+
+AWMON_FIFO = sp:install_read_tap(0x98050004, 0x98050007, "awmon_fifo", function(offset, data, mask)
+  if data ~= 0xffff and data ~= 0 then
+    local low = data & 0xff
+    we(string.format("K,%.6f,%d,%d,%d,%d,kb", M.time:as_double(), sp:read_u16(FRAMENO),
+      (low & 0x7f) + 36, ((low & 0x80) == 0) and 1 or 0, (data >> 8) & 0xff))
+  end
+  return data
+end)
+-- MIDI-in does NOT use the keybed FIFO on this driver: -midiin1 feeds the CPU's real MIDI UART
+-- (MN10300 SIO1) and the firmware parses the bytes itself. Tap the firmware's reads of the SIO1
+-- receive register (0x34000819, byte 1 of the 32-bit word at 0x34000818) and parse the stream:
+-- note-on/off with running status; system/realtime bytes are ignored. Logged as K,...,midi.
+local mst, mdata = 0, {}
+AWMON_MIDI = sp:install_read_tap(0x34000818, 0x3400081B, "awmon_midi", function(offset, data, mask)
+  if (mask & 0xff00) == 0 then return end                  -- only reads of the RXD byte
+  local b = (data >> 8) & 0xff
+  if b >= 0xF8 then return end                             -- realtime (clock, active sensing...)
+  if b >= 0x80 then mst = (b < 0xF0) and b or 0; mdata = {}; return end
+  if mst == 0 then return end
+  mdata[#mdata+1] = b
+  local hi = mst & 0xF0
+  if #mdata < (((hi == 0xC0) or (hi == 0xD0)) and 1 or 2) then return end
+  if hi == 0x90 or hi == 0x80 then
+    local on = (hi == 0x90 and mdata[2] > 0) and 1 or 0
+    we(string.format("K,%.6f,%d,%d,%d,%d,midi", M.time:as_double(), sp:read_u16(FRAMENO), mdata[1], on, mdata[2]))
+  end
+  mdata = {}                                               -- running status: keep mst
+end)
+local A_FE = VMVARS + 0xFE*2
+local lastRIframe = -1
+AWMON_RI = sp:install_write_tap(A_FE, A_FE+3, "awmon_ri", function(offset, data, mask)
+  if offset ~= A_FE or (mask & 0xffff) == 0 then return end   -- var 0xFE only (0xFF shares the word)
+  local fr = sp:read_u16(FRAMENO)
+  if fr == lastRIframe then return end                        -- first 0xFE write after a FRAME_NO bump = ReadInput
+  lastRIframe = fr
+  local part = sp:read_u16(CURPART)
+  we(string.format("R,%.6f,%d,%04X,%d", M.time:as_double(), fr, part, panelMask()))
+  wi(string.format("%d,%04X,%d,%d,%d,%d,%d,%d", fr+1, part, s16(VMVARS+0xFC*2), s16(VMVARS+0xE5*2),
+    s16(VMVARS+0xFB*2), sp:read_u16(VMVARS+0xFD*2), sp:read_u16(VMVARS+0xFA*2), data & 0xffff))
+end)
+print("awmonitor: session "..SESSION)
+print("awmonitor:   human log      -> "..LOGPATH)
+print("awmonitor:   raw key events -> "..EVENTS)
+print("awmonitor:   applied vars   -> "..INPUTS.."  (play normally; flags print below)")
 
 -- ---- per-frame correlation -------------------------------------------------------------
 local ph="sd"; local lf=-1
@@ -146,7 +209,6 @@ emu.register_periodic(function()
   local aLR=s16(VMVARS+0xFC*2); local aUD=s16(VMVARS+0xE5*2); local aJMP=s16(VMVARS+0xFB*2)
   local aACT=sp:read_u16(VMVARS+0xFA*2); local aMASK=sp:read_u16(VMVARS+0xFD*2)
   local aFE=sp:read_u16(VMVARS+0xFE*2)
-  wi(string.format("%d,%04X,%d,%d,%d,%d,%d,%d", fn, sp:read_u16(CURPART), aLR, aUD, aJMP, aMASK, aACT, aFE))
   local mPrevLR=sp:read_u16(PREV_LR); local mPrevUD=sp:read_u16(PREV_UD)
   local part=sp:read_u16(CURPART)
 
@@ -207,7 +269,7 @@ end)
 local function summary()
   local s=string.format("awmonitor summary: %d frames; confirmed anomalies: VALUE=%d GHOST=%d NODIR=%d",
     nFrames, nValue, nGhost, nNodir)
-  w("# "..s); print(s); if log then log:close() end; if inlog then inlog:close() end
+  w("# "..s); print(s); if log then log:close() end; if inlog then inlog:close() end; if evlog then evlog:close() end
 end
 if emu.add_machine_stop_notifier then AWMON_STOP = emu.add_machine_stop_notifier(summary)
 elseif emu.register_stop then emu.register_stop(summary) end
