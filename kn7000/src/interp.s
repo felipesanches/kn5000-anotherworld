@@ -518,19 +518,17 @@ cp_ret:
 #   * Intro (0x3E81): any held keybed/MIDI key -> fire, so the player can skip the intro.
 #     The intro bytecode polls var[0xFE] (ACTION_MASK) and jumps to the first playable
 #     part.
-#   * Water part (0x3E82): five control-panel buttons drive a full D-pad + fire. The
-#     firmware's debounced button bitmap (vm.inc: PANEL_CPR/BTN_*) is read directly; the
-#     six hero variables are written exactly as rustyworld's update_player does.
+#   * Every other part: the keybed/MIDI note map and five control-panel buttons drive a
+#     full D-pad + fire (the firmware's debounced button bitmap, vm.inc PANEL_CPR/BTN_*, is
+#     read directly); the six hero variables are written exactly as rustyworld's
+#     update_player does. The original engine reads input the same way in every part.
 # Keys come from the note trackers (vm.inc NOTES_*), brought up to date here each frame.
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
     movhu   (CURRENT_PART_ID), d0
     cmp     0x3E81, d0
-    beq     ri_intro
-    cmp     0x3E82, d0
-    beq     ri_gameplay
-    bra     ri_ret
+    bne     ri_gameplay
 
 # ---- intro: any keybed/MIDI key = fire (skip) ----
 ri_intro:

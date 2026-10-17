@@ -62,6 +62,8 @@ end)
 local OUTBIN=os.getenv("AWCK_BIN") or "build/replay_pages.bin"
 local OUTIDX=os.getenv("AWCK_IDX") or "build/replay_pages.idx"
 local MAXTICK=tonumber(os.getenv("AWCK_MAX") or "4000")
+-- AW_START_PART=0x3E8n: enter that part at the end of tick 0 (rustyworld replaycksum START_PART)
+local START_PART=os.getenv("AW_START_PART") and tonumber(os.getenv("AW_START_PART"))
 local binf=io.open(OUTBIN,"wb"); local idxf=io.open(OUTIDX,"w")
 local captured=0; local finish=false
 -- optional diagnostics: AW_DUMP_FROM..AW_DUMP_TO prints all 256 VM vars at the END of each tick
@@ -74,6 +76,7 @@ AWREPLAY_CAP = sp:install_write_tap(FRAME_NO, FRAME_NO+3, "awframe", function(of
   if offset~=FRAME_NO then return end
   local v=data&0xffff; if v==0 then return end
   local tick=v-1
+  if tick==0 and START_PART then sp:write_u16(0x4407102C, START_PART) end   -- switch before tick 1
   if tick>=DFROM and tick<=DTO then local parts={}
     for i=0,255 do local x=sp:read_u16(VMV+i*2); if x~=0 then if x>=0x8000 then x=x-0x10000 end; parts[#parts+1]=string.format("%02x=%d",i,x) end end
     print("VARS t="..tick.." "..table.concat(parts," ")) end

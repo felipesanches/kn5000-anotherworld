@@ -124,7 +124,7 @@
 .equ TRACE_MAX,       200000         # enough to hold the whole intro
 
 # ================================================================================
-# Player input (gameplay directional control for the water part, 0x3E82).
+# Player input (gameplay directional control for every part after the intro).
 #
 # The KN7000 firmware keeps a debounced control-panel button bitmap in work RAM: one
 # byte per CP serial segment, one bit per switch line (bit = 1 << SWn), held 1 for as

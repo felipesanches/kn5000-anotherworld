@@ -37,13 +37,13 @@ def vname(v):
     if ud > 0: s.append('DOWN')
     if a: s.append('ACTION')
     return '+'.join(s) or '-'
-game = [t for t in sorted(raw) if raw[t][1] == '3E82' and t in kn]
+game = [t for t in sorted(raw) if raw[t][1] not in ('0000', '3E81') and t in kn]   # every playable part
 diffs = [t for t in game if canon(raw[t][0]) != kn[t]]
 runs = []
 for t in diffs:
     if runs and t == runs[-1][1] + 1: runs[-1][1] = t
     else: runs.append([t, t])
-print(f"water-part ticks: {len(game)}; KN7000 applied != canonical handling of the held keys: "
+print(f"gameplay ticks (all parts after the intro): {len(game)}; KN7000 applied != canonical handling of the held keys: "
       f"{len(diffs)} ticks in {len(runs)} runs")
 for a, b in runs:
     print(f"  {raw[a][2]:6.1f}s  ticks {a:4d}-{b:4d} ({b-a+1:2d} frames): you held {name(raw[a][0]):<14}"
