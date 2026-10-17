@@ -164,3 +164,34 @@ cd ~/compartilhado/kn5000-anotherworld/kn7000 && \
   python3 -I probes/cksum_pages.py ~/compartilhado/tmp/awgen_pages.bin ~/compartilhado/tmp/awgen_pages.idx ~/compartilhado/tmp/kn7000_checksums.log && \
   python3 -I probes/compare_frames.py ~/compartilhado/tmp/kn7000_checksums.log ~/compartilhado/tmp/replay_checksums.log
 ```
+
+### Played session: divergence found at frame 210 — in the REFERENCE (2026-10-17)
+
+A varied scripted play session (`research-scratch/awplay.lua`: swim up+action, run right from
+the beast, rapid L↔R switches with overlaps, run+jump taps, a left+down diagonal, opposite-key
+brushes, run left, jump taps while running — 381 frames) first matched only 214/381, diverging at
+**tick 210**, the screen transition after running right off the first land screen.
+
+**Both VMs are deterministic**, and this is how it was proven: with the aligned convention
+(KN7000 end-of-frame-T state = rustyworld start-of-tick-T+1), *all 256 VM variables were
+bit-identical on both sides through game-frame 209*. The split at 210 was therefore a genuine
+implementation difference, reproducible on every run.
+
+**Localizing it:** rustyworld's `DUMP_TICK` per-opcode PCT trace vs the KN7000's `TRACE_BUF`
+(dumped by `awplay.lua`) for the same tick. Frame 209 was identical (17 ops; `setvec 44→153`,
+`setvec 43→5481`, `changeThreadsState(0,0x3f,resume)`, `changeThreadsState(20,22,kill)`). At 210
+rustyworld ran **2009 ops — threads 0–6, 8–10, 18 each executing the same 48 ops from pc 0** —
+while the KN7000 ran 137 with those threads dormant and the real scene-change handlers (43/44)
+drawing the new screen.
+
+**Root cause — a rustyworld bug.** Its `ChanStatus` had only `Running(pc)` and `Paused(pc)`: no
+dead state. `Kill` (0x11) and `stop()` (deletes) set `Paused(0)`, so the scene-change's
+resume-all resurrected every killed thread at pc 0 and re-ran the part's main init mid-game
+(resetting Lester's X to 0, later a spurious 35-frame restart blank). The original — and the
+KN7000's `OpKillThread`/`DELETE_THREAD` → `PC=0xFFFF` — never revive a killed thread.
+
+**Fix** (reference side, `research-scratch/kn7000-aw-reference/replay-mods/`): a
+`ChanStatus::Stopped` state; kill/delete → `Stopped`; pause/resume only move
+`Running`↔`Paused`. **Result: play 381/381 (100%) and intro 2612/2612 (100%).** The KN7000 VM is
+pixel-faithful across the whole input repertoire the reported bugs involved; the discrepancy was
+the reference's.
