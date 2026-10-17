@@ -28,14 +28,22 @@ worse.
 **The real refinements:**
 - **Skip note 0.** A slot momentarily reads note 0 only while unallocated; note 0 would
   classify as action (`<= 60`), so a slot with note 0 is skipped. Cheap guard.
-- **Cancel opposing directions.** The held bitmap lags physical key-up by ~1 frame
-  (firmware key-up processing; `awrelease.lua` shows the bit clearing ~50 ms after
-  release). So releasing left while pressing right briefly shows **both** for one frame,
-  and the derive's RIGHT-beats-LEFT (and DOWN-beats-UP) rule would jerk the wrong way for
-  that frame. When both bits of an axis are set, `ReadInput` now zeroes that axis (a
-  1-frame neutral instead of a wrong direction). Diagonals (non-opposing bits) are
-  untouched — verified: F5+A5 → left+down (`FD=06`), F5+C6 → neutral, Ab5+A5 → neutral
-  (`awcancel.lua`).
+- **No opposing-axis cancel (tried, then removed — 2026-10-17).** An earlier version
+  zeroed an axis when both its bits were set, on the theory that opposing pairs are a
+  1-frame key-up lag. **That was wrong and is reverted.** Re-evaluating the "bad inputs
+  reasonably easily" complaint from scratch showed the opposing case is not a 1-frame blip
+  but a real, sustained span: a human switching direction presses the new key *before*
+  fully releasing the old one, so both bits are held together for the whole overlap.
+  Cancelling that span made Lester **stop** mid-switch — `awoverlap2.lua` (reading the
+  applied hero vars, not a re-model) showed F5+C6 held → `LR=0` / mask `0x03` /
+  `dir=NEUTRAL` for the entire 1 s overlap. That neutral-stop was itself the frequently-hit
+  bad input. `ReadInput` now follows the AW VM's own fixed priority with no cancel
+  (RIGHT beats LEFT, DOWN beats UP — rustyworld `update_player`, the oracle), so an overlap
+  keeps him moving: F5→C6 overlap now reads `LR=+1` (right) throughout, never 0
+  (`awoverlap2.lua`). Diagonals (non-opposing bits) are untouched — F5+A5 → left+down
+  (`FD=06`). The remaining asymmetry (RIGHT/DOWN win on *any* overlap, so a right→left
+  switch lingers on right for the overlap) is authentic AW behaviour and is motion, not a
+  stop.
 - **Fast, symmetric key signal (the real cut to the "extra kick").** The sustain bitmap
   `0x500D288C` is *set* on key-down in ~17 ms but *cleared* on key-up in ~50 ms (variable
   33–50). That asymmetry is the stray kick: a released direction lingers while you switch.

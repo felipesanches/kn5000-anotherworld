@@ -542,24 +542,14 @@ rkb_adv:
     bne     rkb_loop
 rkb_done:
     or      d3, d2                  # fold keybed mask into the panel mask
-    # Opposing directions held at once are a 1-frame switch artifact (the held bitmap lags
-    # physical key-up by ~1 frame, so releasing left while pressing right briefly shows
-    # both). Cancel each axis when both of its bits are set, so a quick left<->right or
-    # up<->down switch gives a 1-frame neutral instead of jerking the wrong way (RIGHT/DOWN
-    # would otherwise win). Diagonals (non-opposing bits) are untouched.
-    mov     d2, d1
-    and     3, d1                   # LEFT(2) | RIGHT(1)
-    cmp     3, d1
-    bne     rig_lrok
-    and     0xFC, d2                # both held -> clear L and R
-rig_lrok:
-    mov     d2, d1
-    and     0xC, d1                 # DOWN(4) | UP(8)
-    cmp     0xC, d1
-    bne     rig_udok
-    and     0xF3, d2                # both held -> clear U and D
-rig_udok:
-    # d2 = panel mask | keybed mask; now derive the hero variables
+    # d2 = panel mask | keybed mask; now derive the hero variables, following the AW VM's
+    # own priority (rustyworld update_player, the oracle): RIGHT beats LEFT, DOWN beats UP.
+    # No opposing-axis cancel: a human switching direction holds the new key before fully
+    # releasing the old one (the held bitmap also lags key-up ~1 frame), so both bits are
+    # set together for a real span, not a 1-frame blip. Cancelling that span read as Lester
+    # STOPPING mid-switch (awoverlap.lua: F5+C6 held -> dir=NEUTRAL for the whole overlap) --
+    # a bad input on every sloppy switch. The oracle's fixed priority instead keeps him
+    # moving (RIGHT/DOWN wins), which is the authentic AW behaviour. Diagonals are untouched.
     # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
     mov     VAR_HERO_LR, d0
     mov     d2, d1
