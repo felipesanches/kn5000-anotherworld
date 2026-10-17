@@ -57,6 +57,16 @@ frame makes it span *more* frames (worse). Only a *longer* frame (slower game) m
 50 ms a smaller fraction of one frame and hides the lingering — the crispness/speed
 trade-off. At the authentic 80 ms water pace it is an occasional one-frame extra kick.
 
+Also tested and rejected: **symmetrising the edges by delaying the key-ON** (hold a pressed
+bit ~33 ms before applying it, so press+delay ~= the 50 ms key-off). The intent was to make
+both edges land together on a switch. Implemented it clock-based (per-bit on-time in
+KERNEL_MS, so taps survive the 50 ms release tail) and measured the real symptom — frames
+showing the *old* direction while the *new* one is intended — over rapid UP<->LEFT switches:
+it got **worse**, 17 -> 32 such frames. Reason: the stray kick is the slow *release*
+lingering, not the fast press; delaying the press just makes the new direction appear later,
+*lengthening* the window where only the stale old direction shows. Reverted. The firmware's
+~50 ms key-off is the real limit and there is no module-side fix that keeps diagonals.
+
 ## Bug 2 — dynamic elements periodically disappear (background stays)
 
 **Cause.** `CopyPage` resolved a copy source page wrongly. Another World's copyVideoPage
