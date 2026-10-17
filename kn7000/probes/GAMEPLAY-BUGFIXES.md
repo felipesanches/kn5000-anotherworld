@@ -28,22 +28,28 @@ worse.
 **The real refinements:**
 - **Skip note 0.** A slot momentarily reads note 0 only while unallocated; note 0 would
   classify as action (`<= 60`), so a slot with note 0 is skipped. Cheap guard.
-- **No opposing-axis cancel (tried, then removed — 2026-10-17).** An earlier version
-  zeroed an axis when both its bits were set, on the theory that opposing pairs are a
-  1-frame key-up lag. **That was wrong and is reverted.** Re-evaluating the "bad inputs
-  reasonably easily" complaint from scratch showed the opposing case is not a 1-frame blip
-  but a real, sustained span: a human switching direction presses the new key *before*
-  fully releasing the old one, so both bits are held together for the whole overlap.
-  Cancelling that span made Lester **stop** mid-switch — `awoverlap2.lua` (reading the
-  applied hero vars, not a re-model) showed F5+C6 held → `LR=0` / mask `0x03` /
-  `dir=NEUTRAL` for the entire 1 s overlap. That neutral-stop was itself the frequently-hit
-  bad input. `ReadInput` now follows the AW VM's own fixed priority with no cancel
-  (RIGHT beats LEFT, DOWN beats UP — rustyworld `update_player`, the oracle), so an overlap
-  keeps him moving: F5→C6 overlap now reads `LR=+1` (right) throughout, never 0
-  (`awoverlap2.lua`). Diagonals (non-opposing bits) are untouched — F5+A5 → left+down
-  (`FD=06`). The remaining asymmetry (RIGHT/DOWN win on *any* overlap, so a right→left
-  switch lingers on right for the overlap) is authentic AW behaviour and is motion, not a
-  stop.
+- **Newest-key-wins per axis (the overlap fix — 2026-10-17).** An earlier version zeroed an
+  axis when both its bits were set, on the theory that opposing pairs are a 1-frame key-up
+  lag. **That was wrong and is reverted.** Re-evaluating the "bad inputs reasonably easily"
+  complaint from scratch showed the opposing case is not a 1-frame blip but a real,
+  sustained span: a human switching direction presses the new key *before* fully releasing
+  the old one, so both bits are held together for the whole overlap. Cancelling that span
+  made Lester **stop** mid-switch — `awoverlap2.lua` (reading the applied hero vars, not a
+  re-model) showed F5+C6 held → `LR=0` / `dir=NEUTRAL` for the entire 1 s overlap. That
+  neutral-stop was itself the frequently-hit bad input. The fix uses the **ring's recency
+  order**: the active-voice ring is allocation-ordered (head = oldest sounding voice, new
+  voices appended at the tail), so walking head→tail visits held keys oldest→newest, and the
+  walk now *overwrites* each axis's bit as it goes — whichever of left/right (or up/down) was
+  pressed **most recently wins**, in *both* switch directions. Verified (`awoverlap3.lua`,
+  reading applied `var[0xFC]`): L→R overlap ring `{77,84}` → `LR=+1` (right); R→L overlap
+  ring `{84,77}` → `LR=−1` (left). This is better than the AW oracle's fixed RIGHT/DOWN
+  priority, which gave the *wrong* direction on a right→left or up→down switch; here the newer
+  key always wins. The two axes are tracked independently, so diagonals are untouched —
+  F5+A5 → left+down (`FD=06`), and adding C6 flips only the L/R axis to right while down
+  stays (`LR=+1 UD=+1 FD=05`, `awdiag_nw.lua`). Action is OR'd (polyphonic), so move+fire
+  still works (C6+C3 → `FD=81 FA=1`, `awkbdmap.lua`, 8/8). The derive below keeps the AW
+  oracle's fixed priority, which now only arbitrates the rare panel-D-pad-vs-keybed opposing
+  case (the panel is a level bitmap with no recency).
 - **Fast, symmetric key signal (the real cut to the "extra kick").** The sustain bitmap
   `0x500D288C` is *set* on key-down in ~17 ms but *cleared* on key-up in ~50 ms (variable
   33–50). That asymmetry is the stray kick: a released direction lingers while you switch.

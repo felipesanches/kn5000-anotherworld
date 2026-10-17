@@ -486,10 +486,21 @@ rig_nf:
     # so direction changes are crisp (the old TG_HELD_MASK scan lagged key-off ~50 ms).
     # For each link L: note = (L-4); map note <= 60 (bass + C4) = action; F5 left, A5 down,
     # C6 right, Ab5/Bb5 up. Bounds + a node cap guard against a corrupt pointer.
-    clr     d3                      # keybed mask accumulator
+    #
+    # Newest-key-wins per axis. The ring is allocation-ordered (head = oldest sounding
+    # voice, new voices appended at the tail), so walking head->tail visits held keys from
+    # oldest to newest. For an opposing pair held at once (a human switch holds the new key
+    # before releasing the old), the LAST direction seen on an axis is the most recent, so
+    # we OVERWRITE that axis's bit as we walk -- whichever of left/right (or up/down) the
+    # player pressed most recently wins. Action is OR'd (polyphonic), and the two axes are
+    # tracked independently so diagonals (left+down) keep both. (8,sp) = newest L/R bit,
+    # (0xC,sp) = newest U/D bit; d3 accumulates the action bit.
+    clr     d3                      # keybed action accumulator (0x80)
     mov     (TG_RING_HEAD), a2      # a2 = L = ring head link (0 = no keys)
     clr     d0
     mov     d0, (4, sp)             # node count (loop has no calls, so a stack local is safe)
+    mov     d0, (8, sp)             # newest L/R bit so far (0 = none)
+    mov     d0, (0xC, sp)           # newest U/D bit so far (0 = none)
 rkb_loop:
     mov     a2, d0
     cmp     0, d0
@@ -519,19 +530,23 @@ rkb_loop:
     beq     rkb_right
     bra     rkb_adv
 rkb_act:
-    or      0x80, d3
+    or      0x80, d3                # action: polyphonic, just OR the bit
     bra     rkb_adv
 rkb_left:
-    or      2, d3
+    mov     2, d1                   # L/R axis: newest wins -> overwrite
+    mov     d1, (8, sp)
     bra     rkb_adv
 rkb_up:
-    or      8, d3
+    mov     8, d1                   # U/D axis: newest wins -> overwrite
+    mov     d1, (0xC, sp)
     bra     rkb_adv
 rkb_down:
-    or      4, d3
+    mov     4, d1
+    mov     d1, (0xC, sp)
     bra     rkb_adv
 rkb_right:
-    or      1, d3
+    mov     1, d1
+    mov     d1, (8, sp)
 rkb_adv:
     mov     (a2), d0                # L = next link = *(u32)(L)
     mov     d0, a2
@@ -541,15 +556,20 @@ rkb_adv:
     cmp     TG_RING_CAP, d0
     bne     rkb_loop
 rkb_done:
+    mov     (8, sp), d0             # fold the newest L/R bit into the keybed mask
+    or      d0, d3
+    mov     (0xC, sp), d0           # and the newest U/D bit
+    or      d0, d3
     or      d3, d2                  # fold keybed mask into the panel mask
-    # d2 = panel mask | keybed mask; now derive the hero variables, following the AW VM's
-    # own priority (rustyworld update_player, the oracle): RIGHT beats LEFT, DOWN beats UP.
-    # No opposing-axis cancel: a human switching direction holds the new key before fully
-    # releasing the old one (the held bitmap also lags key-up ~1 frame), so both bits are
-    # set together for a real span, not a 1-frame blip. Cancelling that span read as Lester
-    # STOPPING mid-switch (awoverlap.lua: F5+C6 held -> dir=NEUTRAL for the whole overlap) --
-    # a bad input on every sloppy switch. The oracle's fixed priority instead keeps him
-    # moving (RIGHT/DOWN wins), which is the authentic AW behaviour. Diagonals are untouched.
+    # d2 = panel mask | keybed mask. The keybed walk already resolved each axis to a single
+    # bit (newest key wins), so an opposing pair held at once never both reach the derive
+    # from the keybed -- a left<->right or up<->down switch tracks whichever key the player
+    # pressed most recently, in BOTH switch directions, and Lester keeps moving (no stop; the
+    # old opposing-cancel made him freeze mid-switch -- awoverlap2.lua). The derive below is
+    # the AW VM's own priority (rustyworld update_player: RIGHT beats LEFT, DOWN beats UP),
+    # which now only arbitrates the rare case of the panel D-pad and keybed held in opposite
+    # directions at the same instant (the panel is a level bitmap with no recency). Diagonals
+    # are untouched: the two axes are tracked independently, so left+down keeps both.
     # var[0xFC] LEFT_RIGHT: RIGHT(1)? +1 : LEFT(2)? -1 : 0
     mov     VAR_HERO_LR, d0
     mov     d2, d1
