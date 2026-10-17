@@ -201,8 +201,13 @@ emu.register_periodic(function()
   lastResLR, lastResUD = mPrevLR, mPrevUD
 end)
 
-emu.register_stop(function()
+-- Exit summary. The stop hook's name differs across MAME versions (emu.add_machine_stop_notifier
+-- in current builds, emu.register_stop in older ones); if neither exists, skip it -- both logs are
+-- flushed after every line, so nothing is lost without the hook.
+local function summary()
   local s=string.format("awmonitor summary: %d frames; confirmed anomalies: VALUE=%d GHOST=%d NODIR=%d",
     nFrames, nValue, nGhost, nNodir)
   w("# "..s); print(s); if log then log:close() end; if inlog then inlog:close() end
-end)
+end
+if emu.add_machine_stop_notifier then AWMON_STOP = emu.add_machine_stop_notifier(summary)
+elseif emu.register_stop then emu.register_stop(summary) end
