@@ -52,6 +52,13 @@ Reproduce (from `kn7000/`, after `make card`):
 With `awmonitor.lua` now checking the module's tracked notes against the raw key events,
 both re-performances log `VALUE=0 GHOST=0 STUCK=0 NODIR=0`.
 
+**MIDI IN 2 is not read.** Its receive ring (header `0x5001FC88`) is filled by a *polled*
+reader (PC `0x484B28E2`, PSW IE=0 IM=7), not an interrupt. While the plug-in runs, that poll
+comes ~4 ms after each byte instead of ~0.4 ms, so back-to-back MIDI bytes overwrite each
+other in the UART: the session's first four messages arrive as `90 4C 40 56 4A` instead of
+`90 3C 4C 80 3C 40 90 52 56 90 3C 4A` (`awmidi2loss.lua`). A lost note-off would leave a
+direction stuck, so the game takes MIDI from MIDI IN 1 (`-midiin1`), which keeps every byte.
+
 **Cost.** `awricost.lua` traces one water-part `ReadInput` (frame 302 of the keybed
 re-performance) in the MAME debugger: **127** instructions in the voice-ring build, **805** in
 this one (`NotePoll` 75, `NotesAnyHeld` 583 — the 61-note action range, both trackers), plus
