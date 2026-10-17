@@ -48,6 +48,15 @@ would slow the game. It is a ~1-frame artifact on direction changes, not a wrong
 direction, and there is no clean fix that preserves diagonals (a switch like up->left
 can't be told apart from a deliberate up+left diagonal at the moment the new key appears).
 
+Tested and rejected (so it isn't re-attempted): the ~50 ms note-off latency does **not**
+depend on how we yield. Measured it the same (~50 ms) with the old flat 30 ms yield, the
+new ~60 ms AW-paced yield, and a version that split the per-frame sleep into 8 ms chunks to
+schedule the firmware's keybed task more often — all identical. It is a fixed firmware
+property. And it can't be shrunk by running faster: the 50 ms is absolute, so a shorter
+frame makes it span *more* frames (worse). Only a *longer* frame (slower game) makes the
+50 ms a smaller fraction of one frame and hides the lingering — the crispness/speed
+trade-off. At the authentic 80 ms water pace it is an occasional one-frame extra kick.
+
 ## Bug 2 — dynamic elements periodically disappear (background stays)
 
 **Cause.** `CopyPage` resolved a copy source page wrongly. Another World's copyVideoPage
