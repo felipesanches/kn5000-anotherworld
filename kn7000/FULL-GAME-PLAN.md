@@ -96,7 +96,8 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    0xDC=33, 0xF2=4000 -- the same values the reference starts with).
 2. **Password screen (0x3E88/89).** OTHER PART & FR opens it. Its code also reads var 0xDA, the
    last typed character (the DOS keyboard path); the port does not set that var, so letters come
-   only from the screen's own D-pad letter grid.
+   only from the screen's own D-pad letter grid -- which works: `gen_code_keys.py HTDC` entered
+   with the keybed D-pad and action takes the code screen to the prison (0x3E83).
 3. **Sound effects** (103 resources; opcode 0x18 PLAY_SOUND id/frequency/volume/channel). The
    format is 8-bit signed PCM after an 8-byte header (length and loop length in words), played
    on 4 channels at one of 40 frequencies (rustyworld `rodio.rs`). How the KN7000 can output raw
