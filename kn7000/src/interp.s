@@ -452,17 +452,18 @@ cp_loop:
     bne     cp_loop
     bra     cp_ret
 cp_scrolled:
-    # abs(vscroll) in d2, clamped to 199; direction kept in d3 (sign)
+    # abs(vscroll) in d2; direction kept in d3 (sign). The original engine copies only for
+    # -199 <= vscroll <= 199 and skips the copy otherwise (raw/rawgl Video::copyPage); the
+    # final part scrolls past that range.
     mov     d3, d2
     cmp     0, d3
-    bge     cp_absclamp
+    bge     cp_absrange
     clr     d0
     sub     d2, d0                  # -vscroll
     mov     d0, d2
-cp_absclamp:
+cp_absrange:
     cmp     199, d2
-    ble     cp_off
-    mov     199, d2
+    bgt     cp_ret
 cp_off:
     # off_bytes = abs*320 -> a1
     mov     d2, d0

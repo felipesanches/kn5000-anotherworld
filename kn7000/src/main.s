@@ -220,7 +220,7 @@ lgd_c6:
     calls   (a3)
     # --- every Another World resource, as pack files C:\TECHNICS\DATA\AWPxx.AW: each pack is
     # the RAM image of a span of resources, copied to PackAddr[xx] (tables in awres_tab.s).
-    # Packs instead of one file per resource: an fopen costs ~78 ms here, so 31 packs load in
+    # Packs instead of one file per resource: each file costs ~71 ms to open (awloadtime.lua), so 31 packs load in
     # a fraction of the time 140 files take. The firmware's file calls write all over this
     # frame (sp+0..0x1C at least), so the loop state lives in static RAM: LOAD_PACK, LOAD_FILE.
 lgd_resources:

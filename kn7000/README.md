@@ -6,12 +6,12 @@ build is a Toshiba TLCS-900 extension-board ROM, the KN7000 runs a Panasonic
 MN10300 and has no expansion slot — so the game rides along with the keyboard's
 **SP7001 "SD PLUG-iN"** firmware and loads from the SD card.
 
-> **Status (2026-10-16): platform bring-up complete; VM port in progress.**
-> Everything the port needs from the instrument is proven in MAME (`kn7000 -bios
-> sp7001`): our code runs, it reads files from the SD card, it owns the LCD, and a
-> 320×200 indexed page blits to the screen through a palette. The bytecode VM
-> itself (the ~3,500-line interpreter and polygon renderer) is being translated
-> from the KN5000 TLCS-900 source to MN10300.
+> **Status (2026-10-17): the VM runs the whole game's data; intro and lake verified.**
+> The bytecode VM is pixel-identical to the reference (rustyworld) through the intro
+> and the lake, and the lake is playable from the keybed, MIDI IN 1 and the panel.
+> All 146 game resources are on the card and resident in RAM, and every part opens
+> identically to the reference. Sound and music are not implemented yet. The plan for
+> the rest of the game: [FULL-GAME-PLAN.md](FULL-GAME-PLAN.md).
 
 ## How it runs on the KN7000
 
