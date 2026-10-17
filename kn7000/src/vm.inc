@@ -115,10 +115,8 @@
 .equ FRAME_START_MS,  0x44080044     # u32 scratch: KERNEL_MS at the start of this frame
 
 # Last-applied direction bits per axis, for the sticky opposing-key rule. When both keys of an
-# axis are held at once (ambiguous -- and the voice ring's order does NOT reliably say which was
-# pressed last, so newest-wins mis-picks ~15% of the time, awringorder.lua), we keep whichever
-# direction was already applied until that key is released. 0 = none, LR: 1 right/2 left, UD: 4
-# down/8 up. Deterministic and brush-proof, unlike the ring-order newest-wins it replaces.
+# axis are held at once (ambiguous), we keep whichever direction was already applied until that
+# key is released. 0 = none, LR: 1 right/2 left, UD: 4 down/8 up. Deterministic and brush-proof.
 .equ PREV_LR_BITS,    0x44080048     # u16: last-applied L/R bit (0 / 1 / 2)
 .equ PREV_UD_BITS,    0x4408004A     # u16: last-applied U/D bit (0 / 4 / 8)
 .equ VAR_PAUSE_SLICES, 0xFF          # var index holding the per-frame slice count
@@ -141,10 +139,8 @@
 # long as the physical button is down. The CPR half-panel's segments live at
 # PANEL_CPR+seg, the CPL/CPC half at PANEL_CPL+seg. Decoded (byte+bit per button, and
 # that it is level- not edge-held) by probes/awpanelmap.lua, which drives every cpanel
-# ioport in MAME and diffs this region -- see probes/PANEL-INPUT.md. The keybed cannot
-# serve here: its voice-event FIFO is drained by the firmware and the per-voice RAM
-# holds free-running phase accumulators, not a stable held-note identity (three probes:
-# probes/PANEL-INPUT.md). So gameplay directions come from five panel buttons instead.
+# ioport in MAME and diffs this region -- see probes/PANEL-INPUT.md. Five panel buttons
+# form a D-pad + fire; the keybed and MIDI IN drive the same inputs (NOTES_* below).
 .equ PANEL_CPR,       0x5006BE60     # CPR_SEGn button bitmap at PANEL_CPR + n
 .equ PANEL_CPL,       0x5006BE90     # CPL_SEGn / CPC_SEGn button bitmap at PANEL_CPL + n
 
@@ -171,23 +167,31 @@
 .equ VAR_HERO_ACTION,   0xFA         # fire button down -> 1
 .equ VAR_HERO_ACT_MASK, 0xFE         # POS_MASK (the button mask is already in it)
 
-# Keybed gameplay mapping (polyphonic held-note read; probes/PLUGIN-INPUT-INTERFACES.md).
-# The TG voice allocator keeps a 128-bit held-slot bitmap and, per slot, the MIDI note.
-# Verified in-game (probes/awkeyread.lua). Read each frame and OR'd into the panel mask,
-# so keyboard and panel both work and either source can supply diagonals / move+fire.
-.equ TG_HELD_MASK,    0x500D288C     # 16 bytes: bit per voice slot, set while its key is held
-.equ TG_NODE_BASE,    0x500D1278     # voice node array; MIDI note at +0x0C, stride 0x2C
-.equ TG_NODE_STRIDE,  0x2C
-.equ TG_NODE_NOTE,    0x0C
-# Active-voice ring (the FAST, symmetric key signal). Head cell holds a pointer to the
-# first node's link field (node+0x10); from a link L the note is at (L-4)=node+0x0C and
-# the next link at (L). A released note leaves the ring in ~17 ms -- symmetric with
-# key-on, unlike the sustain mask's ~50 ms key-off (that asymmetry was the "extra kick").
-# Walk guarded by bounds + a node cap so a bad pointer can't hang the VM.
-.equ TG_RING_HEAD,    0x500D1050     # u32: head link of the class-0 active-voice ring (0=empty)
-.equ TG_RING_LO,      0x500D1000     # sane address bounds for a ring link
-.equ TG_RING_HI,      0x500D3000
-.equ TG_RING_CAP,     64             # max nodes to walk
+# Keybed + MIDI gameplay mapping: exact held-note state from the firmware's MIDI byte streams.
+# The firmware's lib keeps byte rings {start @+0, last @+4, rd @+8, wr @+0xC, free u16 @+0x10}
+# (enqueue lib 0x4C024D16). Two carry every note event a player makes:
+#   * MIDI IN 1 receive ring -- filled byte by byte by the SIO1 RX ISR (Midi1RxIsr 0x484B1E75);
+#   * MIDI OUT 1 transmit ring -- the firmware sends every keybed note-on/off here as MIDI
+#     (running status, velocity-0 note-off), drained by the SIO1 TX ISR at MIDI baud.
+# The module never consumes from them: each tracker keeps its own read pointer and parses the
+# new bytes every ReadInput into per-note channel masks. (The TG voice ring this replaces held
+# STALE note bytes in reused voice nodes and dropped still-held voices, for keybed and MIDI
+# alike -- probes/INPUT-PRECISION.md.) Header addresses are program 942's (SP7001; the default
+# 941 build's are 0x10 lower); found by probes/awmidiq.lua. Keybed notes reach the TX ring while
+# the keybed part transmits on MIDI OUT (the default).
+.equ MIDIIN1_RXQ,     0x5001F060     # MIDI IN 1 receive ring header (1024 bytes)
+.equ MIDIOUT1_TXQ,    0x5001F874     # MIDI OUT 1 transmit ring header (2048 bytes): the keybed
+.equ QH_START,        0x00           # u32: first byte of the ring buffer
+.equ QH_LAST,         0x04           # u32: last byte of the ring buffer
+.equ QH_WR,           0x0C           # u32: next byte the producer writes
+.equ NOTES_MIDI,      0x44081000     # note tracker for MIDI IN 1
+.equ NOTES_KBD,       0x44081200     # note tracker for the keybed (the MIDI OUT 1 stream)
+.equ NS_HDR,          0x00           # u32: ring header address
+.equ NS_RP,           0x04           # u32: private read pointer (0 = resync on the next poll)
+.equ NS_STATUS,       0x08           # u8: running status (0 = none)
+.equ NS_D1,           0x09           # u8: first data byte of the message being collected
+.equ NS_CNT,          0x0A           # u8: data bytes collected so far (0/1)
+.equ NS_MASK,         0x10           # u16[128]: bit c set while MIDI channel c holds note n
 # Note numbers (C4 = 60). Any note <= C4 is ACTION -- the whole bass/left-hand range plus
 # C4 itself. The right-hand cluster is the D-pad; two notes map to UP.
 .equ KBD_ACTION_MAX,  60             # <= 60 (bass range + C4) -> action

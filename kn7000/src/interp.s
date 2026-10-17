@@ -153,6 +153,7 @@ GameReset:
     movhu   d0, (a0)
     mov     PREV_UD_BITS, a0
     movhu   d0, (a0)
+    call    NotesInit, 0, 0         # start tracking keybed + MIDI notes afresh
     call    VideoStart, 0, 0
     # zero 256 vars (512 bytes)
     mov     VM_VARIABLES, a2
@@ -407,12 +408,13 @@ cp_ret:
 # ================================================================================
 # ReadInput: feed KN7000 controls to the Another World hero variables.
 #
-#   * Intro (0x3E81): any held keybed key -> fire, so the player can skip the intro.
+#   * Intro (0x3E81): any held keybed/MIDI key -> fire, so the player can skip the intro.
 #     The intro bytecode polls var[0xFE] (ACTION_MASK) and jumps to the first playable
-#     part. Source: the firmware's voice "key active" flag at 0x50149690.
+#     part.
 #   * Water part (0x3E82): five control-panel buttons drive a full D-pad + fire. The
 #     firmware's debounced button bitmap (vm.inc: PANEL_CPR/BTN_*) is read directly; the
 #     six hero variables are written exactly as rustyworld's update_player does.
+# Keys come from the note trackers (vm.inc NOTES_*), brought up to date here each frame.
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
@@ -423,22 +425,13 @@ ReadInput:
     beq     ri_gameplay
     bra     ri_ret
 
-# ---- intro: any keybed key = fire (skip) ----
-# A held key = any set bit in the TG held-slot bitmap (TG_HELD_MASK, 16 bytes). The old
-# signal 0x50149690 is a noisy firmware "activity" flag that is nonzero with no key down,
-# so it skipped the intro immediately; the held mask is 0 until a key is actually held.
+# ---- intro: any keybed/MIDI key = fire (skip) ----
 ri_intro:
-    mov     TG_HELD_MASK, a0
-    clr     d1                      # OR of all 16 mask bytes
-    clr     d2                      # byte index
-ri_iscan:
-    movbu   (a0), d0
-    or      d0, d1
-    inc     a0
-    inc     d2
-    cmp     16, d2
-    bne     ri_iscan
-    cmp     0, d1                   # any key held?
+    call    NotePoll, 0, 0
+    clr     d0                      # any note 0..127 held?
+    mov     127, d1
+    call    NotesAnyHeld, 0, 0
+    cmp     0, d0
     beq     ri_clear
     mov     VAR_HERO_ACTION, d0     # var[0xFA] = 1
     mov     1, d1
@@ -490,79 +483,51 @@ rig_nu:
     beq     rig_nf
     or      0x80, d2
 rig_nf:
-    # --- fold the held keybed notes into the mask by walking the active-voice ring ---
-    # The ring (vm.inc TG_RING_*) drops a released note in ~6 ms, symmetric with key-on
-    # (awlat2.lua), so direction changes are crisp. For each link L: note = (L-4); map note
-    # <= 60 (bass + C4) = action; F5 left, A5 down, C6 right, B5/D6 up. Bounds + a node cap
-    # guard against a corrupt pointer.
-    #
-    # Just OR every held direction's bit into d3 -- NO recency logic here. The ring's order
-    # does NOT reliably reflect which key was pressed last (the voice allocator reuses freed
-    # slots, so after churn the order is slot order, not press order -- awringorder.lua found
-    # ~15% of overlaps mis-ordered). So an opposing pair is left for the sticky derive below to
-    # resolve deterministically; the two axes are independent, so diagonals keep both bits.
-    clr     d3                      # keybed mask accumulator
-    mov     (TG_RING_HEAD), a2      # a2 = L = ring head link (0 = no keys)
-    clr     d0
-    mov     d0, (4, sp)             # node count (loop has no calls, so a stack local is safe)
-rkb_loop:
-    mov     a2, d0
+    # --- fold in the held keybed/MIDI notes: note <= 60 (bass + C4) = action; F5 left,
+    #     A5 down, C6 right, Bb5/B5 up. Every held direction's bit is OR'd in; an opposing
+    #     pair is left for the sticky derive below, and diagonals keep both bits. ---
+    call    NotePoll, 0, 0          # bring the note trackers up to date
+    clr     d3                      # note mask accumulator
+    clr     d0                      # action: any note 0..KBD_ACTION_MAX
+    mov     KBD_ACTION_MAX, d1
+    call    NotesAnyHeld, 0, 0
     cmp     0, d0
-    beq     rkb_done                # L == 0 -> end of ring
-    mov     TG_RING_LO, d1
-    cmp     d1, d0
-    blt     rkb_done                # L below bounds -> stop (corrupt)
-    mov     TG_RING_HI, d1
-    cmp     d1, d0
-    bge     rkb_done                # L above bounds -> stop
-    mov     a2, a0                  # note = *(u8)(L - 4)
-    add     -4, a0
-    movbu   (a0), d0
-    cmp     0, d0
-    beq     rkb_adv                 # skip an unallocated node
-    cmp     KBD_ACTION_MAX, d0
-    ble     rkb_act                 # note <= 60 -> action (bass range + C4)
-    cmp     KBD_LEFT_NOTE, d0
-    beq     rkb_left
-    cmp     KBD_UP_NOTE_A, d0
-    beq     rkb_up
-    cmp     KBD_UP_NOTE_B, d0
-    beq     rkb_up
-    cmp     KBD_DOWN_NOTE, d0
-    beq     rkb_down
-    cmp     KBD_RIGHT_NOTE, d0
-    beq     rkb_right
-    bra     rkb_adv
-rkb_act:
+    beq     rkb_na
     or      0x80, d3
-    bra     rkb_adv
-rkb_left:
+rkb_na:
+    mov     KBD_LEFT_NOTE, d0
+    mov     d0, d1
+    call    NotesAnyHeld, 0, 0
+    cmp     0, d0
+    beq     rkb_nl
     or      2, d3
-    bra     rkb_adv
-rkb_up:
-    or      8, d3
-    bra     rkb_adv
-rkb_down:
+rkb_nl:
+    mov     KBD_DOWN_NOTE, d0
+    mov     d0, d1
+    call    NotesAnyHeld, 0, 0
+    cmp     0, d0
+    beq     rkb_nd
     or      4, d3
-    bra     rkb_adv
-rkb_right:
+rkb_nd:
+    mov     KBD_UP_NOTE_A, d0       # Bb5..B5 (82..83) -> up
+    mov     KBD_UP_NOTE_B, d1
+    call    NotesAnyHeld, 0, 0
+    cmp     0, d0
+    beq     rkb_nu
+    or      8, d3
+rkb_nu:
+    mov     KBD_RIGHT_NOTE, d0
+    mov     d0, d1
+    call    NotesAnyHeld, 0, 0
+    cmp     0, d0
+    beq     rkb_done
     or      1, d3
-rkb_adv:
-    mov     (a2), d0                # L = next link = *(u32)(L)
-    mov     d0, a2
-    mov     (4, sp), d0             # cap the walk
-    inc     d0
-    mov     d0, (4, sp)
-    cmp     TG_RING_CAP, d0
-    bne     rkb_loop
 rkb_done:
-    or      d3, d2                  # fold keybed mask into the panel mask
-    # d2 = panel mask | keybed mask (bits R=1 L=2 D=4 U=8 A=0x80), possibly with BOTH bits of
+    or      d3, d2                  # fold the note mask into the panel mask
+    # d2 = panel mask | note mask (bits R=1 L=2 D=4 U=8 A=0x80), possibly with BOTH bits of
     # an axis set when opposing keys are held at once. Resolve each axis with a STICKY rule:
     # one direction alone wins; both held keeps the LAST-APPLIED direction (PREV_*_BITS) until a
-    # key is released; neither = 0. No recency is consulted -- the ring's order is not a
-    # reliable recency signal (awringorder.lua), so newest-wins mis-picked ~15% of overlaps and
-    # flipped Lester the wrong way. Sticky is deterministic and brush-proof: a quick brush of
+    # key is released; neither = 0. Sticky is deterministic and brush-proof: a quick brush of
     # the opposite key never changes the direction you are already holding. d3 accumulates the
     # RESOLVED mask (one bit per axis + action) for var[0xFD]/[0xFE], matching the hero deltas
     # the way a joystick (which cannot hold opposing directions) would. Diagonals (different
@@ -636,6 +601,225 @@ rig_act_w:
     mov     d3, d1
     call    WriteVar, 0, 0
 ri_ret:
+    ret     [d2,d3,a2,a3], 0x20
+
+# ================================================================================
+# Note trackers (vm.inc NOTES_*): held keybed + MIDI notes from the firmware's MIDI rings.
+#
+# NotesInit: point each tracker at its ring. The read pointer is left 0, so the first poll
+# syncs to the ring's newest byte and starts with no notes held.
+NotesInit:
+    mov     MIDIIN1_RXQ, d0
+    mov     d0, (NOTES_MIDI + NS_HDR)
+    mov     MIDIOUT1_TXQ, d0
+    mov     d0, (NOTES_KBD + NS_HDR)
+    clr     d0
+    mov     d0, (NOTES_MIDI + NS_RP)
+    mov     d0, (NOTES_KBD + NS_RP)
+    rets
+
+# NotePoll: parse the bytes both rings received since the last poll.
+NotePoll:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     NOTES_MIDI, a0
+    call    NotePollSource, 0, 0
+    mov     NOTES_KBD, a0
+    call    NotePollSource, 0, 0
+    ret     [d2,d3,a2,a3], 0x20
+
+# NotePollSource(a0 = tracker): read the ring's new bytes from the tracker's own read pointer
+# (the firmware's consumer is never touched) and apply them as MIDI: note-on sets the channel's
+# bit in NS_MASK[note], note-off / note-on velocity 0 clears it, CC 120 and 123..127 (all
+# sound / all notes off, mode changes) clear the channel. Running status as the MIDI spec has
+# it: realtime bytes (>= 0xF8) are skipped, system bytes (0xF0..0xF7) cancel it. A read pointer
+# outside the ring, or a backlog over half the ring (the ring was reset under us), resyncs to
+# the newest byte with no notes held.
+NotePollSource:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     a0, a3                  # a3 = tracker
+    mov     (NS_HDR, a3), a0        # a0 = ring header
+    mov     (QH_START, a0), d2      # d2 = start
+    mov     (QH_LAST, a0), d3       # d3 = last
+    mov     (QH_WR, a0), d1         # write pointer, sampled once (the producer may be an ISR)
+    mov     d1, (0, sp)             # (0,sp) = wr (the loop makes no calls)
+    cmp     0, d2
+    beq     nps_ret                 # ring not set up by the firmware yet
+    cmp     d2, d1
+    blt     nps_ret                 # wr outside the ring: leave everything as it is
+    cmp     d3, d1
+    bgt     nps_ret
+    mov     (NS_RP, a3), a2         # a2 = our read pointer
+    mov     a2, d0
+    cmp     d2, d0
+    blt     nps_resync              # 0 (fresh) or outside the ring
+    cmp     d3, d0
+    bgt     nps_resync
+    sub     d0, d1                  # d1 = backlog = wr - rp (mod ring size)
+    bge     nps_nowrap
+    add     d3, d1
+    sub     d2, d1
+    inc     d1
+nps_nowrap:
+    mov     d3, d0
+    sub     d2, d0
+    lsr     1, d0                   # half the ring
+    cmp     d0, d1
+    bgt     nps_resync
+nps_loop:
+    mov     a2, d0
+    mov     (0, sp), d1
+    cmp     d1, d0
+    beq     nps_done                # caught up with the producer
+    movbu   (a2), d0                # d0 = next byte
+    mov     a2, d1
+    cmp     d3, d1
+    bne     nps_inc
+    mov     d2, a2                  # wrap
+    bra     nps_byte
+nps_inc:
+    inc     a2
+nps_byte:
+    cmp     0xF8, d0
+    bge     nps_loop                # realtime: skipped, running status kept
+    cmp     0xF0, d0
+    bge     nps_sys
+    cmp     0x80, d0
+    bge     nps_status
+    movbu   (NS_STATUS, a3), d1     # data byte
+    cmp     0, d1
+    beq     nps_loop                # no running status: not ours to interpret
+    movbu   (NS_CNT, a3), d1
+    cmp     0, d1
+    bne     nps_second
+    movbu   d0, (NS_D1, a3)         # first data byte
+    movbu   (NS_STATUS, a3), d1
+    and     0xE0, d1                # 0xC0/0xD0 (program change, channel pressure): one data byte
+    cmp     0xC0, d1
+    beq     nps_loop
+    mov     1, d1
+    movbu   d1, (NS_CNT, a3)
+    bra     nps_loop
+nps_sys:
+    clr     d1
+    movbu   d1, (NS_STATUS, a3)
+    movbu   d1, (NS_CNT, a3)
+    bra     nps_loop
+nps_status:
+    movbu   d0, (NS_STATUS, a3)
+    clr     d1
+    movbu   d1, (NS_CNT, a3)
+    bra     nps_loop
+nps_second:
+    clr     d1                      # message complete; running status stays
+    movbu   d1, (NS_CNT, a3)
+    movbu   (NS_STATUS, a3), d1
+    and     0xF0, d1
+    cmp     0x90, d1
+    beq     nps_noteon
+    cmp     0x80, d1
+    beq     nps_noteoff
+    cmp     0xB0, d1
+    bne     nps_loop
+    movbu   (NS_D1, a3), d1         # control change: which controller?
+    cmp     120, d1
+    beq     nps_chanoff
+    cmp     123, d1
+    bge     nps_chanoff
+    bra     nps_loop
+nps_noteon:
+    cmp     0, d0
+    beq     nps_noteoff             # velocity 0 = note-off
+    movbu   (NS_D1, a3), d0
+    asl     1, d0
+    mov     a3, a0
+    add     d0, a0                  # a0 + NS_MASK = &mask[note]
+    movbu   (NS_STATUS, a3), d1
+    and     0x0F, d1
+    mov     1, d0
+    asl     d1, d0                  # d0 = 1 << channel
+    movhu   (NS_MASK, a0), d1
+    or      d0, d1
+    movhu   d1, (NS_MASK, a0)
+    bra     nps_loop
+nps_noteoff:
+    movbu   (NS_D1, a3), d0
+    asl     1, d0
+    mov     a3, a0
+    add     d0, a0
+    movbu   (NS_STATUS, a3), d1
+    and     0x0F, d1
+    mov     1, d0
+    asl     d1, d0
+    not     d0                      # d0 = ~(1 << channel)
+    movhu   (NS_MASK, a0), d1
+    and     d0, d1
+    movhu   d1, (NS_MASK, a0)
+    bra     nps_loop
+nps_chanoff:
+    movbu   (NS_STATUS, a3), d1
+    and     0x0F, d1
+    mov     1, d0
+    asl     d1, d0
+    not     d0                      # d0 = ~(1 << channel)
+    mov     a3, a0
+    add     NS_MASK, a0
+    mov     128, d1
+    mov     d1, (4, sp)
+nps_coloop:
+    movhu   (a0), d1
+    and     d0, d1
+    movhu   d1, (a0)
+    add     2, a0
+    mov     (4, sp), d1
+    add     -1, d1
+    mov     d1, (4, sp)
+    cmp     0, d1
+    bne     nps_coloop
+    bra     nps_loop
+nps_done:
+    mov     a2, (NS_RP, a3)
+nps_ret:
+    ret     [d2,d3,a2,a3], 0x20
+nps_resync:
+    mov     (0, sp), d0
+    mov     d0, (NS_RP, a3)         # continue from the newest byte
+    clr     d0
+    movbu   d0, (NS_STATUS, a3)
+    movbu   d0, (NS_CNT, a3)
+    mov     a3, a0
+    add     NS_MASK, a0
+    mov     128, d1
+nps_rsclr:
+    movhu   d0, (a0)
+    add     2, a0
+    add     -1, d1
+    bne     nps_rsclr
+    bra     nps_ret
+
+# NotesAnyHeld(d0 = lowest note, d1 = highest note) -> d0 = OR of the channel masks of every
+# note in [d0, d1] in both trackers: nonzero while any key in the range is held.
+NotesAnyHeld:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    sub     d0, d1
+    inc     d1                      # d1 = notes in the range
+    asl     1, d0
+    mov     NOTES_MIDI + NS_MASK, a0
+    add     d0, a0
+    mov     NOTES_KBD + NS_MASK, a1
+    add     d0, a1
+    clr     d0
+nah_loop:
+    movhu   (a0), d2
+    or      d2, d0
+    movhu   (a1), d2
+    or      d2, d0
+    add     2, a0
+    add     2, a1
+    add     -1, d1
+    bne     nah_loop
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================

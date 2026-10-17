@@ -4,6 +4,53 @@ Felipe: "input is still messed up" after the newest-wins + note-remap fixes, and
 the principled approach even at a performance cost. This is the end-to-end re-evaluation of
 how the port reads the keybed, what the real limits are, and what was tried.
 
+## Current source: the firmware's own MIDI byte rings (2026-10-17, evening)
+
+`ReadInput` now reads key state from **note events**, not from TG voices. The firmware's lib
+keeps byte rings `{start @+0, last @+4, rd @+8, wr @+0xC, free u16 @+0x10}` (enqueue lib
+`0x4C024D16`), and two of them carry every note a player makes (`awmidiq.lua`,
+`awmidiqtrace.lua`; program 942 addresses):
+
+| ring header  | size   | filled by                                                              | drained by                                           |
+|--------------|--------|------------------------------------------------------------------------|------------------------------------------------------|
+| `0x5001F060` | 1024 B | SIO1 RX ISR `Midi1RxIsr` `0x484B1E75`: every MIDI IN 1 byte            | lib dequeue right after each byte                    |
+| `0x5001F874` | 2048 B | the keybed path: every keybed note as MIDI (running status, vel-0 off) | MIDI OUT 1 TX ISR, one byte per ~0.32 ms (MIDI baud) |
+
+The module keeps its **own read pointer** into each ring (nothing is consumed, the firmware's
+consumers are untouched), parses the new bytes once per frame (running status, note-on
+velocity 0 = off, CC 120/123..127 = channel off) into per-note channel masks, and maps the held
+notes exactly as before (vm.inc `NOTES_*`, interp.s `NotePollSource`). A backlog over half a
+ring, or a pointer outside it, resyncs with no notes held. The keybed reaches its ring while
+the keybed part transmits on MIDI OUT, which is the default.
+
+**Why the TG voice ring had to go.** Re-performing Felipe's misinput session through the
+voice-ring build gave wrong hero input in **62 ticks / 18 runs** via MIDI (`events_to_mid.py` →
+`-midiin1`) and **59 ticks / 16 runs** via the keybed (`awkbreplay.lua`), against the
+canonical handling of the same keys (`raw_vs_applied.py`; Felipe's own run: 58 / 16). The
+keybed failures are the same class as the MIDI ones: e.g. C6 held while the ring reads C4,
+because a reused voice node keeps the released note's byte. The note byte of a voice node
+is not a reliable key identity for either source. `awkeystate.lua` + `keystate_find.py` found
+no per-note held-key table in work RAM for either source, so the event rings are the source.
+
+**Result** (session fixture `sessions/2026-10-17-fsanches-misinput1-events.csv`, 717 water ticks):
+
+| build                     | MIDI re-performance | keybed re-performance | `awkbdmap.lua` |
+|---------------------------|---------------------|-----------------------|----------------|
+| TG voice ring (`2ce8c2b`) | 62 ticks in 18 runs | 59 ticks in 16 runs   | 10/10          |
+| MIDI byte rings           | **0**               | **0**                 | 10/10          |
+
+Reproduce (from `kn7000/`, after `make card`):
+
+    python3 -I probes/events_to_mid.py probes/sessions/2026-10-17-fsanches-misinput1-events.csv ~/compartilhado/tmp/misinput1.mid
+    # MIDI:   AW_SESSION=repro  ... -midiin1 ~/compartilhado/tmp/misinput1.mid -autoboot_script probes/awmonitor.lua -str 80
+    # keybed: AW_SESSION=kbrepro AW_KBEVENTS=probes/sessions/2026-10-17-fsanches-misinput1-events.csv \
+    #           ... -autoboot_script probes/awkbreplay.lua -str 80
+    # where ... = ~/compartilhado/mame-pr/kn7000 -rompath ~/compartilhado/technics_romsets
+    #             -skip_gameinfo -window kn7000 -bios sp7001 -harddisk build/another_sd.img
+    python3 -I probes/raw_vs_applied.py ~/compartilhado/tmp/aw-repro     # and aw-kbrepro
+
+The sections below are the earlier analysis of the TG-voice-based source, kept as history.
+
 ## The ideal source — and why it is blocked on this platform
 
 The authoritative, instant, ghost-free key signal is the **make/break FIFO** the two TG LSIs
@@ -29,10 +76,10 @@ voice-allocation latency, no release tail, and no ghosting.
    persistent per-key table — it writes a transient per-event record and hands off to the
    voice allocator.
 
-So the only key state the module can read is the firmware's **voice-allocator** state in work
-RAM — which is exactly what `ReadInput` already reads.
+The FIFO itself stays out of reach, but the events do not: the firmware re-encodes every keybed
+event as MIDI into the MIDI OUT 1 ring, which the module reads (top section).
 
-## The current source (the active-voice ring) is already optimal
+## The active-voice ring (the source until 2026-10-17)
 
 `awlat2.lua` (2 ms resolution, using the 500 Hz FIFO poll as the clock) measured each RAM
 signal's latency per edge:
@@ -42,9 +89,9 @@ signal's latency per edge:
 | active-voice ring `0x500D1050` | **~6 ms**     | **~6 ms**      |
 | held-voice mask `0x500D288C`   | ~44 ms        | ~82 ms         |
 
-The ring is **symmetric and ~6 ms on both edges** — the fastest and cleanest RAM signal, and
-the one `ReadInput` walks. The held-mask is far slower (its 82 ms release is the original
-"extra kick"). There is no better RAM source to switch to.
+The ring is **symmetric and ~6 ms on both edges** — the fastest of the TG voice signals. The
+held-mask is far slower (its 82 ms release is the original "extra kick"). Its latency is good,
+but its notes are not: a reused voice node can carry a stale note byte (top section).
 
 Other checks, all clean:
 - **No pollution.** `awringpure.lua`: 0/99 no-key frames in the water part had any voice —
@@ -79,12 +126,9 @@ measurements show was not actually being violated.
 
 ## Conclusion
 
-The input **signal** is handled correctly and about as precisely as this platform allows: the
-ring is 6 ms-fresh and symmetric, unpolluted, correctly mapped, read at the right point, with
-newest-key-wins on overlaps. The ideal (instant FIFO events) is blocked by read-only flash and
-the preemptive 500 Hz firmware FIFO drain. The residual "feel" is **inherent**: Another World
-reads input once per frame, and the water part's authentic pace is ~83 ms (12 fps), so there is
-~1 frame of input granularity by design.
+(Superseded on the source: the ring's note bytes go stale under sustained play, see the top
+section.) The timing part holds: Another World reads input once per frame, and the water
+part's authentic pace is ~83 ms (12 fps), so there is ~1 frame of input granularity by design.
 
 The only lever left for a more responsive *feel* is a **faster frame pace** (lower `SLICE_MS`
 or a smaller `var[0xFF]`), which makes the whole game run faster — i.e. trading authenticity
