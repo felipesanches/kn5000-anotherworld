@@ -68,12 +68,121 @@ VideoStart:
     rets
 
 # ================================================================================
-# InitForPart(d0 = partId): reset threads and load this part's resource pointers.
-# For the port we only run part GAME_PART_INTRO; the resource pointers come from the
-# AWDATA header rather than a PART_RESOURCE_TABLE.
+# PartTable: per part 0x3E80..0x3E89, the resource ids of its palette, bytecode, video1 and
+# video2 (0 = none) -- the original engine's part list (rustyworld GAME_PARTS, rawgl).
+PartTable:
+    .byte   0x14, 0x15, 0x16, 0x00  # 0x3E80 protection (code wheel)
+    .byte   0x17, 0x18, 0x19, 0x00  # 0x3E81 intro
+    .byte   0x1A, 0x1B, 0x1C, 0x11  # 0x3E82 water (first playable)
+    .byte   0x1D, 0x1E, 0x1F, 0x11  # 0x3E83 prison
+    .byte   0x20, 0x21, 0x22, 0x11  # 0x3E84 city
+    .byte   0x23, 0x24, 0x25, 0x00  # 0x3E85 arena
+    .byte   0x26, 0x27, 0x28, 0x11  # 0x3E86 baths
+    .byte   0x29, 0x2A, 0x2B, 0x11  # 0x3E87 final
+    .byte   0x7D, 0x7E, 0x7F, 0x00  # 0x3E88 password screen
+    .byte   0x7D, 0x7E, 0x7F, 0x00  # 0x3E89 password screen
+    .align  4
+
+# ResPtr(d0 = resource id) -> a0 = where the resource is resident (ResAddr, awres.inc).
+ResPtr:
+    and     0xff, d0
+    asl     2, d0
+    mov     ResAddr, a0
+    add     d0, a0
+    mov     (a0), a0
+    rets
+
+# LoadBitmap(d0 = resource id): draw a 320x200 screen bitmap into page 0, as the original
+# engine's copyBitmapPtr. The MS-DOS bitmap is four 8000-byte bit planes; plane k supplies
+# bit k of every pixel, and within a byte the MSB is the leftmost of its 8 pixels
+# (rustyworld video.rs load_bg). Page 0 is cleared, then each plane ORs its bit in.
+LoadBitmap:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    call    ResPtr, 0, 0
+    mov     a0, a2                  # a2 = next plane byte (the planes are consecutive)
+    mov     PAGE_BITMAP_0, a3
+    mov     PAGE_SIZE / 4, d2
+    clr     d0
+lb_clear:
+    mov     d0, (a3)
+    add     4, a3
+    add     -1, d2
+    bne     lb_clear
+    mov     1, d3                   # d3 = this plane's pixel bit: 1, 2, 4, 8
+lb_plane:
+    mov     PAGE_BITMAP_0, a3       # a3 = first of the 8 pixels the byte covers
+    mov     PAGE_SIZE / 8, d2       # 8000 bytes per plane
+lb_byte:
+    movbu   (a2), d1
+    inc     a2
+    btst    0x80, d1
+    beq     lb_b6
+    movbu   (0, a3), d0
+    or      d3, d0
+    movbu   d0, (0, a3)
+lb_b6:
+    btst    0x40, d1
+    beq     lb_b5
+    movbu   (1, a3), d0
+    or      d3, d0
+    movbu   d0, (1, a3)
+lb_b5:
+    btst    0x20, d1
+    beq     lb_b4
+    movbu   (2, a3), d0
+    or      d3, d0
+    movbu   d0, (2, a3)
+lb_b4:
+    btst    0x10, d1
+    beq     lb_b3
+    movbu   (3, a3), d0
+    or      d3, d0
+    movbu   d0, (3, a3)
+lb_b3:
+    btst    0x08, d1
+    beq     lb_b2
+    movbu   (4, a3), d0
+    or      d3, d0
+    movbu   d0, (4, a3)
+lb_b2:
+    btst    0x04, d1
+    beq     lb_b1
+    movbu   (5, a3), d0
+    or      d3, d0
+    movbu   d0, (5, a3)
+lb_b1:
+    btst    0x02, d1
+    beq     lb_b0
+    movbu   (6, a3), d0
+    or      d3, d0
+    movbu   d0, (6, a3)
+lb_b0:
+    btst    0x01, d1
+    beq     lb_next
+    movbu   (7, a3), d0
+    or      d3, d0
+    movbu   d0, (7, a3)
+lb_next:
+    add     8, a3
+    add     -1, d2
+    bne     lb_byte
+    asl     1, d3
+    cmp     0x10, d3
+    bne     lb_plane
+    ret     [d2,d3,a2,a3], 0x20
+
+# ================================================================================
+# InitForPart(d0 = partId): reset threads and point the VM at this part's resources
+# (PartTable; every part's resources are resident). An id outside 0x3E80..0x3E89 is ignored.
 InitForPart:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    and     0xffff, d0
+    cmp     PART_FIRST, d0
+    blt     ifp_ret
+    cmp     PART_LAST, d0
+    bgt     ifp_ret
     movhu   d0, (CURRENT_PART_ID)
     mov     PREV_LR_BITS, a0        # reset the sticky direction state on a part switch
     clr     d1
@@ -111,31 +220,28 @@ ifp_loop:
     mov     0xE4, d0
     mov     0x14, d1
     call    WriteVar, 0, 0
-    # resource pointers for this part (video2 is shared by all parts)
+    # resource pointers for this part, from PartTable
     movhu   (CURRENT_PART_ID), d0
-    cmp     0x3E82, d0
-    beq     ifp_part2
-    # part 0x3E81 (intro): the first preloaded resource region
-    mov     AW_BYTECODE, a0
+    add     -PART_FIRST, d0
+    asl     2, d0
+    mov     PartTable, a2
+    add     d0, a2                  # a2 = this part's {palette, bytecode, video1, video2}
+    movbu   (a2), d0
+    call    ResPtr, 0, 0
+    mov     a0, (CUR_PALETTES)
+    movbu   (1, a2), d0
+    call    ResPtr, 0, 0
     mov     a0, (CUR_BYTECODE)
-    mov     AW_VIDEO1, a0
+    movbu   (2, a2), d0
+    call    ResPtr, 0, 0
     mov     a0, (CUR_VIDEO_DATA)
     mov     a0, (CUR_VIDEO_1)
-    mov     AW_PALETTES, a0
-    mov     a0, (CUR_PALETTES)
-    bra     ifp_vid2
-ifp_part2:
-    # part 0x3E82 (water): the second preloaded resource region
-    mov     AW2_BYTECODE, a0
-    mov     a0, (CUR_BYTECODE)
-    mov     AW2_VIDEO1, a0
-    mov     a0, (CUR_VIDEO_DATA)
-    mov     a0, (CUR_VIDEO_1)
-    mov     AW2_PALETTES, a0
-    mov     a0, (CUR_PALETTES)
-ifp_vid2:
-    mov     AW_VIDEO2, a0           # video2 (resource 0x11) shared by all parts
+    # video2 is the shared polygon resource 0x11. Parts listed without one never draw from it;
+    # the original engine leaves its pointer as it was, so keep it valid for every part.
+    mov     RES_VIDEO2, d0
+    call    ResPtr, 0, 0
     mov     a0, (CUR_VIDEO_2)
+ifp_ret:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
@@ -1570,9 +1676,10 @@ OpPlaySound:
     bra     ei_end
 
 # ---- 0x19 LOAD: resource load / part switch -----------------------------------
-# We run only the intro from AWDATA, and screen-bitmap resources are not loaded in
-# this build, so: resourceId 0 = no-op; > NUM_MEM_LIST = part switch request (we
-# ignore, single part); otherwise ignore (screen bitmaps unsupported here).
+# Every resource is already resident (LoadGameData), so: resourceId 0 (stop sound and
+# music) = no-op; a part id (0x3E80..) = deferred part switch request; a bitmap resource
+# is drawn into page 0 now, as the original engine's copyBitmapPtr; any other resource
+# (sound, music, ...) needs nothing.
 OpLoad:
     movbu   (a2), d0
     movbu   (1, a2), d1
@@ -1581,9 +1688,19 @@ OpLoad:
     or      d1, d0                  # d0 = resourceId
     cmp     0, d0
     beq     ei_end
-    cmp     0x91, d0                # NUM_MEM_LIST
-    ble     ei_end                  # known resource / screen: ignore (not loaded)
-    movhu   d0, (REQ_NEXT_PART)     # part switch request (unused with one part)
+    cmp     RES_COUNT, d0
+    bge     ol_part
+    mov     ResType, a0
+    add     d0, a0
+    movbu   (a0), d1
+    cmp     RES_TYPE_BITMAP, d1
+    bne     ei_end
+    call    LoadBitmap, 0, 0        # d0 = resource id
+    bra     ei_end
+ol_part:
+    cmp     PART_FIRST, d0
+    blt     ei_end
+    movhu   d0, (REQ_NEXT_PART)     # applied at the end of the frame (NextThread)
     bra     ei_end
 
 # ---- 0x1A PLAY_MUSIC: not supported; skip 5 bytes -----------------------------

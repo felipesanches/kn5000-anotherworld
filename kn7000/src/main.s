@@ -9,9 +9,9 @@
 #
 # Flow (see ../README.md):
 #   * The hook runs as BASEEXT's XapEntry, on the firmware's loading task -- the
-#     only context where the SD file API is valid. It loads AWDATA.AW (the intro's
-#     bytecode + polygon + palette resources) from the card into the 0x44 scratch
-#     window, starts our game task, then resumes XapEntry so BASEEXT still works.
+#     only context where the SD file API is valid. It loads every game resource
+#     (C:\TECHNICS\DATA\AWRxx.AW) plus the font and strings from the card into the 0x44
+#     scratch window, starts our game task, then resumes XapEntry so BASEEXT still works.
 #   * The game task runs the VM: GameReset, then ExecuteInstruction forever. The VM
 #     blits its front page to the 640x240 RGB565 LCD frame through a 16-colour
 #     palette; it persists on the static SP7001 screen (the firmware repaints only
@@ -19,6 +19,7 @@
 
 .include "platform.inc"
 .include "vm.inc"
+.include "awres.inc"                # generated: RES_COUNT, RES_BASE, RES_END
 .mnbase 0x502B6000                  # where xap_addon.py places this module
 
 # =================================================================================
@@ -120,132 +121,21 @@ lof_close:
 lof_done:
     ret     [d2,d3,a2,a3], 0x30
 
-# LoadGameData: preload the intro part's four resources (eager per-part load, like the
-# KN5000 initForPart). One-shot, guarded by AW_LOADED_FLAG. Runs on the firmware task.
+# LoadGameData: preload the font, the string tables and EVERY game resource (all parts,
+# bitmaps, sounds, music) -- the file API only works here, on the firmware task, so nothing
+# can be loaded later. One-shot, guarded by AW_LOADED_FLAG.
 # The firmware file calls only work when invoked DIRECTLY on the hook's own call chain
 # (a nested helper's fread returns a count but never fills the buffer -- the file API
-# stashes its arguments up the stack in a way the extra frame breaks). So the four
-# resource loads are inlined here rather than factored into a helper.
-# Safe stack slot: (0x18,sp) for FILE* (outside fopen/fread's [sp+4..sp+0x10] stash).
+# stashes its arguments up the stack in a way the extra frame breaks). So the loads are
+# inlined here (the resources as one loop) rather than factored into a helper.
+# Safe stack slots: 0, 0x14, 0x18, 0x1c (outside fopen/fread's [sp+4..sp+0x10] stash).
 LoadGameData:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
     mov     (AW_LOADED_FLAG), d0
     cmp     0x600D, d0
     beq     lgd_done
-    # --- bytecode ---
-    mov     path_byte, a0
-    mov     aw_mode, a1
-    mov     FOPEN, a3
-    calls   (a3)
-    cmp     0, a0
-    beq     lgd_v1
-    mov     a0, (0x18, sp)
-    mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
-    mov     1, d0
-    mov     AW_BYTECODE_SZ, d1
-    mov     FREAD, a3
-    calls   (a3)
-    mov     d0, d2
-    mov     STAGING_BIG, a0
-    mov     AW_BYTECODE, a1
-lgd_c0:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     lgd_c0
-    mov     (0x18, sp), a0
-    mov     FCLOSE, a3
-    calls   (a3)
-    # --- video1 ---
-lgd_v1:
-    mov     path_vid1, a0
-    mov     aw_mode, a1
-    mov     FOPEN, a3
-    calls   (a3)
-    cmp     0, a0
-    beq     lgd_v2
-    mov     a0, (0x18, sp)
-    mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
-    mov     1, d0
-    mov     AW_VIDEO1_SZ, d1
-    mov     FREAD, a3
-    calls   (a3)
-    mov     d0, d2
-    mov     STAGING_BIG, a0
-    mov     AW_VIDEO1, a1
-lgd_c1:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     lgd_c1
-    mov     (0x18, sp), a0
-    mov     FCLOSE, a3
-    calls   (a3)
-    # --- video2 ---
-lgd_v2:
-    mov     path_vid2, a0
-    mov     aw_mode, a1
-    mov     FOPEN, a3
-    calls   (a3)
-    cmp     0, a0
-    beq     lgd_pal
-    mov     a0, (0x18, sp)
-    mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
-    mov     1, d0
-    mov     AW_VIDEO2_SZ, d1
-    mov     FREAD, a3
-    calls   (a3)
-    mov     d0, d2
-    mov     STAGING_BIG, a0
-    mov     AW_VIDEO2, a1
-lgd_c2:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     lgd_c2
-    mov     (0x18, sp), a0
-    mov     FCLOSE, a3
-    calls   (a3)
-    # --- palettes ---
-lgd_pal:
-    mov     path_pal, a0
-    mov     aw_mode, a1
-    mov     FOPEN, a3
-    calls   (a3)
-    cmp     0, a0
-    beq     lgd_font
-    mov     a0, (0x18, sp)
-    mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
-    mov     1, d0
-    mov     AW_PALETTES_SZ, d1
-    mov     FREAD, a3
-    calls   (a3)
-    mov     d0, d2
-    mov     STAGING_BIG, a0
-    mov     AW_PALETTES, a1
-lgd_c3:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     lgd_c3
-    mov     (0x18, sp), a0
-    mov     FCLOSE, a3
-    calls   (a3)
     # --- font (DRAW_STRING glyphs) ---
-lgd_font:
     mov     path_font, a0
     mov     aw_mode, a1
     mov     FOPEN, a3
@@ -307,7 +197,7 @@ lgd_strdat:
     mov     FOPEN, a3
     calls   (a3)
     cmp     0, a0
-    beq     lgd_flag
+    beq     lgd_resources
     mov     a0, (0x18, sp)
     mov     STAGING_BIG, a0
     mov     (0x18, sp), a1
@@ -328,89 +218,77 @@ lgd_c6:
     mov     (0x18, sp), a0
     mov     FCLOSE, a3
     calls   (a3)
-    # --- part 0x3E82 (water) bytecode (resource 0x1B) ---
-    mov     path_byte2, a0
+    # --- every Another World resource, as pack files C:\TECHNICS\DATA\AWPxx.AW: each pack is
+    # the RAM image of a span of resources, copied to PackAddr[xx] (tables in awres_tab.s).
+    # Packs instead of one file per resource: an fopen costs ~78 ms here, so 31 packs load in
+    # a fraction of the time 140 files take. The firmware's file calls write all over this
+    # frame (sp+0..0x1C at least), so the loop state lives in static RAM: LOAD_PACK, LOAD_FILE.
+lgd_resources:
+    clr     d0
+    mov     d0, (LOAD_PACK)
+lgd_pack:
+    mov     (LOAD_PACK), d0         # the pack index as two upper-case hex digits in res_path_xx
+    lsr     4, d0
+    and     15, d0
+    cmp     10, d0
+    blt     lgd_ph1
+    add     7, d0                   # 'A' - '0' - 10
+lgd_ph1:
+    add     0x30, d0
+    movbu   d0, (res_path_xx)
+    mov     (LOAD_PACK), d0
+    and     15, d0
+    cmp     10, d0
+    blt     lgd_ph2
+    add     7, d0
+lgd_ph2:
+    add     0x30, d0
+    movbu   d0, (res_path_xx + 1)
+    mov     res_path, a0
     mov     aw_mode, a1
     mov     FOPEN, a3
     calls   (a3)
     cmp     0, a0
-    beq     lgd_vid12
-    mov     a0, (0x18, sp)
+    beq     lgd_pnext
+    mov     a0, (LOAD_FILE)
+    mov     (LOAD_PACK), d0         # count = PackSize[pack]
+    asl     1, d0
+    mov     PackSize, a0
+    add     d0, a0
+    movhu   (a0), d1
     mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
+    mov     (LOAD_FILE), a1
     mov     1, d0
-    mov     AW2_BYTECODE_SZ, d1
     mov     FREAD, a3
     calls   (a3)
-    mov     d0, d2
+    mov     d0, d2                  # bytes read
+    mov     (LOAD_PACK), d0
+    asl     2, d0
+    mov     PackAddr, a0
+    add     d0, a0
+    mov     (a0), a1                # dest = PackAddr[pack] (4-byte aligned, as is STAGING_BIG)
     mov     STAGING_BIG, a0
-    mov     AW2_BYTECODE, a1
-lgd_cb2:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
+    add     3, d2
+    lsr     2, d2                   # whole words
+    cmp     0, d2
+    beq     lgd_pclose
+lgd_pcopy:
+    mov     (a0), d0
+    mov     d0, (a1)
+    add     4, a0
+    add     4, a1
     add     -1, d2
-    bne     lgd_cb2
-    mov     (0x18, sp), a0
+    bne     lgd_pcopy
+lgd_pclose:
+    mov     (LOAD_FILE), a0
     mov     FCLOSE, a3
     calls   (a3)
-    # --- part 0x3E82 video1 (resource 0x1C) ---
-lgd_vid12:
-    mov     path_vid12, a0
-    mov     aw_mode, a1
-    mov     FOPEN, a3
-    calls   (a3)
-    cmp     0, a0
-    beq     lgd_pal2
-    mov     a0, (0x18, sp)
-    mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
-    mov     1, d0
-    mov     AW2_VIDEO1_SZ, d1
-    mov     FREAD, a3
-    calls   (a3)
-    mov     d0, d2
-    mov     STAGING_BIG, a0
-    mov     AW2_VIDEO1, a1
-lgd_cv12:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     lgd_cv12
-    mov     (0x18, sp), a0
-    mov     FCLOSE, a3
-    calls   (a3)
-    # --- part 0x3E82 palette (resource 0x1A) ---
-lgd_pal2:
-    mov     path_pal2, a0
-    mov     aw_mode, a1
-    mov     FOPEN, a3
-    calls   (a3)
-    cmp     0, a0
-    beq     lgd_flag
-    mov     a0, (0x18, sp)
-    mov     STAGING_BIG, a0
-    mov     (0x18, sp), a1
-    mov     1, d0
-    mov     AW2_PALETTES_SZ, d1
-    mov     FREAD, a3
-    calls   (a3)
-    mov     d0, d2
-    mov     STAGING_BIG, a0
-    mov     AW2_PALETTES, a1
-lgd_cp2:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     lgd_cp2
-    mov     (0x18, sp), a0
-    mov     FCLOSE, a3
-    calls   (a3)
+lgd_pnext:
+    mov     (LOAD_PACK), d0
+    inc     d0
+    mov     d0, (LOAD_PACK)
+    cmp     PACK_COUNT, d0
+    blt     lgd_pack
 lgd_flag:
     mov     0x600D, d0
     mov     AW_LOADED_FLAG, a0
@@ -473,18 +351,6 @@ game_ctsk:
     .align  4
 palette:
     .space  16*2, 0
-path_byte:
-    .asciz "C:\TECHNICS\DATA\AWBYTE.AW"
-    .align 2
-path_vid1:
-    .asciz "C:\TECHNICS\DATA\AWVID1.AW"
-    .align 2
-path_vid2:
-    .asciz "C:\TECHNICS\DATA\AWVID2.AW"
-    .align 2
-path_pal:
-    .asciz "C:\TECHNICS\DATA\AWPAL.AW"
-    .align 2
 path_font:
     .asciz "C:\TECHNICS\DATA\AWFONT.AW"
     .align 2
@@ -494,17 +360,14 @@ path_stridx:
 path_strdat:
     .asciz "C:\TECHNICS\DATA\AWSTRDAT.AW"
     .align 2
-path_byte2:
-    .asciz "C:\TECHNICS\DATA\AWBYTE2.AW"
-    .align 2
-path_vid12:
-    .asciz "C:\TECHNICS\DATA\AWVID12.AW"
-    .align 2
-path_pal2:
-    .asciz "C:\TECHNICS\DATA\AWPAL2.AW"
+res_path:                           # C:\TECHNICS\DATA\AWPxx.AW, xx patched per pack
+    .ascii  "C:\TECHNICS\DATA\AWP"
+res_path_xx:
+    .asciz  "00.AW"
     .align 2
 aw_mode:
     .asciz "rb"
     .align 4
 .include "vm.s"
 .include "interp.s"
+.include "awres_tab.s"              # generated: ResAddr, ResSize, ResType

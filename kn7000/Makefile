@@ -12,10 +12,12 @@ SD_IMAGE    ?= ../../technics_roms/media/sp7001_activated_sdcard.img
 # The overlay ../../kn7000-emulator/kn7000 does NOT have it.
 MAME        ?= ../../mame-pr/kn7000
 ROMPATH     ?= ../../technics_romsets
-# The Another World intro resources (non-zero extracted data lives in src/resources/,
-# NOT game_data/MSDOS/ which holds empty placeholders). Each is loaded as its own SD
-# file because the firmware's fread has a 16-bit count and no sequential reads.
-RES_DIR     ?= ../../custom-kn5000-roms/anotherworld/src/resources
+# The original MS-DOS release (MEMLIST.BIN + BANK01..BANK0D) -- the same files the reference VM
+# (rustyworld) reads. tools/aw_extract.py unpacks all 146 resources into build/res/; each goes on
+# the card as its own file (C:\TECHNICS\DATA\AWRxx.AW) because the firmware's fread has a 16-bit
+# count and no sequential reads, and every resource is <= 65535 bytes.
+AW_DATA     ?= ../../MSDOS
+RES_OUT     := build/res
 # The 8x8 font and the string index/data tables (DRAW_STRING). These are the exact
 # blobs the KN5000 build binclude's; shared verbatim so the two renderers agree.
 FONT_DIR    ?= ../../custom-kn5000-roms/anotherworld/src/hardcoded_data
@@ -23,9 +25,13 @@ SD_ADDFILE  := $(PYTHON) $(DISASM_REPO)/tools/sd_addfile.py
 
 all: build/BASEEXT.XAP
 
-build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc src/interp.s $(DISASM_REPO)/tools/xapasm.py
+$(RES_OUT)/awres.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
+	@mkdir -p $(RES_OUT)
+	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $@
+
+build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc src/interp.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
 	@mkdir -p build
-	$(XAPASM) src/main.s -I src -o $@ -m build/another.map
+	$(XAPASM) src/main.s -I src -I $(RES_OUT) -o $@ -m build/another.map
 
 build/BASEEXT.XAP: build/another.bin $(BASE_XAP) $(DISASM_REPO)/tools/xap_addon.py
 	$(PYTHON) $(DISASM_REPO)/tools/xap_addon.py $(BASE_XAP) build/another.bin $@ --at $(MODULE_AT)
@@ -34,13 +40,7 @@ card: build/BASEEXT.XAP
 	cp $(SD_IMAGE) build/another_sd.img
 	chmod u+w build/another_sd.img
 	$(PYTHON) $(DISASM_REPO)/tools/sd_splice.py build/another_sd.img 'C:\TECHNICS\DATA\BASEEXT.XAP' build/BASEEXT.XAP
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWBYTE.AW' $(RES_DIR)/resource-0x18.bin
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID1.AW' $(RES_DIR)/resource-0x19.bin
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID2.AW' $(RES_DIR)/resource-0x11.bin
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWPAL.AW'  $(RES_DIR)/resource-0x17.bin
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWBYTE2.AW' $(RES_DIR)/resource-0x1b.bin
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWVID12.AW' $(RES_DIR)/resource-0x1c.bin
-	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWPAL2.AW'  $(RES_DIR)/resource-0x1a.bin
+	$(SD_ADDFILE) build/another_sd.img $$(cat $(RES_OUT)/card.args) > build/card.log
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWFONT.AW'   $(FONT_DIR)/anotherworld_chargen.rom
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWSTRIDX.AW' $(FONT_DIR)/str_index.rom
 	$(SD_ADDFILE) build/another_sd.img 'C:\TECHNICS\DATA\AWSTRDAT.AW' $(FONT_DIR)/str_data.rom

@@ -72,35 +72,27 @@
 .equ CURRENT_PART_ID, 0x4407102A      # u16
 .equ REQ_NEXT_PART,   0x4407102C      # u16
 
-# Game resources are loaded from the SD card as four separate files (the firmware's
-# fread_api has a 16-bit count and no working sequential reads, so each resource is one
-# fopen+fread+fclose, and each must be <= 65535 bytes -- all four are). Fixed load
-# addresses in the 0x44 scratch window, clear of the pages and the VM state. Sizes are
-# the intro resources' exact byte lengths; keep them in step with the SD files.
-.equ AW_BYTECODE,     0x44400000     # resource 0x18, 9871 bytes
-.equ AW_VIDEO1,       0x44420000     # resource 0x19, 65230 bytes
-.equ AW_VIDEO2,       0x44440000     # resource 0x11, 25108 bytes
-.equ AW_PALETTES,     0x44460000     # resource 0x17, 2048 bytes
+# Every Another World resource (all 146 MEMLIST entries: sounds, music, bitmaps, palettes,
+# bytecode, polygons) is resident in the 0x44 window, loaded at startup by LoadGameData. They
+# are laid out from RES_BASE (4-byte aligned, id order) and the card carries that image cut into
+# pack files of <= 65535 bytes (C:\TECHNICS\DATA\AWPxx.AW): the firmware's fread_api has a
+# 16-bit count and no working sequential reads, so each pack is one fopen + fread + fclose.
+# Where each resource lands, its size and type, and each pack's base and length are the
+# generated tables ResAddr/ResSize/ResType/PackAddr/PackSize (build/res/awres_tab.s, from
+# tools/aw_extract.py).
+.equ RES_TYPE_BITMAP, 2              # MEMLIST type of a 320x200 4-plane screen bitmap
+.equ RES_VIDEO2,      0x11           # the shared polygon resource (video2)
+.equ PART_FIRST,      0x3E80         # part ids 0x3E80..0x3E89 (PartTable in interp.s)
+.equ PART_LAST,       0x3E89
 .equ AW_FONT,         0x44480000     # anotherworld_chargen.rom, 768 bytes (8x8, chars 0x20+)
 .equ AW_STRIDX,       0x44490000     # str_index.rom, 2048 bytes (LE u16 offset per string id)
 .equ AW_STRDAT,       0x444A0000     # str_data.rom, 4096 bytes (NUL-terminated strings)
-.equ AW_BYTECODE_SZ,  9871
-.equ AW_VIDEO1_SZ,    65230
-.equ AW_VIDEO2_SZ,    25108
-.equ AW_PALETTES_SZ,  2048
 .equ AW_FONT_SZ,      768
 .equ AW_STRIDX_SZ,    2048
 .equ AW_STRDAT_SZ,    4096
-
-# Part 0x3E82 (water -- first playable) resources, preloaded at startup into their
-# own RAM region just past the intro's. video2 (0x11) is shared with the intro.
-.equ AW2_BYTECODE,    0x444B0000     # resource 0x1B, 20810 bytes
-.equ AW2_VIDEO1,      0x444C0000     # resource 0x1C, 57510 bytes
-.equ AW2_PALETTES,    0x444D0000     # resource 0x1A, 2048 bytes
-.equ AW2_BYTECODE_SZ, 20810
-.equ AW2_VIDEO1_SZ,   57510
-.equ AW2_PALETTES_SZ, 2048
-.equ AW_LOADED_FLAG,  0x44080020     # set to 0x600D once all four are loaded
+.equ AW_LOADED_FLAG,  0x44080020     # set to 0x600D once everything is loaded
+.equ LOAD_PACK,       0x44080050     # u32: LoadGameData's pack loop index
+.equ LOAD_FILE,       0x44080054     # u32: LoadGameData's open FILE*
 
 .equ DRAW_BUDGET,     0x44080070     # per-VIDEO-op polygon budget (anti-hang guard)
 .equ DRAW_BUDGET_MAX, 4000
