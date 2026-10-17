@@ -130,3 +130,37 @@ clustered at the right edge (x≈312–317). `DrawChar` rejected `x >= 312` and
 `y >= 192`, but a glyph at col 39 (x=312) fits exactly in [312,319] and one at
 y=192 fits in [192,199] — the original clips `col <= 39`, `y <= 192`. Fix:
 `cmp 312`→`cmp 313`, `cmp 192`→`cmp 193` (allow x≤312, y≤192).
+
+## Gameplay differential replay (2026-10-17)
+
+The method above drives the **intro** (no input). To ground **gameplay**, feed BOTH VMs the
+same recorded inputs and diff per frame — Felipe's idea: "run the other VM implementation with
+the log of input events; both should behave identically."
+
+- **Record inputs.** `awmonitor.lua` (passive, while you play) writes `aw-inputs.csv`: the six
+  applied hero vars (0xFC,0xE5,0xFB,0xFD,0xFA,0xFE) per frame. `research-scratch/awgen.lua`
+  does the same from a scripted run.
+- **Reference side.** rustyworld gains `Vm::run_replay()` + a `replaycksum` bin
+  (`research-scratch/kn7000-aw-reference/replay-mods/`): it OVERRIDES the hero vars from the csv
+  each tick (instead of reading a device) and continues through part switches, writing the same
+  `<tick> <crc32hex>` stream. Keyed frame-1 so its tick matches awcksum's tick = FRAME_NO-1.
+- **KN7000 side.** `awreplay.lua` replays the csv into the port deterministically — a write-tap
+  on var[0xFE] overrides the six hero vars right after `ReadInput` sets them — and captures the
+  page per tick (awcksum format). `awgen.lua` captures the pages inline for a scripted run.
+- **Compare.** `cksum_pages.py` + `compare_frames.py`, exactly as for the intro.
+
+**Validated:** a scripted intro-skip + water-part up+action capture (231 frames) matched
+**231/231 (100%)** KN7000 vs rustyworld — the pipeline is correct and the water-part VM is
+pixel-faithful to the reference for that input. Any future divergence localizes a real VM bug.
+
+### Reproduce (scripted)
+```
+cd ~/compartilhado/kn5000-anotherworld/kn7000 && make card
+AWCK_MAX=230 ../../mame-pr/kn7000 kn7000 -bios sp7001 -rompath ../../technics_romsets \
+  -harddisk build/another_sd.img -autoboot_script ~/compartilhado/research-scratch/awgen.lua -str 299 -window -nothrottle
+cd ~/compartilhado/tmp/kn7000-aw-reference/run && \
+  .../replaycksum ~/compartilhado/tmp/aw-inputs.csv ~/compartilhado/tmp/replay_checksums.log 231
+cd ~/compartilhado/kn5000-anotherworld/kn7000 && \
+  python3 -I probes/cksum_pages.py ~/compartilhado/tmp/awgen_pages.bin ~/compartilhado/tmp/awgen_pages.idx ~/compartilhado/tmp/kn7000_checksums.log && \
+  python3 -I probes/compare_frames.py ~/compartilhado/tmp/kn7000_checksums.log ~/compartilhado/tmp/replay_checksums.log
+```
