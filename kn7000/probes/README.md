@@ -52,4 +52,7 @@ Read-only MAME probes that measured the KN7000 facts the port relies on. Run aga
 Work RAM `0x50000000–0x503FFFFF` is definitely real and the firmware uses it heavily; the
 library at `0x4C000000` runs from RAM, so the CPU fetches instructions from RAM — the VM can
 be loaded from the SD card and executed. `0x44000000` is mapped as 16 MB of RAM by the MAME
-driver; its real-hardware size is not yet confirmed, so a real-instrument build must verify it.
+driver as a placeholder. kn7000_disassembly identifies it as the 256 KB battery-backed backup SRAM
+(IC23), which holds the panel memories, and 941's firmware writes exactly its first 256 KB
+(`cnv/README.md`). The game's use of it above `0x44040000` works only in MAME; a real-instrument
+build must move its data into work RAM (2026-10-18).

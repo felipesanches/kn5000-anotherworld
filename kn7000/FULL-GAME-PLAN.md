@@ -19,7 +19,10 @@ enter every part, and each part's opening has been checked against the reference
 
 The `0x44` window is mapped as 16 MB by the MAME driver; the game now uses it up to `0x444A1000`
 (~4.6 MB: pages, VM state, resources, font and strings; plus the debug trace buffer at
-`0x44800000`). The real instrument's size of this window is still unconfirmed.
+`0x44800000`). On a real instrument this window is most likely only the 256 KB battery-backed
+backup SRAM (IC23, the panel memories): kn7000_disassembly's `BackupSramTest` fixes that size, and
+941's firmware writes exactly its first 256 KB (`probes/cnv/README.md`). A real-hardware build
+must keep the game out of it; see README-CNV.md, Limits (2026-10-18).
 
 ## 2. The VM side
 

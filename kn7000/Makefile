@@ -26,9 +26,9 @@ SD_ADDFILE  := $(PYTHON) $(DISASM_REPO)/tools/sd_addfile.py
 
 all: build/BASEEXT.XAP
 
-$(RES_OUT)/awres.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
+$(RES_OUT)/awres.inc $(RES_OUT)/awbank.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
 	@mkdir -p $(RES_OUT)
-	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $@
+	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $(RES_OUT)/awres.inc --banks $(RES_OUT)/awbank.inc
 
 build/another.bin: src/main.s src/display.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
 	@mkdir -p build
@@ -63,7 +63,35 @@ test: card
 	  -snapshot_directory build -str 50 -window -nothrottle
 	@echo "---- build/awrun.log ----"; cat build/awrun.log
 
+# ---- the STYLE CONVERT build: a stock KN7000 (program 941), no SP7001 -- README-CNV.md -------
+# AW.CNV is loaded by DISK MENU > STYLE CONVERT and runs the same VM. The floppy holds it, the
+# game's original BANK01..0D (unpacked on the instrument) and the font/string tables, on a blank
+# disk the KN7000 itself formatted (FLOPPY_TOOLS: kn7000_mame tools/floppy-images).
+FLOPPY_TOOLS ?= ../../kn7000_mame/tools/floppy-images
+# The published overlay build (program 941 is its default KN7000 BIOS).
+MAME941     ?= ../../kn7000-emulator/run.sh
+SD941       ?= ../../kn7000-emulator/sdcard_from_real_kn7000.img
+
+cnv: build/AW.CNV
+
+# tools/leafcheck.py first: a routine entered with `call X, 0, 0` must not call anything before
+# it makes a frame (the nested call overwrites its return address; that hung the first unpacker).
+build/AW.CNV: src/cnv_main.s src/platform941.inc src/display.s src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(RES_OUT)/awbank.inc $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py
+	@mkdir -p build
+	$(PYTHON) -I tools/leafcheck.py src/cnv_main.s src/display.s src/vm.s src/interp.s src/help.s
+	$(XAPASM) src/cnv_main.s -I src -I $(RES_OUT) -o $@ -m build/AW.map
+
+floppy: build/another_floppy.img
+
+build/another_floppy.img: build/AW.CNV tools/make_cnv_floppy.py
+	$(PYTHON) -I tools/make_cnv_floppy.py $@ build/AW.CNV $(AW_DATA) $(FONT_DIR) $(FLOPPY_TOOLS)
+
+# Boot the stock KN7000 with the floppy in the drive; then DISK MENU, STYLE CONVERT, OK.
+cnvrun: build/another_floppy.img
+	cp $(SD941) build/sd941.img && chmod u+w build/sd941.img
+	$(MAME941) kn7000 -window -flop $(abspath build/another_floppy.img) -harddisk $(abspath build/sd941.img)
+
 clean:
 	rm -rf -- build
 
-.PHONY: all card run test clean
+.PHONY: all card run test clean cnv floppy cnvrun

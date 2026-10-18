@@ -13,11 +13,15 @@ MN10300 and has no expansion slot — so the game rides along with the keyboard'
 > identically to the reference. Sound and music are not implemented yet. The plan for
 > the rest of the game: [FULL-GAME-PLAN.md](FULL-GAME-PLAN.md).
 
+**Without SP7001:** the same VM also runs on a stock KN7000 (program 941) from a floppy, as a
+style converter (`AW.CNV`): [README-CNV.md](README-CNV.md).
+
 ## How it runs on the KN7000
 
-The KN7000's firmware owns the LCD and runs no outside code — except through the
+The KN7000's firmware owns the LCD and is known to run outside code in two ways: the
 SP7001 plug-in, which loads `TECHNICS\DATA\BASEEXT.XAP` from the SD card into RAM
-and runs it (see [SP7001 Firmware](../../kn5000-docs/kn7000-sp7001-firmware.md)).
+and runs it, and the style converters (`.CNV`) that DISK MENU > STYLE CONVERT runs from a
+floppy ([README-CNV.md](README-CNV.md)). This build uses the first (see [SP7001 Firmware](../../kn5000-docs/kn7000-sp7001-firmware.md)).
 The port **rides along** with that plug-in rather than replacing it:
 
 1. `kn7000_disassembly/tools/xap_addon.py` places our module in `BASEEXT.XAP`'s
@@ -39,13 +43,13 @@ full-clears the frame every repaint, so a blit cannot win. Riding along avoids t
 
 Each fact was established in MAME; the read-only probes are in `probes/`.
 
-| fact                                                   | probe / result                                                                 |
-|--------------------------------------------------------|--------------------------------------------------------------------------------|
-| our code runs as a ride-along module                   | the clock demo and this port boot and draw                                     |
-| a full-frame blit to `0x9CE00000` persists             | `probes/` full-frame fill covers the whole LCD                                 |
-| the firmware heap is too small for the game            | `heap_probe.lua`: ~15–31 KB free → load game data into a large RAM window      |
-| writable RAM windows                                   | `ram_probe.lua`: `0x44000000`, `0x4C000000`, work RAM `0x50000000–0x503FFFFF`, LCD `0x9C…` |
-| **reading a file from the SD card**                    | `sdread.lua`: `fopen`/`fread`/`fclose` return the exact file bytes             |
+| fact                                        | probe / result                                                                             |
+|---------------------------------------------|--------------------------------------------------------------------------------------------|
+| our code runs as a ride-along module        | the clock demo and this port boot and draw                                                 |
+| a full-frame blit to `0x9CE00000` persists  | `probes/` full-frame fill covers the whole LCD                                             |
+| the firmware heap is too small for the game | `heap_probe.lua`: ~15–31 KB free → load game data into a large RAM window                  |
+| writable RAM windows                        | `ram_probe.lua`: `0x44000000`, `0x4C000000`, work RAM `0x50000000–0x503FFFFF`, LCD `0x9C…` |
+| **reading a file from the SD card**         | `sdread.lua`: `fopen`/`fread`/`fclose` return the exact file bytes                         |
 
 ### The SD file API (the key enabler)
 
@@ -76,11 +80,11 @@ The vendor plug-in is not redistributed: the build adds our module to your own c
 
 ## Layout
 
-| path              | what it is                                                        |
-|-------------------|-------------------------------------------------------------------|
-| `src/platform.inc`| KN7000/SP7001 addresses and constants, with how each was found    |
-| `src/main.s`      | the platform layer: hook, task, page→frame blit (test page today) |
-| `probes/`         | read-only MAME probes that established the facts above             |
+| path               | what it is                                                        |
+|--------------------|-------------------------------------------------------------------|
+| `src/platform.inc` | KN7000/SP7001 addresses and constants, with how each was found    |
+| `src/main.s`       | the platform layer: hook, task, page→frame blit (test page today) |
+| `probes/`          | read-only MAME probes that established the facts above            |
 
 ## Credits
 
