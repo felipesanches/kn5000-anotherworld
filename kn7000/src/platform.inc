@@ -59,3 +59,10 @@
 .equ PAGE_BITMAP_2,   0x44120000
 .equ PAGE_BITMAP_3,   0x44130000
 .equ PAGE_SIZE,       AW_W*AW_H     # 64000 bytes, one colour index per pixel
+
+# ---- RAM the VM reads (program 942; build 941 has each 0x10 lower: platform941.inc) ----
+.equ KERNEL_MS,       0x500D3C68     # firmware 1 kHz millisecond counter (u32)
+.equ PANEL_CPR,       0x5006BE60     # CPR_SEGn button bitmap at PANEL_CPR + n
+.equ PANEL_CPL,       0x5006BE90     # CPL_SEGn / CPC_SEGn button bitmap at PANEL_CPL + n
+.equ MIDIIN1_RXQ,     0x5001F060     # MIDI IN 1 receive ring header (1024 bytes)
+.equ MIDIOUT1_TXQ,    0x5001F874     # MIDI OUT 1 transmit ring header (2048 bytes): the keybed

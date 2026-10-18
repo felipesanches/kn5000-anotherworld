@@ -103,7 +103,7 @@
 # the bytecode setting var[0xFF] each frame. We sleep only the remainder after the frame's
 # work (measured via the firmware's 1 kHz counter), with a floor so the firmware keeps
 # getting time for the keybed/panel. SLICE_MS = 20 is authentic AW; lower it to run faster.
-.equ KERNEL_MS,       0x500D3C68     # firmware 1 kHz millisecond counter (u32)
+# KERNEL_MS: per platform (platform.inc / platform941.inc)
 .equ FRAME_START_MS,  0x44080044     # u32 scratch: KERNEL_MS at the start of this frame
 
 # Last-applied direction bits per axis, for the sticky opposing-key rule. When both keys of an
@@ -133,8 +133,8 @@
 # that it is level- not edge-held) by probes/awpanelmap.lua, which drives every cpanel
 # ioport in MAME and diffs this region -- see probes/PANEL-INPUT.md. Five panel buttons
 # form a D-pad + fire; the keybed and MIDI IN drive the same inputs (NOTES_* below).
-.equ PANEL_CPR,       0x5006BE60     # CPR_SEGn button bitmap at PANEL_CPR + n
-.equ PANEL_CPL,       0x5006BE90     # CPL_SEGn / CPC_SEGn button bitmap at PANEL_CPL + n
+# PANEL_CPR: per platform (platform.inc / platform941.inc)
+# PANEL_CPL: per platform (platform.inc / platform941.inc)
 
 # The Another World D-pad + fire. Buttons chosen for mnemonic labels and for landing in
 # distinct bytes, so any combination can be held and read at once.
@@ -203,8 +203,8 @@
 # alike -- probes/INPUT-PRECISION.md.) Header addresses are program 942's (SP7001; the default
 # 941 build's are 0x10 lower); found by probes/awmidiq.lua. Keybed notes reach the TX ring while
 # the keybed part transmits on MIDI OUT (the default).
-.equ MIDIIN1_RXQ,     0x5001F060     # MIDI IN 1 receive ring header (1024 bytes)
-.equ MIDIOUT1_TXQ,    0x5001F874     # MIDI OUT 1 transmit ring header (2048 bytes): the keybed
+# MIDIIN1_RXQ: per platform (platform.inc / platform941.inc)
+# MIDIOUT1_TXQ: per platform (platform.inc / platform941.inc)
 .equ QH_START,        0x00           # u32: first byte of the ring buffer
 .equ QH_LAST,         0x04           # u32: last byte of the ring buffer
 .equ QH_WR,           0x0C           # u32: next byte the producer writes

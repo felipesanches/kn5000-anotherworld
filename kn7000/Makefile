@@ -30,7 +30,7 @@ $(RES_OUT)/awres.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
 	@mkdir -p $(RES_OUT)
 	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $@
 
-build/another.bin: src/main.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
+build/another.bin: src/main.s src/display.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
 	@mkdir -p build
 	$(XAPASM) src/main.s -I src -I $(RES_OUT) -o $@ -m build/another.map
 
