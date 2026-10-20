@@ -106,10 +106,10 @@ with `noop_app.s` as the root's `KN7APP.BIN`. The taps count the menu's and the 
 the converter's, and allow a firmware write into the converter RAM while the menu runs only as a sector
 read the menu asked for, into its destination.
 
-| file                  | what it is                                                                                           |
-|-----------------------|------------------------------------------------------------------------------------------------------|
-| `run_menu_route.sh`   | the runner: `blank-v13`, `ic23 BIOS BASE NAME` as in `run_cnv_tests.sh`, through the menu            |
-| `awmenu_test.lua`     | the session through the menu: `menu`, `launch`, the 16 checks, `menu-again`, `menu-again-run`, ...  |
+| file                | what it is                                                                                         |
+|---------------------|----------------------------------------------------------------------------------------------------|
+| `run_menu_route.sh` | the runner: `blank-v13`, `ic23 BIOS BASE NAME` as in `run_cnv_tests.sh`, through the menu          |
+| `awmenu_test.lua`   | the session through the menu: `menu`, `launch`, the 16 checks, `menu-again`, `menu-again-run`, ... |
 
     T=~/compartilhado/tmp/aw-menu-tests     # EMU=a copy of kn7000-emulator; CARDTREE=kn7menu's build/card
     make -C ../../technics-roms-disasm/kn7000/tools/kn7menu card
