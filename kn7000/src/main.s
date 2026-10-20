@@ -37,6 +37,9 @@ Hook:
     mov     d1, (0x14, sp)
     mov     a0, (0x18, sp)
     mov     a1, (0x1c, sp)
+    call    IsIC23, 0, 0            # a real KN7000: the window is the panel memories. Do nothing:
+    cmp     0, d0                   # no load, no task; the plug-in carries on alone
+    bne     hk_resume
     call    LoadGameData, 0, 0      # SD load here, where the file API is valid
     mov     KERNEL_MS, d0           # program 942's addresses for the shared code (vm.inc FWV_*)
     mov     d0, (FWV_KERNEL_MS)
@@ -47,6 +50,7 @@ Hook:
     mov     MIDIOUT1_TXQ, d0
     mov     d0, (FWV_MIDIOUT1)
     call    StartTask, 0, 0
+hk_resume:
     mov     (0x10, sp), d0
     mov     (0x14, sp), d1
     mov     (0x18, sp), a0
@@ -56,6 +60,29 @@ Hook:
     movm    [a2,a3], (sp)           # the two displaced XapEntry instructions
     add     -8, sp
     jmp     XAP_RESUME
+
+# IsIC23 -> d0 = 1 when the 0x44000000 window is IC23 and not RAM: its first KB, read through the
+# uncached view the firmware uses, repeats 256 KB further on (the chip has A1-A17 only; confirmed on
+# a real unit 2026-10-20). MAME's upstream placeholder RAM holds the settings at 0x84000000 and zeros
+# at 0x84040000 when the plug-in loads, so the game runs there. Blank IC23 reads as a repeat too, which
+# errs on the safe side. Reads only. Leaf.
+IsIC23:
+    mov     0x84000000, a0
+    mov     0x84040000, a1
+ic_loop:
+    mov     (a0), d0
+    mov     (a1), d1
+    cmp     d1, d0
+    bne     ic_ram
+    add     4, a0
+    add     4, a1
+    cmp     0x84000400, a0
+    bcs     ic_loop
+    mov     1, d0
+    rets
+ic_ram:
+    clr     d0
+    rets
 
 # Create and start the game task, trying slot 10 then 9 (once per power-on).
 StartTask:

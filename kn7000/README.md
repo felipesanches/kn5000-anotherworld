@@ -13,8 +13,28 @@ MN10300 and has no expansion slot — so the game rides along with the keyboard'
 > identically to the reference. Sound and music are not implemented yet. The plan for
 > the rest of the game: [FULL-GAME-PLAN.md](FULL-GAME-PLAN.md).
 
-**Without SP7001:** the same VM also runs on a stock KN7000 (program 941) from a floppy, as a
-style converter (`AW.CNV`): [README-CNV.md](README-CNV.md).
+> **MAME ONLY. Do not put this build on a real KN7000.** It keeps the game in the `0x44000000`
+> window. MAME's upstream driver maps 16 MB of plain RAM there as a placeholder, but on a real
+> KN7000 that window is chip select CS1, which is IC23 alone: the 256 KB battery-backed SRAM holding
+> the panel settings and the 104 PANEL MEMORY records, repeating every 256 KB through the whole
+> window (confirmed on the owner's unit on 2026-10-20). Every game write would land on the stored
+> settings, and the firmware's POWER OFF would stamp the damage valid: in the overlay emulator,
+> which models IC23, one 60 s session overwrote 1,945 of the 1,956 header bytes and 65,676 bytes of
+> panel memories (kn7000_mame `notes/ic23-nvram-2026-10-20`). Its loader also stages the game in
+> `0x50200000`, inside the user-memory pool where the firmware keeps the TPAD pads.
+>
+> It cannot simply move to the safe RAM the STYLE CONVERT build uses: that holds about 0.8 MB, the
+> game needs 1.7 MB resident (0.5 MB without audio), and this build cannot load part by part, as the
+> plug-in's file API works only during the plug-in load (below). So it stays MAME-only, and three
+> things keep it there: `tools/ic23_guard.py` runs on it at every build and must find its 670
+> references into IC23 and the pools (were it ever to call this build clean, the check itself would be
+> broken); the Makefile refuses to build it without `MAME_ONLY=1`; and at run time the hook reads
+> IC23 through `0x84000000` and starts nothing when its first KB repeats 256 KB further on, as it does
+> on an instrument (`IsIC23` in `src/main.s`; in upstream MAME the placeholder does not repeat).
+>
+> **For a real instrument:** the same VM runs on a stock KN7000 (any program build: 893, 935, 941,
+> 942) from a floppy, as a style converter (`AW.CNV`), with everything in the converter's own work
+> RAM: [README-CNV.md](README-CNV.md).
 
 ## How it runs on the KN7000
 
@@ -24,7 +44,7 @@ and runs it, and the style converters (`.CNV`) that DISK MENU > STYLE CONVERT ru
 floppy ([README-CNV.md](README-CNV.md)). This build uses the first (see [SP7001 Firmware](../../kn5000-docs/kn7000-sp7001-firmware.md)).
 The port **rides along** with that plug-in rather than replacing it:
 
-1. `kn7000_disassembly/tools/xap_addon.py` places our module in `BASEEXT.XAP`'s
+1. `technics-roms-disasm/kn7000/tools/xap_addon.py` places our module in `BASEEXT.XAP`'s
    unused tail and redirects the plug-in's entry (`XapEntry`) to our **hook**.
 2. The hook runs on the firmware's loading task. It loads the game from the SD
    card (the file API works in this context) and starts a **task** of our own,
@@ -48,7 +68,7 @@ Each fact was established in MAME; the read-only probes are in `probes/`.
 | our code runs as a ride-along module        | the clock demo and this port boot and draw                                                 |
 | a full-frame blit to `0x9CE00000` persists  | `probes/` full-frame fill covers the whole LCD                                             |
 | the firmware heap is too small for the game | `heap_probe.lua`: ~15–31 KB free → load game data into a large RAM window                  |
-| writable RAM windows                        | `ram_probe.lua`: `0x44000000`, `0x4C000000`, work RAM `0x50000000–0x503FFFFF`, LCD `0x9C…` |
+| writable RAM windows (in MAME)              | `ram_probe.lua`: `0x44000000`, `0x4C000000`, work RAM `0x50000000–0x503FFFFF`, LCD `0x9C…` |
 | **reading a file from the SD card**         | `sdread.lua`: `fopen`/`fread`/`fclose` return the exact file bytes                         |
 
 ### The SD file API (the key enabler)
@@ -63,18 +83,20 @@ The firmware exports a C-like file API to plug-ins; it is reachable both by name
   "rb")`. (Our assembler's `.asciz` does not process escapes, so write one `\`.)
 - **Read into work RAM, not the `0x44000000` window.** The SD read cannot target
   the external-memory window; `fread_api(buf, FILE, 1, count)` with `buf` in
-  `0x50000000–0x503FFFFF` returns the bytes. The loader then copies to `0x44…`.
+  `0x50000000–0x503FFFFF` returns the bytes. The loader then copies to `0x44…`
+  (MAME's placeholder RAM; IC23 on an instrument, see the top).
 
 ## Building
 
-Needs a checkout of [`kn7000_disassembly`](../../kn7000_disassembly) beside this
-repo (for the MN10300 assembler and the XAP/SD tools) and its extracted vendor
-`BASEEXT.XAP`:
+Needs a checkout of `technics-roms-disasm` beside this repo (its `kn7000/` holds the
+MN10300 assembler and the XAP/SD tools) and its extracted vendor `BASEEXT.XAP`:
 
-    make -C ../../kn7000_disassembly baserom/sp7001_baseext.xap
-    make            # build/BASEEXT.XAP  (the vendor plug-in with our module added)
-    make card       # build/another_sd.img  (a copy of an SP7001 SD image with it)
-    make run        # boot MAME; press the orange SD CARD button to load it
+    make -C ../../technics-roms-disasm/kn7000 baserom/sp7001_baseext.xap
+    make MAME_ONLY=1 sp7001   # build/BASEEXT.XAP  (the vendor plug-in with our module added)
+    make MAME_ONLY=1 card     # build/another_sd.img  (a copy of an SP7001 SD image with it)
+    make MAME_ONLY=1 run      # boot MAME; press the orange SD CARD button to load it
+
+A plain `make` builds the STYLE CONVERT floppy instead (README-CNV.md).
 
 The vendor plug-in is not redistributed: the build adds our module to your own copy.
 
@@ -83,7 +105,7 @@ The vendor plug-in is not redistributed: the build adds our module to your own c
 | path               | what it is                                                        |
 |--------------------|-------------------------------------------------------------------|
 | `src/platform.inc` | KN7000/SP7001 addresses and constants, with how each was found    |
-| `src/main.s`       | the platform layer: hook, task, page→frame blit (test page today) |
+| `src/main.s`       | the platform layer: hook, task, load, the VM's platform hooks     |
 | `probes/`          | read-only MAME probes that established the facts above            |
 
 ## Credits
