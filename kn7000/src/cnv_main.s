@@ -165,8 +165,11 @@ ce_load_step:
     mov     d0, (LD_CUR)
     bra     ce_poll_exit
 ce_load_fail:
-    mov     1, d0                   # the game task stops (EnsurePart) and shows why
-    mov     d0, (LD_FAILED)
+    mov     1, d0                   # the game task stops (EnsurePart) and shows why; the list is
+    mov     d0, (LD_FAILED)         # dropped, so the file is not tried again on every call, and
+    clr     d0                      # YES starts afresh
+    mov     d0, (LD_REC)
+    mov     d0, (LD_CUR)
 
 ce_poll_exit:
     # EXIT held for QUIT_HOLD_MS -> quit request (the firmware ignores EXIT while we answer 5)
