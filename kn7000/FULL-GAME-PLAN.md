@@ -104,14 +104,24 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    with the keybed D-pad and action takes the code screen to the prison (0x3E83).
 3. **Sound effects** (103 resources; opcode 0x18 PLAY_SOUND id/frequency/volume/channel). The
    format is 8-bit signed PCM after an 8-byte header (length and loop length in words), played
-   on 4 channels at one of 40 frequencies (rustyworld `rodio.rs`). How the KN7000 can output raw
-   PCM — through the tone generator or otherwise — is an open research question; the resources
-   are resident, so only the player is missing.
-4. **Music** (modules 0x07 intro, 0x8A final; 0x89 preloaded by the lake), the original's
-   4-channel module player, instruments taken from the sound resources. The intro reads the
-   music sync mark (var 0xF4): with the stub music it stays 0 in both VMs (hence the identical
-   intro), so once music plays the intro's timing must be re-verified against a reference that
-   produces marks.
+   on 4 channels at one of 40 frequencies (rustyworld `rodio.rs`). **First iteration done in the
+   KN7APP.BIN build (2026-10-20, `src/audio.s`, README-CNV.md "Sound"):** no PCM is output; every
+   PLAY_SOUND becomes a MIDI note that the game writes into the firmware's MIDI IN 1 receive ring, as
+   the RX ISR does, so the KN7000's own tone generator plays it on PART 4-7 (one per AW channel) or
+   the drums on PART 10. Each resource's GM program (or drum key) and pitch is a hand-made table
+   (`tools/aw_sound_map.py`, from each sample's analysis); the frequency index moves the note by
+   semitones, the volume is the velocity, the sample's length at that rate is the note's length. The
+   SP7001 build stays silent (`src/audio_stub.s`).
+4. **Music** (modules 0x07 intro, 0x8A final; 0x89 preloaded by the lake, never played), the
+   original's 4-channel module player, instruments taken from the sound resources. **First iteration
+   done (same place):** the module player of rawgl (`SfxPlayer`) runs on the kernel's millisecond
+   counter, polled at every thread switch and between 4 ms slices of every yield; each row's notes
+   (Amiga periods, to the nearest semitone) go out as MIDI on PART 11-14 (melodic instruments) and
+   PART 10 (drums). **The sync mark var 0xF4 is produced as the original does** (event 0xFFFD writes
+   the event's value; the intro module has 24 of them, values 1..49), whether the sound is on or off,
+   so the intro's scenes follow the music again; with the stub they stayed 0 in both VMs. The intro
+   is therefore no longer the frame-identical one of `CHECKSUM-COMPARISON.md`: the reference VM would
+   need a player too.
 5. **Pacing in the big parts.** City and baths have the largest code and polygon sets (62 KB and
    51 KB of bytecode, 65 KB of video1 each); measure each part's frame work time against
    `var[0xFF] × 20 ms` once they are played through. A lead: the module blits the 320x200 page to

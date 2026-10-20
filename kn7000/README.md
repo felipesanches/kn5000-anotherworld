@@ -10,7 +10,8 @@ MN10300 and has no expansion slot — so the game rides along with the keyboard'
 > The bytecode VM is pixel-identical to the reference (rustyworld) through the intro
 > and the lake, and the lake is playable from the keybed, MIDI IN 1 and the panel.
 > All 146 game resources are on the card and resident in RAM, and every part opens
-> identically to the reference. Sound and music are not implemented yet. The plan for
+> identically to the reference. This build stays silent; the KN7APP.BIN build plays the
+> sound effects and music on the KN7000's tone generator (README-CNV.md, "Sound"). The plan for
 > the rest of the game: [FULL-GAME-PLAN.md](FULL-GAME-PLAN.md).
 
 > **MAME ONLY. Do not put this build on a real KN7000.** It keeps the game in the `0x44000000`

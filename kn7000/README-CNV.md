@@ -25,7 +25,7 @@ every program build we know: **893** (v1.3, the owner's), 935, **941** (v1.6) an
 
 Contents: [What goes where](#what-goes-where) · [Building](#building) · [Before the first run on the
 instrument](#before-the-first-run-on-the-instrument) · [Playing it](#playing-it) · [How it works](#how-it-works) ·
-[Speed](#speed) · [Memory](#memory) · [How it was checked](#how-it-was-checked) · [What MAME cannot
+[Sound](#sound) · [Speed](#speed) · [Memory](#memory) · [How it was checked](#how-it-was-checked) · [What MAME cannot
 settle](#what-mame-cannot-settle) · [Limits](#limits) · [History](#history-the-awcnv-floppy-retired)
 
 ## What goes where
@@ -37,38 +37,41 @@ settle](#what-mame-cannot-settle) · [Limits](#limits) · [History](#history-the
 write-protect tab at PROTECTED. Every MAME test below runs this very image.
 
 **The SD card: everything in `build/sdcard/`, copied to the card's root folder.** `make sdcard`
-writes exactly these 44 files there and nothing else (their sizes and SHA-1s: `build/sdcard.txt`):
+writes exactly these 47 files there and nothing else (their sizes and SHA-1s: `build/sdcard.txt`):
 
-| file(s)                              | bytes   | what                                                                                           |
-|--------------------------------------|---------|------------------------------------------------------------------------------------------------|
-| `KN7APP.BIN`                         | 22,312  | the game: application header, platform layer, firmware search, VM, unpacker, speed measurement |
-| `AWFONT.AW`                          | 768     | the 8x8 font (the KN5000 port's)                                                               |
-| `AWSTRIDX.AW`, `AWSTRDAT.AW`         | 6,144   | the string tables (the KN5000 port's)                                                          |
-| `AWR11.AW` ... `AWR91.AW` (40 files) | 563,528 | each resource the game draws or runs, as `MEMLIST.BIN` finds it in `BANKxx`                    |
+| file(s)                              | bytes   | what                                                                                                  |
+|--------------------------------------|---------|-------------------------------------------------------------------------------------------------------|
+| `KN7APP.BIN`                         | 24,540  | the game: application header, platform layer, firmware search, VM, unpacker, speed measurement, sound |
+| `AWFONT.AW`                          | 768     | the 8x8 font (the KN5000 port's)                                                                      |
+| `AWSTRIDX.AW`, `AWSTRDAT.AW`         | 6,144   | the string tables (the KN5000 port's)                                                                 |
+| `AWSND.AW`                           | 584     | each sound's KN7000 program, note and length ("Sound"; `tools/aw_sound_map.py`)                       |
+| `AWR07.AW` ... `AWR91.AW` (42 files) | 566,944 | each resource the game draws, runs or plays, as `MEMLIST.BIN` finds it in `BANKxx`                    |
 
-All 44 names, as `ls build/sdcard` gives them:
+All 47 names, as `ls build/sdcard` gives them:
 
-    KN7APP.BIN   AWFONT.AW    AWSTRDAT.AW  AWSTRIDX.AW
-    AWR11.AW     AWR12.AW     AWR13.AW     AWR14.AW     AWR15.AW     AWR16.AW     AWR17.AW     AWR18.AW
-    AWR19.AW     AWR1A.AW     AWR1B.AW     AWR1C.AW     AWR1D.AW     AWR1E.AW     AWR1F.AW     AWR20.AW
-    AWR21.AW     AWR22.AW     AWR23.AW     AWR24.AW     AWR25.AW     AWR26.AW     AWR27.AW     AWR28.AW
-    AWR29.AW     AWR2A.AW     AWR2B.AW     AWR43.AW     AWR44.AW     AWR45.AW     AWR46.AW     AWR47.AW
-    AWR48.AW     AWR49.AW     AWR53.AW     AWR7D.AW     AWR7E.AW     AWR7F.AW     AWR90.AW     AWR91.AW
+    KN7APP.BIN   AWFONT.AW    AWSTRDAT.AW  AWSTRIDX.AW  AWSND.AW
+    AWR07.AW     AWR11.AW     AWR12.AW     AWR13.AW     AWR14.AW     AWR15.AW     AWR16.AW     AWR17.AW
+    AWR18.AW     AWR19.AW     AWR1A.AW     AWR1B.AW     AWR1C.AW     AWR1D.AW     AWR1E.AW     AWR1F.AW
+    AWR20.AW     AWR21.AW     AWR22.AW     AWR23.AW     AWR24.AW     AWR25.AW     AWR26.AW     AWR27.AW
+    AWR28.AW     AWR29.AW     AWR2A.AW     AWR2B.AW     AWR43.AW     AWR44.AW     AWR45.AW     AWR46.AW
+    AWR47.AW     AWR48.AW     AWR49.AW     AWR53.AW     AWR7D.AW     AWR7E.AW     AWR7F.AW     AWR8A.AW
+    AWR90.AW     AWR91.AW
 
-592,752 bytes in all (`build/sdcard.txt`), well within the 126.5 MB free on the owner's card.
+598,980 bytes in all (`build/sdcard.txt`), well within the 126.5 MB free on the owner's card.
 Each `AWRxx.AW` holds the exact bytes the original MS-DOS release's `MEMLIST.BIN` points at in its
-`BANKxx` file, ByteKiller-packed or stored, for every palette, bytecode, polygon set and bitmap (the
-sounds and music modules are left out: the port has no audio). They are made from your own copy of
-the game by `make sdcard` (`tools/aw_extract.py --parts`), and the part tables inside `KN7APP.BIN`
-are generated from the same `MEMLIST.BIN`, so the card must carry the files the same build wrote.
-`KN7APP.BIN`'s SHA-1 for the build in this repository and the MS-DOS release in `../../MSDOS/`:
-`e3ee3a4045ba81f9dda3b56c336808905dcd7957` (the speed build merged with the launch-folder support; `build/sdcard.txt` lists it with the
-rest; the other 43 files are the same as the earlier build's, `b952c2aa...`).
+`BANKxx` file, ByteKiller-packed or stored, for every palette, bytecode, polygon set and bitmap, and
+the two music modules (`AWR07.AW` the intro's, `AWR8A.AW` the final part's); the sound samples are
+left out, since the KN7000's tone generator plays its own sounds for them ("Sound"). They are made
+from your own copy of the game by `make sdcard` (`tools/aw_extract.py --parts`), and the part tables
+inside `KN7APP.BIN` are generated from the same `MEMLIST.BIN`, so the card must carry the files the
+same build wrote. `KN7APP.BIN`'s SHA-1 for the build in this repository and the MS-DOS release in
+`../../MSDOS/`: `97fbd9e67fc165310c244a4a1ef1c13fc8d6c8fe` (the first sound build; `build/sdcard.txt`
+lists it with the rest; the build before it, without sound, was `e3ee3a40...`).
 
 **With the program menu (2026-10-20): the game in a folder of its own, `AW\`.** The card's root
 `KN7APP.BIN` can be the program menu (technics-roms-disasm `kn7000/tools/kn7menu`), which lists the
 programs in the card's folders and starts the one picked as the loader would have. Its `make card`
-puts this game in `AW\` (all 44 files of `build/sdcard/`, with a `MANIFEST.TXT` and an `ICON.BMP`)
+puts this game in `AW\` (all 47 files of `build/sdcard/`, with a `MANIFEST.TXT` and an `ICON.BMP`)
 beside the ROM dumper's passes 5 to 9, each in its folder, so nothing has to be swapped on the card any
 more: copy the whole of kn7menu's `build/card/` to the card's root once. "Continue Next?" YES then
 brings the menu back instead of a new game.
@@ -99,7 +102,7 @@ As for the SD build (README.md: the MS-DOS release in `../../MSDOS/` and the KN5
 string tables), with technics-roms-disasm beside this repository (`DISASM_REPO`: the assembler,
 `sd_addfile.py`, and the loader's `tools/cnv_romdump`):
 
-    make sdcard     # build/sdcard/ (also `make`): KN7APP.BIN and the 43 game files; build/sdcard.txt
+    make sdcard     # build/sdcard/ (also `make`): KN7APP.BIN and the 46 game files; build/sdcard.txt
     make app        # build/KN7APP.BIN alone: leafcheck, ic23_guard --loader ("clean"), assemble,
                     #   cnv_layout, then the loader's mkapp.py (header size and CRC-32)
     make kn7run     # the overlay emulator with the owner's loader floppy and a copy of the real
@@ -161,18 +164,19 @@ If anything looks wrong, write the card image from step 1 back and restore the p
    a moment while the bar fills again: the part's files are being read from the card.
 4. The controls (the HELP screen shows them too, with the level codes):
 
-   | game   | keybed (or MIDI IN 1) | panel                                   |
-   |--------|-----------------------|-----------------------------------------|
-   | up     | Bb5 or B5             | R1/R2 OCTAVE +                          |
-   | down   | A5                    | R1/R2 OCTAVE -                          |
-   | left   | F5                    | PART SELECT LEFT                        |
-   | right  | C6                    | PART SELECT RIGHT 1                     |
-   | action | C4 or any key below   | SUSTAIN                                 |
-   | codes  |                       | OTHER PART & FR: the level code screen  |
-   | help   |                       | HELP; PAGE UP / PAGE DOWN turn pages    |
-   | speed  |                       | PAGE UP: the overlay on / off ("Speed") |
-   | blit   |                       | PAGE DOWN: the new blit / the old one   |
-   | quit   |                       | hold EXIT for 1.5 s                     |
+   | game   | keybed (or MIDI IN 1, channels 1-3) | panel                                   |
+   |--------|-------------------------------------|-----------------------------------------|
+   | up     | Bb5 or B5                           | R1/R2 OCTAVE +                          |
+   | down   | A5                                  | R1/R2 OCTAVE -                          |
+   | left   | F5                                  | PART SELECT LEFT                        |
+   | right  | C6                                  | PART SELECT RIGHT 1                     |
+   | action | C4 or any key below                 | SUSTAIN                                 |
+   | codes  |                                     | OTHER PART & FR: the level code screen  |
+   | help   |                                     | HELP; PAGE UP / PAGE DOWN turn pages    |
+   | sound  |                                     | PART SELECT RIGHT 2: off / on ("Sound") |
+   | speed  |                                     | PAGE UP: the overlay on / off ("Speed") |
+   | blit   |                                     | PAGE DOWN: the new blit / the old one   |
+   | quit   |                                     | hold EXIT for 1.5 s                     |
 
    **Prefer the keybed to the panel's up, down and action.** Those are R1/R2 OCTAVE + / - and SUSTAIN,
    and the firmware keeps doing their own job while the game runs: OCTAVE + / - shift the R1/R2
@@ -271,6 +275,54 @@ source (`kn7000/tools/cnv_romdump/loader.s`, `kn7cnv.inc`) and measured in MAME 
   loader notes it. The firmware shows its message box, then "Continue Next?". YES makes the loader
   read `KN7APP.BIN` again, which starts a new game from the firmware search on. NO goes back to the
   main screen.
+
+## Sound
+
+**First iteration (2026-10-20): sound effects and music, played by the KN7000's own tone generator.**
+The game never outputs a sample. It becomes a MIDI source inside the instrument (`src/audio.s`), and
+the firmware plays its notes by its normal path, the one an external sequencer on MIDI IN uses.
+
+- **The way in: the MIDI IN 1 receive ring.** The firmware's MIDI 1 receive ISR (941 `0x484B1E86`)
+  takes each byte from the serial port and enqueues it into a byte ring in work RAM (lib `0x4C0249C5`,
+  the enqueue `0x4C024CBC`: the byte at `wr`, `wr` + 1 wrapping at `last`, `free` - 1, nothing when
+  `free` is 0); a firmware task dequeues and parses the bytes. The game's `MidiMsg` writes each whole
+  message the same way, with interrupts masked (PSW IE off), so that neither the ISR nor a task switch
+  can come in the middle; it never touches the read pointer. The ring is the one `fwfind.s` already
+  finds for MIDI IN input (step 5; 893 `0x5001F020`, 941 `0x5001F050`). A full ring drops the message.
+- **Which parts.** The KN7000's MIDI receive routing as initialised (owner's manual p.190): channels
+  1-3 are RIGHT 1, RIGHT 2 and LEFT, the panel's voices; channels 4-16 are PART 4-16, the parts "for SMF
+  playback or MIDI receive". The game sends only on channels 4-7 (the sound effects, one per AW mixer
+  channel), 10 (the drums of both) and 11-14 (the music, one per module channel): **it never touches
+  the panel's parts.** On those channels it sends reset all controllers and volume 100 at the start,
+  then GM2 bank select (121/0, drums 120/0) and a program change whenever a channel needs another
+  sound, and notes.
+- **The sound effects** (opcode 0x18 PLAY_SOUND). Each sound resource has a GM program and the note it
+  sounds at 8363 Hz, or a GM drum key: `tools/aw_sound_map.py`, a hand-made table from each sample's
+  analysis (length, noise or tone, pitch), loaded at the start from the card file `AWSND.AW`. The
+  frequency index moves the note by semitones, the volume is the velocity, the note lasts as long as the
+  sample would at that rate (held while a looping sample plays); volume 0 stops the channel.
+- **The music** (opcode 0x1A PLAY_MUSIC): rawgl's module player, on the kernel's millisecond counter.
+  Each row, each of the four channels may start a note (an Amiga period, played as the nearest
+  semitone, on the instrument's program), stop, change the volume, or set the **sync mark var 0xF4**.
+  The marks are written as the original does, whether the sound is on or off: the intro reads them to
+  time its scenes, and with them it follows the music (it reached the lake by itself in MAME, below).
+  The module is loaded with its part's files (`AWR07.AW` with the intro, `AWR8A.AW` with the final
+  part) into `MUSIC_BUF`.
+- **When.** `AudioPoll` runs at every switch of VM thread and between 4 ms slices of every yield
+  (`DLY_TSK`): the rows that are due, the notes whose time is up, the sound button. A part switch and
+  LOAD 0 stop everything (as rawgl's `restartAt` and `stopAll`); the help screen sends all notes off
+  and freezes the music; **quitting sends all notes off, all sound off and reset all controllers on
+  every channel the game used**, before the game task ends.
+- **PART SELECT RIGHT 2 turns the sound off and on** (off: all notes off, all sound off, nothing more is
+  sent; on: the channels set up again). The music player keeps running while the sound is off, so the
+  intro's timing does not depend on the button. The help screen's first page lists it.
+- **MIDI IN as input now means channels 1-3.** The game's own notes go into the same ring as MIDI IN,
+  so its note trackers count only channels 1-3 there (`MIDI_IN_CHANNELS`); the keybed is unaffected.
+
+What to listen for on the instrument, and what to report: whether the intro's music and the effects
+sound at all; which effects sound wrong or too loud (the resource ids are in `aw_sound_map.py`, the
+next iteration tunes that table); whether any note keeps sounding after the help screen, a part switch,
+the sound button or quitting; whether RIGHT 1, RIGHT 2 and LEFT still have your voices afterwards.
 
 ## Speed
 
@@ -423,7 +475,7 @@ map, laid out around the loader's contract `kn7cnv.inc` (which the game includes
 | `0x502B9C00`-`0x502B9C7F` | LV_STR: the loader's line buffer                                                      |
 | `0x502B9D00`-`0x502B9DFF` | LOADER_VARS: the loader's variables and the saved SD folder                           |
 | `0x502B9E00`-`0x502B9E6B` | SVC: the loader's service table (the game reads it)                                   |
-| `0x502BA000`-`0x502BFFFF` | KN7APP.BIN: header, code and tables (22,312 bytes, to 0x502BF728)                     |
+| `0x502BA000`-`0x502BFFFF` | KN7APP.BIN: header, code and tables (24,540 bytes, to 0x502BFFDC)                     |
 | `0x502C0000`-`0x502C03FF` | CNV_VARS: the entry's and the part loader's variables                                 |
 | `0x502C0400`-`0x502C04FF` | FW_VARS: what fwfind.s found, and its scratch                                         |
 | `0x502C0800`-`0x502C083F` | AW_PATHS: the game's folder, from the menu's launch block                             |
@@ -436,6 +488,9 @@ map, laid out around the loader's contract `kn7cnv.inc` (which the game includes
 | `0x502D8000`-`0x502D82FF` | AW_FONT: the 8x8 font, from AWFONT.AW                                                 |
 | `0x502D8300`-`0x502D8AFF` | AW_STRIDX: string index, from AWSTRIDX.AW                                             |
 | `0x502D8B00`-`0x502D9AFF` | AW_STRDAT: strings, from AWSTRDAT.AW                                                  |
+| `0x502DA000`-`0x502DA1FF` | AUDIO_VARS: audio.s: MIDI producer, music player, note slots                          |
+| `0x502DA200`-`0x502DA5FF` | SND_TAB: each sound's program, note, length, from AWSND.AW                            |
+| `0x502DB000`-`0x502DEFFF` | MUSIC_BUF: the current part's music module                                            |
 | `0x502E7F00`-`0x502E7FFF` | LB_ADDR: the program menu's launch block (kn7cnv.inc): read, never ours               |
 | `0x502E8000`-`0x502EE3FF` | VIDEO2_AT: the shared polygons (0x11)                                                 |
 | `0x502EE400`-`0x5031AFFF` | PART_AREA: the current part's files                                                   |
@@ -575,6 +630,25 @@ through the loader, and, for comparison, from the floppy with the retired `AW.CN
 - **What the tests found and fixed** (with `AW.CNV`, none of it a write outside the game's RAM, all of
   the fixes in `KN7APP.BIN` too): `probes/cnv/README.md`. The loader route needed no fix.
 
+**The sound (2026-10-20, `KN7APP.BIN` `15f5c57e...` and `97fbd9e6...`; `probes/cnv/README.md`,
+"Sound").** Only short runs, as asked: no acceptance suite was rerun for the sound build.
+
+- `awcnv_sound.lua` (893, `15f5c57e...`, the build before the last change, which only keeps the
+  sound quiet until the game has set it up): the whole intro with no input, recorded. The game put
+  1,704 messages into the ring, dropped none, and the firmware read every one (its read pointer equal
+  to the write pointer at every one-second sample). The module player played 951 rows; all 24 of the
+  intro module's sync marks reached var 0xF4 in order (1, 4, 8, 12, 1, 16, 20, 33 .. 49), the intro
+  stopped the music at mark 49, as its bytecode does, and went on to the lake by itself (at VM tick
+  about 2,660; 2,612 before, without marks). 211 PLAY_SOUNDs sounded. The recording is silent before
+  the game and between -27 and -49 dBFS through the intro, its pitches the module's (the bass's E2 at
+  82 Hz, the melody's E4, G4, D4). PART SELECT RIGHT 2 stopped the game's output for the six seconds
+  it was off. At the quit the ring's last bytes were all notes off, all sound off and reset all
+  controllers on channels 10 to 14 (and before them 4 to 7), all read by the firmware.
+- `awcnv_noteoff.lua` (893, `97fbd9e6...`, the game's own sound muted): the same notes put into the
+  ring by the script, as `MidiMsg` does, and sent through the MIDI IN port from an SMF behave alike: a
+  square lead (GM 80) falls by about 40 dB within a second of its note-off either way; a piano (GM 0)
+  rings on after its note-off either way, which is the overlay's tone generator, not the path.
+
 ## What MAME cannot settle
 
 - **Everything rests on the emulation of program 893.** The `-bios v13` program and table images are
@@ -611,19 +685,31 @@ through the loader, and, for comparison, from the floppy with the retired `AW.CN
   times (the ROM dumper's `DUMPLIST.TXT` and dump files); the game does it the same way, in the root,
   once per quit, and never opens an existing file for writing (it tries each name for reading first,
   which fails for a missing one as a missing game file's read does).
+- **The sound on the instrument.** In MAME the notes the game sends are consumed and sound, and its
+  note-offs are honoured as MIDI IN's are; but the overlay's tone generator keeps some voices sounding
+  after their note-off (and after all notes off), so MAME cannot show that nothing hangs: listen after
+  the help screen, the sound button, a part switch and the quit. The GM programs and drum keys are
+  chosen without hearing the KN7000 play them. And the routing is the instrument's initial one: if
+  PART 4-14 have been given other channels, NOTE ONLY or no program change in the MIDI menus, or MIDI IN
+  is set to BASS PEDAL, the game may sound differently or not at all.
 - **IC23, the pools and the loader are only measured in MAME.** The game names no address there and
   refuses any computed one outside its RAM, but the first run should still check the instrument's
   memory: "Before the first run on the instrument".
 
 ## Limits
 
-- **No sound,** as in the SP7001 build.
+- **Sound: a first iteration** ("Sound"). The effects are GM sounds picked from each sample's
+  analysis, not the game's own samples; the music is the original's notes on GM instruments. The
+  SP7001 build stays silent.
 - **Load pauses** at each part switch, up to 130 KB of files (the city).
 - **One card per build.** `KN7APP.BIN`'s part tables name the files of the build that wrote them:
   copy the whole of `build/sdcard/` each time, never `KN7APP.BIN` alone.
 - **YES restarts from scratch.** The loader reloads `KN7APP.BIN` for "Continue Next?" YES, so a new
   game repeats the firmware search and the global files before the splash, and its speed figures
   start afresh (the new blit, the overlay off).
+- **No room left in `KN7APP.BIN`.** The sound build ends at `0x502BFFDC`, 36 bytes below
+  `IMAGE_END_MAX` (`CNV_VARS` follows it). Anything more needs the variables moved up (the probes name
+  their addresses) or code loaded from a file.
 - **Ten speed reports at most.** With `AWPERF0.TXT` .. `AWPERF9.TXT` all on the card, a quit writes no
   more; delete them after copying them off.
 
