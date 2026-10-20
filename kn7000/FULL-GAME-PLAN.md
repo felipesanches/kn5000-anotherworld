@@ -118,10 +118,11 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    the LCD about 33 times a second (`probes/awfbwrites.lua`), more often than the VM shows frames,
    and its inner loop is 11 instructions per pixel (~700k per blit, from the code) -- blitting only when the shown page changes would
    free a lot of CPU.
-6. **Real hardware.** The `0x44` window is IC23 (above); the real-hardware build is AW.CNV, which
-   stays out of it. Still to measure on the instrument: the floppy load time per part.
+6. **Real hardware.** The `0x44` window is IC23 (above); the real-hardware build is `KN7APP.BIN`, run by
+   the SD loader `KN7LOAD.CNV` (README-CNV.md), which stays out of it. Still to measure on the
+   instrument: the SD load time per part. (Its predecessor, `AW.CNV` from a floppy, is retired.)
 
-**Done for the STYLE CONVERT build (2026-10-20, README-CNV.md): load on demand.** The SP7001 build
+**Done for the instrument build (2026-10-20, README-CNV.md): load on demand.** The SP7001 build
 still loads everything at boot, for the reason below. The original plan: if the real `0x44` window is smaller
 than ~4.6 MB (or the 10.6 s startup becomes a problem), load each part's resources when the part
 starts, as the original engine does, instead of everything at boot: the largest part, the city,

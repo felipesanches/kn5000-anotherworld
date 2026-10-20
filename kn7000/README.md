@@ -33,15 +33,16 @@ MN10300 and has no expansion slot — so the game rides along with the keyboard'
 > on an instrument (`IsIC23` in `src/main.s`; in upstream MAME the placeholder does not repeat).
 >
 > **For a real instrument:** the same VM runs on a stock KN7000 (any program build: 893, 935, 941,
-> 942) from a floppy, as a style converter (`AW.CNV`), with everything in the converter's own work
-> RAM: [README-CNV.md](README-CNV.md).
+> 942) as `KN7APP.BIN`, an application of the SD loader `KN7LOAD.CNV` that STYLE CONVERT runs from
+> the owner's floppy, with the game's files on the SD card and everything in the converter's own
+> work RAM: [README-CNV.md](README-CNV.md).
 
 ## How it runs on the KN7000
 
 The KN7000's firmware owns the LCD and is known to run outside code in two ways: the
 SP7001 plug-in, which loads `TECHNICS\DATA\BASEEXT.XAP` from the SD card into RAM
 and runs it, and the style converters (`.CNV`) that DISK MENU > STYLE CONVERT runs from a
-floppy ([README-CNV.md](README-CNV.md)). This build uses the first (see [SP7001 Firmware](../../kn5000-docs/kn7000-sp7001-firmware.md)).
+floppy (the instrument build: [README-CNV.md](README-CNV.md)). This build uses the first (see [SP7001 Firmware](../../kn5000-docs/kn7000-sp7001-firmware.md)).
 The port **rides along** with that plug-in rather than replacing it:
 
 1. `technics-roms-disasm/kn7000/tools/xap_addon.py` places our module in `BASEEXT.XAP`'s
@@ -96,7 +97,7 @@ MN10300 assembler and the XAP/SD tools) and its extracted vendor `BASEEXT.XAP`:
     make MAME_ONLY=1 card     # build/another_sd.img  (a copy of an SP7001 SD image with it)
     make MAME_ONLY=1 run      # boot MAME; press the orange SD CARD button to load it
 
-A plain `make` builds the STYLE CONVERT floppy instead (README-CNV.md).
+A plain `make` builds the instrument build's SD card folder instead, `build/sdcard/` (README-CNV.md).
 
 The vendor plug-in is not redistributed: the build adds our module to your own copy.
 
@@ -107,6 +108,9 @@ The vendor plug-in is not redistributed: the build adds our module to your own c
 | `src/platform.inc` | KN7000/SP7001 addresses and constants, with how each was found |
 | `src/main.s`       | the platform layer: hook, task, load, the VM's platform hooks  |
 | `probes/`          | read-only MAME probes that established the facts above         |
+
+The instrument build (`KN7APP.BIN`: `src/cnv_main.s`, `src/fwfind.s`, `src/platformcnv.inc`) is
+described in [README-CNV.md](README-CNV.md).
 
 ## Credits
 
