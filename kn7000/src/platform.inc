@@ -9,7 +9,7 @@
 # settings and the 104 PANEL MEMORY records, repeating every 256 KB through the whole window
 # (confirmed on Felipe's unit, 2026-10-20). Every game write would land on the stored settings, and
 # the firmware's power-off stamps the damage valid (kn7000_mame notes/ic23-nvram-2026-10-20). Its
-# loader also uses STAGING_BIG in the user-memory pool (the TPAD pads). The STYLE CONVERT build
+# loader also uses STAGING_BIG in the user-memory pool (the TPAD pads). The KN7APP.BIN build
 # (platformcnv.inc) is the one that stays out of both; this one cannot follow it there, because
 # the plug-in's file API works only during the plug-in load, so it cannot load per part (README.md).
 # The Makefile runs tools/ic23_guard.py on it and refuses to build it without MAME_ONLY=1.

@@ -1,7 +1,7 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# Shared by both KN7000 builds (main.s: SP7001 plug-in; cnv_main.s: STYLE CONVERT .CNV):
+# Shared by both KN7000 builds (main.s: SP7001 plug-in; cnv_main.s: KN7APP.BIN for KN7LOAD.CNV):
 # the game task, the page blit and the border fill, and their data.
 
 .equ SG_REASONS,      5             # StopGame's reasons (sg_why), GUARD_PAGE .. GUARD_FILE

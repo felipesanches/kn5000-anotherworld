@@ -1,11 +1,13 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# fwfind.s -- AW.CNV's run-time firmware search. AW.CNV carries no firmware address: on its first
-# calls it finds what it needs by the code, in the program flash (0x48400000-0x487FFFFF) and in the
-# kernel library the boot copies to RAM at 0x4C000000, the way the ROM dumper's loader does
-# (technics-roms-disasm kn7000/tools/cnv_romdump/loader.s, whose FindSig, CountSig, Read32U and file
-# signatures are reused here; that loader ran on the owner's program 893 on 2026-10-19).
+# fwfind.s -- the game's run-time firmware search. KN7APP.BIN carries no firmware address: on its
+# first calls it finds what it needs by the code, in the program flash (0x48400000-0x487FFFFF) and in
+# the kernel library the boot copies to RAM at 0x4C000000, the way KN7LOAD.CNV, the loader that runs
+# it, does (technics-roms-disasm kn7000/tools/cnv_romdump/loader.s, whose FindSig, CountSig and
+# Read32U are reused here; that loader ran on the owner's program 893 on 2026-10-19). The SD file
+# routines are the loader's: it found them by the same kind of search and hands them over in its
+# service table (kn7cnv.inc), which step 2 checks.
 # tools/aw_find_fw.py runs exactly these searches, with the same rules, over the program images of
 # 893, 935, 941 and 942, and checks the 941 and 942 results against the addresses measured in MAME.
 #
@@ -16,11 +18,10 @@
 #   1 clock   the routine the firmware yields with (adds d0 ms to the kernel's millisecond counter
 #             and rotates the ready queue until then), in the library RAM: one hit, its three counter
 #             operands equal; and the kernel's 1 kHz tick handler: one hit, its two counter operands
-#             equal to that                                                     -> FW_DLY, FWV_KERNEL_MS
-#   2 files   the fmm layer as the dumper finds it (the drive switch, fmmopen within 4 KB after it,
-#             fmmclose and fmmread by their dispatch tables), and OpenHere, the open-in-the-current-
-#             folder routine STYLE CONVERT loads a converter with: one hit, whose last call enters
-#             fmmopen after its 5-byte prologue                                  -> FW_OPEN, FW_READ, FW_CLOSE
+#             equal to that, and to the loader's (SV_MSCOUNT) when it found one  -> FW_DLY, FWV_KERNEL_MS
+#   2 files   the loader's service table at SVC: magic "KN7S", the loader ABI this build was made for,
+#             file access found (FOUND_FILESIG or FOUND_TABLES), and an address for each of open, read,
+#             close and the drive switch pair                -> FW_OPEN, FW_READ, FW_CLOSE, FW_SETEXT, FW_RESETEXT
 #   3 tasks   the firmware's own "mov N, d0; mov X, a0; call cre_tsk; mov N, d0; clr d1; call sta_tsk"
 #             sites with both targets in the library: at least two, all agreeing, each a kernel entry
 #             stub ("add -4, sp; mov d1, (0, sp)")                               -> FW_CRE, FW_STA
@@ -38,10 +39,6 @@
 .equ WR_HI,         0x503FFF00
 # the search's scratch (FW_VARS + 0x40.., platformcnv.inc)
 .equ FS_LASTHIT,    FW_VARS + 0x40  # CountSig: the first hit
-.equ FS_TOPEN,      FW_VARS + 0x44  # FindFileSig: fmmopen's dispatch table
-.equ FS_DRIVE,      FW_VARS + 0x48  # FindFileSig: the drive byte's address
-.equ FS_EXT,        FW_VARS + 0x4C  # FindFileSig: the drive switch
-.equ FS_HITS,       FW_VARS + 0x50
 .equ FS_A,          FW_VARS + 0x54  # a found pair, while the rest of the sites are checked
 .equ FS_B,          FW_VARS + 0x58
 .equ FS_N,          FW_VARS + 0x5C
@@ -147,33 +144,51 @@ fw_clock:
     call    InWorkRam, 0, 0
     cmp     0, d0
     bne     fw_no
+    mov     (SVC+SV_MSCOUNT), d0    # the loader's own find of the counter (0 = none): the same
+    cmp     0, d0
+    beq     fc_ok
+    cmp     d2, d0
+    bne     fw_no
+fc_ok:
     mov     a2, (FW_DLY)
     mov     d2, (FWV_KERNEL_MS)
     bra     fw_yes
 
-# ---- 2: the file routines -------------------------------------------------------------------------
+# ---- 2: the SD file routines, from the loader's service table ------------------------------------
+# The loader (KN7LOAD.CNV) has found them and checked them against each other before it read
+# KN7APP.BIN with them; here the table must be the one this build was made for. Only loads from the
+# table: the game never writes the loader's resident area (tools/ic23_guard.py --loader).
 fw_files:
-    call    FindFileSig, 0, 0       # FW_FMMOPEN, FW_READ, FW_CLOSE
-    cmp     0, d0
-    beq     fw_no
-    mov     sig_openhere, a0
-    call    CountFlash, 0, 0
-    cmp     1, d0
-    bne     fw_no
-    mov     (FS_LASTHIT), a2
-    mov     a2, a3                  # its last call (cd rel16 ..), at +46, must enter fmmopen + 5
-    add     46, a3
-    movbu   (1, a3), d0
-    movbu   (2, a3), d1
-    asl     8, d1
-    or      d1, d0
-    exth    d0
-    add     a3, d0
-    mov     (FW_FMMOPEN), d1
-    add     5, d1
+    mov     (SVC+SV_MAGIC), d0
+    mov     0x53374E4B, d1          # "KN7S"
     cmp     d1, d0
     bne     fw_no
-    mov     a2, (FW_OPEN)
+    mov     (SVC+SV_ABI), d0
+    cmp     LOADER_ABI, d0
+    bne     fw_no
+    mov     (SVC+SV_FOUND), d0
+    and     FOUND_FILESIG|FOUND_TABLES, d0
+    beq     fw_no
+    mov     (SVC+SV_OPEN), d0
+    cmp     0, d0
+    beq     fw_no
+    mov     d0, (FW_OPEN)
+    mov     (SVC+SV_READ), d0
+    cmp     0, d0
+    beq     fw_no
+    mov     d0, (FW_READ)
+    mov     (SVC+SV_CLOSE), d0
+    cmp     0, d0
+    beq     fw_no
+    mov     d0, (FW_CLOSE)
+    mov     (SVC+SV_SETEXT), d0
+    cmp     0, d0
+    beq     fw_no
+    mov     d0, (FW_SETEXT)
+    mov     (SVC+SV_RESETEXT), d0
+    cmp     0, d0
+    beq     fw_no
+    mov     d0, (FW_RESETEXT)
     bra     fw_yes
 
 # ---- 3: cre_tsk and sta_tsk, from the firmware's own call sites ----------------------------------
@@ -421,130 +436,6 @@ CountFlash:
     call    CountSig, 0, 0
     ret     [d2,d3,a2,a3], 0x30
 
-# FindFileSig -> d0 = 1 when the drive switch and the fmmopen/fmmclose/fmmread dispatchers were each
-# found exactly once (FW_FMMOPEN, FW_CLOSE, FW_READ), else 0. The dumper's (loader.s), without
-# fmmwrite.
-FindFileSig:
-    movm    [d2,d3,a2,a3], (sp)
-    add     -0x20, sp
-    mov     sig_ext, a0
-    call    CountFlash, 0, 0
-    cmp     1, d0
-    bne     ff_no
-    mov     (FS_LASTHIT), a2
-    mov     a2, (FS_EXT)
-    mov     a2, a0
-    add     8, a0
-    call    Read32U, 0, 0
-    mov     d0, d2                  # the drive byte address, three times in the signature
-    mov     d0, (FS_DRIVE)
-    mov     a2, a0
-    add     18, a0
-    call    Read32U, 0, 0
-    cmp     d2, d0
-    bne     ff_no
-    mov     a2, a0
-    add     27, a0
-    call    Read32U, 0, 0
-    cmp     d2, d0
-    bne     ff_no
-    mov     sig_fmmopen, a0         # fmmopen, within 4 KB after the drive switch
-    mov     a2, d0
-    mov     a2, d1
-    add     0x1000, d1
-    call    CountSig, 0, 0
-    cmp     1, d0
-    bne     ff_no
-    mov     (FS_LASTHIT), a3
-    mov     a3, (FW_FMMOPEN)
-    mov     a3, a0
-    add     8, a0
-    call    Read32U, 0, 0
-    mov     d0, (FS_TOPEN)
-    mov     a3, a0
-    add     28, a0
-    call    Read32U, 0, 0
-    cmp     d2, d0
-    bne     ff_no
-    mov     sig_close, a0           # fmmclose: table 12 bytes after fmmopen's
-    mov     5, d0
-    mov     12, d1
-    mov     25, a1
-    call    FindDispatcher, 0, 0
-    cmp     0, d0
-    beq     ff_no
-    mov     d0, (FW_CLOSE)
-    mov     sig_rw, a0              # fmmread: 0x3C bytes after
-    mov     8, d0
-    mov     0x3C, d1
-    mov     28, a1
-    call    FindDispatcher, 0, 0
-    cmp     0, d0
-    beq     ff_no
-    mov     d0, (FW_READ)
-    mov     1, d0
-    bra     ff_ret
-ff_no:
-    clr     d0
-ff_ret:
-    ret     [d2,d3,a2,a3], 0x30
-
-# FindDispatcher(a0 = signature, d0 = table operand offset, d1 = table distance from fmmopen's,
-# a1 = drive operand offset) -> d0 = the one hit within 4 KB of the drive switch whose table and
-# drive byte fit, or 0. (loader.s)
-FindDispatcher:
-    movm    [d2,d3,a2,a3], (sp)
-    add     -0x20, sp
-    mov     a0, (0x14, sp)
-    mov     d0, (0x18, sp)
-    mov     (FS_TOPEN), d2
-    add     d1, d2
-    mov     a1, (0x1C, sp)
-    mov     (FS_EXT), a2
-    mov     a2, d3
-    add     0x1000, d3
-    mov     0, a3
-    clr     d0
-    mov     d0, (FS_HITS)
-fd_next:
-    mov     (0x14, sp), a0
-    mov     a2, d0
-    mov     d3, d1
-    call    FindSig, 0, 0
-    cmp     0, d0
-    beq     fd_done
-    mov     d0, a2
-    mov     a2, a0
-    mov     (0x18, sp), d0
-    add     d0, a0
-    call    Read32U, 0, 0
-    cmp     d2, d0
-    bne     fd_skip
-    mov     a2, a0
-    mov     (0x1C, sp), d0
-    add     d0, a0
-    call    Read32U, 0, 0
-    mov     (FS_DRIVE), d1
-    cmp     d1, d0
-    bne     fd_skip
-    mov     a2, a3
-    mov     (FS_HITS), d0
-    inc     d0
-    mov     d0, (FS_HITS)
-fd_skip:
-    inc     a2
-    bra     fd_next
-fd_done:
-    mov     (FS_HITS), d0
-    cmp     1, d0
-    bne     fd_none
-    mov     a3, d0
-    bra     fd_ret
-fd_none:
-    clr     d0
-fd_ret:
-    ret     [d2,d3,a2,a3], 0x30
-
 # CountSig(a0 = signature, d0 = start, d1 = end) -> d0 = hits; FS_LASTHIT = the first. (loader.s)
 CountSig:
     movm    [d2,d3,a2,a3], (sp)
@@ -651,31 +542,6 @@ sig_tick:       # the kernel's 1 kHz tick handler: mov (MS), d0; inc d0; mov d0,
     .word   0xdd, 0x100, 0x100, 0x100, 0x100, 0x80, 0x0c, 0xfa, 0xfc, 0xff, 0xf7, 0xcb, 0xcb
     .word   0xfc, 0xac, 0x18, 0x01, 0x00, 0x34, 0xfa, 0xe0, 0x00, 0xff, 0xf8, 0xe4, 0x01
     .word   0xfc, 0x83, 0x18, 0x01, 0x00, 0x34, 0xFFFF
-sig_ext:        # SetExtMode, ResetExtMode, CheckExtMode (loader.s; 941 0x48532346)
-    .word   0x81, 0x15, 0xa5, 0x03, 0xc2, 0x08, 0xfc, 0x82, 0x100, 0x100, 0x100, 0x100
-    .word   0xde, 0x00, 0x00, 0x00, 0xfc, 0x82, 0x100, 0x100, 0x100, 0x100, 0xde, 0x00, 0x00
-    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0xde, 0x00, 0x00, 0xFFFF
-sig_fmmopen:    # fmmopen (loader.s sig_open; 941 0x48532390)
-    .word   0xcf, 0x30, 0xf8, 0xfe, 0xe4, 0x97, 0xfc, 0xde, 0x100, 0x100, 0x100, 0x100
-    .word   0x3d, 0x21, 0x10, 0x85, 0xf4, 0xdb, 0xf0, 0x42, 0x49, 0xf0, 0x51, 0x45, 0x44, 0xd9
-    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0x3d, 0x54, 0x21, 0x10, 0xf3, 0xa1, 0x9d
-    .word   0xf0, 0xf2, 0xdf, 0x30, 0x24, 0xFFFF
-sig_close:      # fmmclose and the other argument-less dispatchers (loader.s; 941 0x485323BC)
-    .word   0xf8, 0xfe, 0xec, 0xfc, 0xdd, 0x100, 0x100, 0x100, 0x100
-    .word   0x3c, 0x20, 0x08, 0x85, 0xf4, 0xdb, 0xf0, 0x41, 0x45, 0xf0, 0x50, 0x41, 0x44, 0xd9
-    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0x3c, 0x54, 0x20, 0x08, 0xf3, 0x80
-    .word   0xf0, 0xf0, 0xdf, 0x00, 0x14, 0xFFFF
-sig_rw:         # fmmread and fmmwrite (loader.s; 941 0x48532463, 0x4853248F)
-    .word   0xcf, 0xa0, 0xf8, 0xfe, 0xe4, 0x82, 0xfc, 0xde, 0x100, 0x100, 0x100, 0x100
-    .word   0x3d, 0x21, 0x10, 0x85, 0xf4, 0xdb, 0xf0, 0x42, 0x49, 0xf0, 0x51, 0x45, 0x44, 0xd9
-    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0x3d, 0x54, 0x21, 0x10, 0xf3, 0x91, 0x88
-    .word   0xf0, 0xf1, 0xdf, 0xa0, 0x24, 0xFFFF
-sig_openhere:   # OpenHere(a0 = name, a1 = mode): drive + current folder + name, then fmmopen (941 0x48531AC5)
-    .word   0xcf, 0x30, 0xfa, 0xfe, 0x64, 0xff, 0x47, 0xb0, 0x93, 0x3e, 0x22, 0x10, 0x98
-    .word   0xfc, 0xdd, 0x100, 0x100, 0x100, 0x100, 0xcd, 0x100, 0x100, 0x00, 0x00, 0x98
-    .word   0xfc, 0xdd, 0x100, 0x100, 0x100, 0x100, 0xcd, 0x100, 0x100, 0x00, 0x00, 0x98, 0x9d
-    .word   0xcd, 0x100, 0x100, 0x00, 0x00, 0x5d, 0xb0, 0x98, 0xcd, 0x100, 0x100, 0x30, 0x24
-    .word   0xdf, 0x30, 0xa4, 0xFFFF
 sig_cresta:     # mov X, a0; call cre_tsk, 0, 0; mov N, d0; clr d1; call sta_tsk, 0, 0 (941 0x48405D51)
     .word   0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0xdd, 0x100, 0x100, 0x100, 0x100, 0x00, 0x00
     .word   0x80, 0x100, 0x04, 0xdd, 0x100, 0x100, 0x100, 0x100, 0x00, 0x00, 0xFFFF

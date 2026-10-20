@@ -1,33 +1,53 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# Another World on the Technics SX-KN7000 with no SP7001: the game is a style converter. DISK MENU >
-# STYLE CONVERT lists AW.CNV, and choosing it loads this file to 0x502B8000 and calls its first byte
-# on the firmware's main task (platformcnv.inc says how the firmware drives a converter). Any
-# program build: 893 (v1.3), 935, 941 (v1.6), 942.
+# Another World on the Technics SX-KN7000 with no SP7001: the game is KN7APP.BIN, an application of
+# the generic SD loader KN7LOAD.CNV (technics-roms-disasm kn7000/tools/cnv_romdump; kn7cnv.inc is the
+# contract). DISK MENU > STYLE CONVERT runs KN7LOAD.CNV from the floppy; the loader reads this file
+# from the SD card's root folder to APP_BASE (0x502BA000), checks its header and CRC-32, and calls
+# its entry (AH_ENTRY = CnvEntry) on every converter call, on the firmware's main task
+# (platformcnv.inc says how the firmware drives a converter). Any program build: 893 (v1.3), 935,
+# 941 (v1.6), 942. The game's files are beside KN7APP.BIN in the card's root folder (README-CNV.md).
 #
 # Each call does one step and returns; every call but the last answers request 5 (a short text),
 # which parks the firmware on the converter while the game task runs:
-#   * the first FW_STEPS calls find the firmware's routines and RAM (fwfind.s);
-#   * the next ones read the font, the strings and the shared polygons from the floppy, one file
+#   * the first FW_STEPS calls find the firmware's routines and RAM (fwfind.s), and check the
+#     loader's service table, whose SD file routines the game reads its files with;
+#   * the next ones read the font, the strings and the shared polygons from the SD card, one file
 #     per call (GlobalList), then start the game task (display.s GameTask runs the VM);
 #   * from then on, whenever the game task asks for a part (EnsurePart, at a part switch), each call
 #     reads one of that part's files and unpacks it in place (LoadStep), until the part is resident.
 # Holding EXIT for QUIT_HOLD_MS asks the game task to end itself at its next yield (DLY_TSK below);
 # the following call answers 0xFE, which hands the instrument back: the firmware shows a message
-# (EXIT), then "Continue Next?". YES calls the converter again, which starts a new game; NO leaves.
+# (EXIT), then "Continue Next?". YES makes the loader read KN7APP.BIN afresh (zeroing APP_BASE..
+# CNV_END first) and call it, which starts a new game from the firmware search on; NO leaves.
 #
 # Memory: platformcnv.inc. The game writes nothing outside [AW_LO, AW_HI) but the mailbox and the LCD:
-# not CS1 (IC23, the panel memories), not the user-memory pools (tools/ic23_guard.py checks every
+# not CS1 (IC23, the panel memories), not the user-memory pools, not the loader's resident area
+# below APP_BASE, whose service table it only reads (tools/ic23_guard.py --loader checks every
 # address named here; GuardRange checks every computed load destination at run time).
 
+.include "kn7cnv.inc"               # the loader's contract (technics-roms-disasm cnv_romdump)
 .include "platformcnv.inc"
 .include "vm.inc"
 .include "awpart.inc"               # generated: RES_COUNT, PART_LISTS, LR_* (tools/aw_extract.py --parts)
-.mnbase 0x502B8000                  # CNV_BASE: the firmware loads AW.CNV here
+.mnbase APP_BASE                    # where KN7LOAD.CNV loads KN7APP.BIN
 .equ ResAddr,      RES_TAB          # interp.s ResPtr: the table the part loader fills
 
-# ---- our variables (CNV_VARS, zeroed by the firmware with the whole area on each load) ----
+# ---- the application header (kn7cnv.inc AH_*); mkapp.py fills in the size and the CRC-32 ----
+AppHeader:
+    .ascii  "KN7A"                  # AH_MAGIC
+    .long   LOADER_ABI              # AH_ABI
+    .long   0                       # AH_SIZE (mkapp.py)
+    .long   CnvEntry                # AH_ENTRY: called on every converter call
+    .long   0                       # AH_CRC (mkapp.py)
+    .long   APP_BASE                # AH_BASE
+    .long   0, 0
+AppName:                            # AH_NAME: 32 bytes, NUL-padded
+    .ascii  "ANOTHER WORLD"
+    .space  AppHeader + 0x40 - .
+
+# ---- our variables (CNV_VARS, zeroed by the loader with the whole application area on each load) ----
 .equ CV_STATE,     CNV_VARS + 0x00  # 0 first call, 1 searching, 2 global files, 3 running, 4 failed
 .equ CV_QUIT_REQ,  CNV_VARS + 0x04  # set by the entry when EXIT has been held long enough
 .equ CV_TASK_DONE, CNV_VARS + 0x08  # set when no game task runs (ended, or never started)
@@ -66,7 +86,7 @@
 .equ FAIL_CALLS,   200              # about 10 s of calls: end a failed run when EXIT cannot be read
 
 # =================================================================================
-# The entry: called by the firmware with `calls (a0)`, a0 = CNV_BASE, on its main task.
+# The entry: called by the loader with `calls (a0)` on every converter call, on the firmware's main task.
 CnvEntry:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
@@ -132,7 +152,9 @@ ce_fail_now:
     bra     ce_failed
 
 ce_run:
-    # A call after we answered 0xFE is the firmware's "Continue Next?" answered YES: play again.
+    # A call after we answered 0xFE would be the firmware's "Continue Next?" answered YES: play
+    # again. (With the loader it never comes: YES makes the loader load KN7APP.BIN afresh, which
+    # starts at ce_first. Kept for a loader that calls the application again without reloading.)
     # NO leaves STYLE CONVERT without calling us.
     mov     (CV_ENDED), d0
     cmp     0, d0
@@ -503,13 +525,16 @@ pl_clear:
     call    ListStart, 0, 0
     ret     [d2,d3,a2,a3], 0x30
 
-# LoadStep: load the record at LD_REC -- check its destination, open its file in the floppy's
-# current folder, read it there, close it, unpack it in place if it is packed -- and move on. A file
-# that fails (open, short read, not intact) is logged and tried again on the next call, up to
+# LoadStep: load the record at LD_REC -- check its destination, open its file in the SD card's root
+# folder (the loader empties the current folder around each call), read it there in FILE_PIECE
+# pieces as the loader reads KN7APP.BIN, close it, unpack it in place if it is packed -- and move on.
+# The loader's routines (FW_OPEN.., from its service table) are called as the loader calls them:
+# the drive switch to the SD card first and back after (a no-op when they are the SD backends). A
+# file that fails (open, short read, not intact) is logged and tried again on the next call, up to
 # FILE_TRIES attempts; a destination the guard refuses is not.
 #   -> d0 = 0 more to come, 1 the list is done, 2 the file failed for good (LD_BAD_ID)
 # The firmware's routines store their arguments in the caller's frame at sp+4..sp+0x10, so nothing
-# of ours lives there.
+# of ours lives there; they keep d2, d3, a2, a3.
 LoadStep:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
@@ -535,29 +560,53 @@ lst_len:
     call    GuardRange, 0, 0
     cmp     0, d0
     bne     lst_guard
+    mov     1, d0                   # the file layer to the SD card
+    mov     (FW_SETEXT), a3
+    calls   (a3)
+    mov     (LD_REC), a2
     mov     (LR_NAME, a2), a0
     mov     mode_rb, a1
     mov     (FW_OPEN), a3
     calls   (a3)
     exth    d0
     cmp     0, d0
-    blt     lst_open_fail
+    blt     lst_open_back
     mov     1, d0
     mov     d0, (LD_IN_READ)
     mov     (LD_REC), a2
-    mov     (LR_DEST, a2), a0
-    mov     (LR_READ, a2), d0
-    mov     (FW_READ), a3
-    calls   (a3)                    # d0 = bytes read
-    mov     d0, (0x14, sp)
+    mov     (LR_DEST, a2), a3       # a3: where the next piece goes
+    mov     (LR_READ, a2), d2       # d2: bytes still to read
+    clr     d3                      # d3: bytes read
+lst_piece:
+    cmp     0, d2
+    beq     lst_read_end
+    mov     d2, d0
+    mov     FILE_PIECE, d1
+    cmp     d1, d0
+    bls     lst_ask
+    mov     d1, d0
+lst_ask:
+    mov     d0, (0x14, sp)          # asked for
+    mov     a3, a0
+    mov     (FW_READ), a1
+    calls   (a1)                    # d0 = bytes read
+    mov     (0x14, sp), d1
+    cmp     d1, d0
+    bne     lst_read_end            # short, or an error: the count below tells
+    add     d0, d3
+    add     d0, a3
+    sub     d0, d2
+    bra     lst_piece
+lst_read_end:
     clr     d0
     mov     d0, (LD_IN_READ)
     mov     (FW_CLOSE), a3
     calls   (a3)
+    mov     (FW_RESETEXT), a3       # the file layer back, as the firmware expects between calls
+    calls   (a3)
     mov     (LD_REC), a2
-    mov     (0x14, sp), d0
     mov     (LR_READ, a2), d1
-    cmp     d1, d0
+    cmp     d1, d3
     bne     lst_short
     movbu   (LR_FLAGS, a2), d0
     btst    LR_INPLACE, d0
@@ -602,6 +651,9 @@ lst_ret:
 lst_guard:
     mov     0x04000000, d0          # kind 4: a destination outside the game's RAM
     bra     lst_fail
+lst_open_back:
+    mov     (FW_RESETEXT), a3
+    calls   (a3)
 lst_open_fail:
     mov     0x01000000, d0          # kind 1: the open failed
     bra     lst_fail
@@ -620,8 +672,8 @@ lst_fail:
     mov     (GUARD_WHAT), d0        # a refused destination is not tried again
     cmp     0, d0
     bne     lst_give_up
-    mov     (LD_TRIES), d0          # a read can fail now and work next time (a floppy is a
-    inc     d0                      # floppy): the same record again on the next call
+    mov     (LD_TRIES), d0          # a read can fail now and work next time: the same record
+    inc     d0                      # again on the next call
     mov     d0, (LD_TRIES)
     cmp     FILE_TRIES, d0
     bcc     lst_give_up

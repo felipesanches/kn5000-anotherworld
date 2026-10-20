@@ -96,7 +96,7 @@ ResPtr:
 # engine's copyBitmapPtr. The MS-DOS bitmap is four 8000-byte bit planes; plane k supplies
 # bit k of every pixel, and within a byte the MSB is the leftmost of its 8 pixels
 # (rustyworld video.rs load_bg). Page 0 is cleared, then each plane ORs its bit in. The
-# platform's BitmapData gives the planes (the STYLE CONVERT build keeps bitmaps packed and
+# platform's BitmapData gives the planes (the KN7APP.BIN build keeps bitmaps packed and
 # unpacks one here); a bitmap that is not there leaves page 0 alone.
 LoadBitmap:
     movm    [d2,d3,a2,a3], (sp)
@@ -179,7 +179,7 @@ lb_ret:
 
 # ================================================================================
 # InitForPart(d0 = partId): make the part's resources resident (the platform's EnsurePart: a
-# no-op where everything is resident, a load from the floppy in the STYLE CONVERT build), reset
+# no-op where everything is resident, a load from the SD card in the KN7APP.BIN build), reset
 # threads and point the VM at them (PartTable). An id outside 0x3E80..0x3E89 is ignored.
 InitForPart:
     movm    [d2,d3,a2,a3], (sp)

@@ -6,7 +6,7 @@
 # VM_INTERP_BASE (the interpreter, 0x1100 bytes) and VM_MISC_BASE (everything else, 0x1400
 # bytes), come from platform.inc (the SP7001 build: the 0x44000000 window, MAME ONLY -- on a real
 # KN7000 that window is IC23, the battery-backed SRAM with the panel memories) or platformcnv.inc
-# (the STYLE CONVERT build: the converter area of work RAM). Field names and sizes mirror the
+# (the KN7APP.BIN build: the converter area of work RAM). Field names and sizes mirror the
 # KN5000 TLCS-900 source so the two stay readable side by side.
 
 .equ VM_STATE,        VM_POLY_BASE  # per platform (platform.inc / platformcnv.inc)
@@ -87,10 +87,10 @@
 .equ RES_VIDEO2,      0x11           # the shared polygon resource (video2)
 .equ PART_FIRST,      0x3E80         # part ids 0x3E80..0x3E89 (PartTable in interp.s)
 .equ PART_LAST,       0x3E89
-# The STYLE CONVERT build keeps one part's resources at a time and loads the next part's from the
-# floppy at the part switch (cnv_main.s, EnsurePart). Both builds find a resource through ResPtr
-# (interp.s): the u32 at ResAddr + 4 * id (a table in the module for SP7001, a table in RAM that the
-# part loader fills for STYLE CONVERT).
+# The KN7APP.BIN build (run by KN7LOAD.CNV through STYLE CONVERT) keeps one part's resources at a
+# time and loads the next part's from the SD card at the part switch (cnv_main.s, EnsurePart). Both
+# builds find a resource through ResPtr (interp.s): the u32 at ResAddr + 4 * id (a table in the
+# module for SP7001, a table in RAM that the part loader fills for KN7APP.BIN).
 # AW_FONT (anotherworld_chargen.rom, 8x8, chars 0x20+), AW_STRIDX (str_index.rom, LE u16 offset per
 # string id), AW_STRDAT (str_data.rom, NUL-terminated strings): per platform.
 .equ AW_FONT_SZ,      768
@@ -125,7 +125,7 @@
 # VM instruction trace (for diffing against the vm-gui reference): ExecuteInstruction calls the
 # platform's TraceInsn. The SP7001 build (MAME only) logs 8-byte entries, frame(u16)@0,
 # thread(u8)@2, opcode(u8)@3, pc(u16)@4, to its TRACE_BUF (main.s; dumped by probes/awtrace.lua);
-# the STYLE CONVERT build logs nothing. FRAME_NO also tells the probes the VM is running.
+# the KN7APP.BIN build logs nothing. FRAME_NO also tells the probes the VM is running.
 .equ TRACE_COUNT,     VM_MISC_BASE + 0x0078     # entries logged so far
 .equ FRAME_NO,        VM_MISC_BASE + 0x007C     # current VM frame (tick) number
 
