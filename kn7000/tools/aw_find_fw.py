@@ -32,7 +32,12 @@
 #   rings     the library's per-port MIDI ring wrappers: one hit; MIDI IN 1 receive and MIDI OUT 1
 #             transmit ring headers, in work RAM, IN below OUT
 #
-#   python3 -I tools/aw_find_fw.py [--roms DIR]     (DIR: the overlay emulator's roms/kn7000)
+#   python3 -I tools/aw_find_fw.py [--roms DIR] [--real-lib893 FILE]
+# DIR: the overlay emulator's roms/kn7000 (its v1.3 images are the owner's own dumps). FILE: the
+# owner's library RAM as the ROM dumper's SURVEY2 pass read it from 0x4C000000 on the instrument
+# (private: technics_roms roms/kn7000/real_dump_v1.3_b893/pass5-run1/R4C00000.BIN); with it, 893's
+# library searches run on the real RAM instead of the boot's copy of the flash, and the script
+# reports whether the two agree.
 import argparse
 import os
 import struct
@@ -243,12 +248,19 @@ KEYS = ["open", "fmmread", "fmmclose", "cre_tsk", "sta_tsk", "dly_tsk", "exd_tsk
 def main():
     ap = argparse.ArgumentParser(description="AW.CNV run-time firmware search, over every program build")
     ap.add_argument("--roms", default=os.path.expanduser("~/compartilhado/kn7000-emulator/roms/kn7000"))
+    ap.add_argument("--real-lib893")
     a = ap.parse_args()
     cols, bad = {}, 0
     for name, even, odd in BUILDS:
         flash = load(a.roms, even, odd)
         i = flash.find(LIB_HEAD)
         lib = flash[i:i + LIB_LEN] if i >= 0 else b""
+        if name.startswith("893") and a.real_lib893:
+            real = open(a.real_lib893, "rb").read()
+            n = next((k for k, (x, y) in enumerate(zip(real, lib)) if x != y), len(lib))
+            print(f"893: the instrument's library RAM equals the boot's copy of the flash for its first "
+                  f"0x{n:X} bytes; searching the instrument's", file=sys.stderr)
+            lib = real
         r, fail = search(Mem(flash, lib))
         known = KNOWN.get(name, {})
         cell = {}
