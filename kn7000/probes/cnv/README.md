@@ -179,6 +179,55 @@ load errors 0, guard 0", and `compare_frames.py`: 2612 of 2612 frames identical 
 gave "captured 2613 frames (last tick 2612); part loads 3, load errors 0, guard 0", and 2612 of 2612
 frames identical.
 
+## Speed (2026-10-20): where a frame's time goes
+
+On the owner's KN7000 the game ran, but its frame rate was very low. MAME cannot show that: the overlay
+emulator gives every memory access the same cost, with no wait states. What it can do is count the
+accesses the game makes per VM tick in each region; on the instrument the LCD frame lies behind the
+bus controller's slow setting (below) and costs far more than work RAM, so the counts say what the
+wait states multiply. These probes run through the loader exactly as the acceptance tests do
+(`run_perf.sh`: the owner's floppy, a copy of the real card with `CARDFILES` added, fresh NVRAM, program 893):
+
+| file              | question                                                                                                                                                                           |
+|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `run_perf.sh`     | the runner: one MAME run with a given autoboot script and card files; the card copy is deleted after                                                                               |
+| `awcnv_perf.lua`  | per VM tick: the game's stores into the LCD frame (by size), its loads from it, its accesses to the pages and to the rest of its RAM; the firmware's LCD stores; the emulated time |
+| `awcnv_fwlcd.lua` | while the game runs, when and where does the firmware draw on the LCD? 10 s with no input, then each panel button and a key, 4 s each                                              |
+| `lcd_cost.py`     | what the counted LCD stores cost under a wait-state model, or with the instrument's own benchmark figures                                                                          |
+
+**Before (`KN7APP.BIN` `b952c2aa...`, the intro, ticks 1-300, mean per tick):**
+
+| region              | accesses per tick                                |
+|---------------------|--------------------------------------------------|
+| LCD frame, 16-bit   | 128,000 stores: the window, 64,000 pixels, twice |
+| LCD frame, 32-bit   | 89,600 stores: the black border, 44,800, twice   |
+| VM pages            | 141,694 loads, 21,231 stores                     |
+| the rest of its RAM | 6,470 loads, 2,188 stores                        |
+| the firmware's LCD  | 0 stores                                         |
+
+Every tick blitted the front page twice (the bytecode's own blit, then `NextThread`'s at the end of
+every frame) and repainted the whole border with each blit: 217,600 stores, about 614 KB, into the LCD
+frame per tick, whatever changed. The firmware programs the bus controller for the region that holds
+the LCD frame, the DSP's latch and its data port (`0x98000000`-`0x9FFFFFFF`, MEMCTR3 at `0x32000026`; 941
+`0x484D7111`) to `0x0424` or `0x0704`, by a board strap it reads at `0x98070000`, and raises it to
+`0x0924` around each DSP data-port access; bits 8-12 look like a wait count. With 4 or 7 waits on a
+16-bit bus at a guessed 16 MHz, `lcd_cost.py` puts those stores at 115 or 173 ms per tick, before any
+other work: a ceiling of 6-9 frames per second, where the gameplay asks for 25 or 50.
+
+The firmware drew on the LCD only before the first VM frame (its text screen, 458,880 stores from
+`0x48414F92`). With the game running it drew nothing, in 10 s with no input or after R1/R2 OCTAVE + / -,
+SUSTAIN (twice), PART SELECT RIGHT 1 / LEFT, PAGE UP (twice), PAGE DOWN, HELP, EXIT, OTHER PART & FR or a
+keybed key. **DISPLAY HOLD** is the exception: in the first run, pressed in the intro, the firmware
+repainted the whole screen (152,960 stores) and stopped calling the converter for the rest of the run
+(so EXIT could no longer end the game); in the second, pressed on the level-code screen, it did
+nothing. Do not press DISPLAY HOLD while the game runs.
+
+    T=~/compartilhado/tmp/aw-perf    # EMU=a copy of kn7000-emulator; CARDFILES=the build's card files
+    probes/cnv/run_perf.sh $T/base-perf probes/cnv/awcnv_perf.lua           # AWP_MAX=300
+    probes/cnv/run_perf.sh $T/base-fwlcd2 probes/cnv/awcnv_fwlcd.lua         # DISPLAY HOLD last
+    AWL_HOLD_EARLY=1 probes/cnv/run_perf.sh $T/base-fwlcd probes/cnv/awcnv_fwlcd.lua   # ... as the first run
+    python3 -I probes/cnv/lcd_cost.py $T/base-perf/perf.tsv
+
 ## What the platform does with a converter
 
 Three small converters, each alone on a floppy, ask what a converter may do on 941. They answer
