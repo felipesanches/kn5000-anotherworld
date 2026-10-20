@@ -119,7 +119,8 @@
 .equ PREV_UD_BITS,    VM_MISC_BASE + 0x004A     # u16: last-applied U/D bit (0 / 4 / 8)
 .equ VAR_PAUSE_SLICES, 0xFF          # var index holding the per-frame slice count
 .equ SLICE_MS,        20             # ms per slice (authentic AW)
-.equ MIN_YIELD_MS,    8              # never yield less than this (firmware must run)
+.equ MIN_YIELD_MS,    2              # never yield less than this (the firmware's tasks get the CPU only then)
+.equ MIN_YIELD_OLD,   8              # ... as before 2026-10-20, in the old blit mode (perf.s PF_MODE)
 .equ MAX_YIELD_MS,    400            # safety cap on a single frame's sleep
 
 # VM instruction trace (for diffing against the vm-gui reference): ExecuteInstruction calls the
@@ -182,7 +183,7 @@
 # saved and put back.
 .equ HELP_PAGE_NO,    VM_MISC_BASE + 0x005C     # u32: the help page shown (0..HELP_PAGES-1)
 .equ HELP_PAL_SAVE,   VM_MISC_BASE + 0x0100     # 32 bytes: the game's palette while the help is up
-.equ HELP_PAGES,      3
+.equ HELP_PAGES,      4              # the fourth: the speed figures (perf.s)
 .equ HELP_TICK,       VM_MISC_BASE + 0x0120     # u32: help polls since the page was last shown
 .equ HELP_REFRESH,    16             # re-show the page every 16 polls (~0.5 s)
 
@@ -258,3 +259,110 @@
 .equ GUARD_BITMAP,    4              # a LOAD of a bitmap that is not resident (cnv_main.s)
 .equ GUARD_FILE,      5              # a game file could not be opened, read or unpacked (cnv_main.s)
 .equ VM_STACK_SIZE,   0x200          # 256 x u16 at VM_STACK
+.equ FWV_BUILD,       VM_MISC_BASE + 0x0230     # u32: the program build (893, 941, ...; 0 = unknown), for the speed figures
+
+# ================================================================================
+# Speed (perf.s; README-CNV.md, "Speed"). The fine clock is the MN10300's timer 4, which the firmware
+# runs as its 1 kHz tick: TM4BC counts down from TM4_TOP to 0 at 2 MHz and the kernel's millisecond
+# counter steps at each reload (technics-roms-disasm cnv_romdump pass 8 measured it on the owner's
+# unit). A stamp is ms * (TM4_TOP + 1) + (TM4_TOP - BC): counts of 1/2001 ms, about 0.5 us. The time
+# of every frame is split into phases (PH_*), summed per frame, per one-second window, per part and
+# over the whole game; the help screen's fourth page, the overlay (DISPLAY HOLD) and AWPERF.TXT show
+# them. The block also holds the blit's state: the palette the LCD shows, its pixel-pair table, the
+# page last shown and which pages were drawn on since.
+.equ TM4BC,           0x340010A0     # timer 4 binary counter (read only here)
+.equ TM4BR,           0x34001090     # timer 4 base register (the firmware sets 2000)
+.equ TM4MD,           0x34001080     # timer 4 mode (8 bits; the firmware sets 0x81)
+.equ TM4_TOP,         2000
+.equ STAMP_TRIES,     8
+.equ WINDOW_COUNTS,   2001000        # a measuring window: 1 s of stamps
+.equ PH_VM,           0              # the interpreter, input, everything not below
+.equ PH_DRAW,         1              # polygons and strings (Op80, Op40, DRAW_STRING)
+.equ PH_PAGE,         2              # page fill, page copy, bitmap
+.equ PH_BLIT,         3              # the page to the LCD (BlitPage)
+.equ PH_BORD,         4              # the black border
+.equ PH_WAIT,         5              # the end-of-frame yield to the firmware (pacing)
+.equ PH_LOAD,         6              # waiting for a part's files (EnsurePart): not part of a frame
+.equ PH_PAUSE,        7              # the help screens, the stop screen, the overlay: not part of a frame
+.equ PH_COUNT,        8
+.equ PF_T_LAST,       VM_PERF_BASE + 0x000  # u32: the stamp at the last phase switch
+.equ PF_CUR,          VM_PERF_BASE + 0x004  # u32: the phase being timed
+.equ PF_WIN_T0,       VM_PERF_BASE + 0x008  # u32: the stamp the window started at
+.equ PF_WIN_FRAMES,   VM_PERF_BASE + 0x00C  # u32: frames ended in the window
+.equ PF_WIN_MAX,      VM_PERF_BASE + 0x010  # u32: the window's longest frame, us
+.equ PF_WIN_PX,       VM_PERF_BASE + 0x014  # u32: LCD pixels the blits wrote in the window
+.equ PF_FRAME_PX,     VM_PERF_BASE + 0x018  # u32: ... in this frame
+.equ PF_STATE,        VM_PERF_BASE + 0x01C  # u32: bit 0 the overlay is on; bits 1, 2: PAGE UP, PAGE DOWN were down
+.equ PF_DAMAGE,       VM_PERF_BASE + 0x020  # u32: != 0: the next blit repaints border and window (PFD_*)
+.equ PF_LAST_SRC,     VM_PERF_BASE + 0x024  # u32: the page the LCD shows (0: the shadow means nothing)
+.equ PF_DIRTY,        VM_PERF_BASE + 0x028  # 4 x u8: VM page k drawn on since it was last shown
+.equ PF_SINCE_REP,    VM_PERF_BASE + 0x02C  # u32: frames since the last full repaint
+.equ PF_REPAINTS,     VM_PERF_BASE + 0x030  # u32: full repaints so far
+.equ PF_SENT_BAD,     VM_PERF_BASE + 0x034  # u32: repaints a sentinel asked for (the LCD was not as drawn)
+.equ PF_BLITS,        VM_PERF_BASE + 0x038  # u32: blits that compared and wrote what changed
+.equ PF_SKIPS,        VM_PERF_BASE + 0x03C  # u32: blits skipped: nothing changed
+.equ PF_ACC,          VM_PERF_BASE + 0x040  # PH_COUNT x u32: this frame, stamp counts per phase
+.equ PF_WIN,          VM_PERF_BASE + 0x060  # PH_COUNT x u32: this window, us per phase
+.equ PF_MODE,         VM_PERF_BASE + 0x080  # u32: 0 the new blit, 1 the old one (PAGE DOWN switches)
+.equ PF_OVL_DUE,      VM_PERF_BASE + 0x084  # u32: draw the overlay at the next blit
+.equ PF_PAIR_N,       VM_PERF_BASE + 0x088  # u32: pixel-pair tables built (palette changes shown)
+.equ PF_ASKED,        VM_PERF_BASE + 0x08C  # u32: this frame's yield, as asked (ms)
+.equ PF_WIN_ASKED,    VM_PERF_BASE + 0x090  # u32: the window's yields as asked, ms
+.equ PF_SWITCHES,     VM_PERF_BASE + 0x094  # u32: blit mode switches
+.equ PF_POSTLOAD,     VM_PERF_BASE + 0x098  # u32: frames to go of the repaints after a part's load (PFD_LOAD)
+.equ PF_SHOW,         VM_PERF_BASE + 0x0C0  # the last window's figures (PS_* offsets), u32 each
+.equ PS_FPS,          0x00           #   frames per second x 10
+.equ PS_FRAME,        0x04           #   ms per frame x 10 (all phases but LOAD and PAUSE)
+.equ PS_MAX,          0x08           #   the longest frame, ms x 10
+.equ PS_PX,           0x0C           #   LCD pixels written per frame
+.equ PS_ASKED,        0x10           #   the yield asked per frame, ms x 10
+.equ PS_PH,           0x14           #   PH_COUNT x: ms per frame x 10 (LOAD, PAUSE: ms in the window x 10)
+.equ PS_MODE,         0x34           #   the window's blit mode
+.equ PF_BENCH,        VM_PERF_BASE + 0x100  # BN_COUNT x u32: the benchmark, ns per access x 10
+.equ PF_REGS,         VM_PERF_BASE + 0x140  # RG_COUNT x u32: bus controller, cache, timer 4, builds
+.equ PF_TOTS,         VM_PERF_BASE + 0x180  # 2 x TR_LEN: the whole game, per blit mode (the windows closed)
+.equ TR_PH,           0x00           #   PH_COUNT x u32: ms per phase
+.equ TR_FRAMES,       0x20           #   frames
+.equ TR_MAX,          0x24           #   the longest frame, us
+.equ TR_PX,           0x28           #   LCD pixels the blits wrote
+.equ TR_RUN,          0x2C           #   ms of frames (windows less loads and pauses)
+.equ TR_ASKED,        0x30           #   the yields asked, ms
+.equ TR_WINDOWS,      0x34           #   windows
+.equ TR_LEN,          0x40
+.equ PF_PART,         VM_PERF_BASE + 0x200  # 2 modes x 10 parts x PR_LEN: per blit mode, per part 0x3E80..0x3E89
+.equ PR_FRAMES,       0x00           #   frames
+.equ PR_MAX,          0x04           #   the longest frame, us
+.equ PR_SUM,          0x08           #   PH_COUNT x u32: us per phase (wraps after 71 min)
+.equ PR_LEN,          0x28
+.equ PR_SET,          10 * PR_LEN    #   one mode's ten parts
+.equ PF_PAL,          VM_PERF_BASE + 0x520  # 16 x u16: the palette the LCD shows
+.equ PF_DIGITS,       VM_PERF_BASE + 0x560  # 32 bytes: FmtNum's scratch
+.equ PF_PAIR,         VM_PERF_BASE + 0x600  # 256 x u32: two pixels' RGB565 for a pair of colour indices
+.equ PF_TEXT,         VM_PERF_BASE + 0xA00  # 64 bytes: a line of the overlay
+.equ PF_ITEMS,        VM_PERF_BASE + 0xA40  # the speed help page's items (help.s format), 24 x 12 bytes + end
+.equ PF_LINES,        VM_PERF_BASE + 0xB80  # ... and their text, 24 x 48 bytes, to the block's end
+.equ PF_LINE_LEN,     48
+.equ PFD_START,       1              # PF_DAMAGE reasons: nothing shown yet
+.equ PFD_BAR,         2              #   the load bar was drawn in the border
+.equ PFD_OVERLAY,     4              #   the overlay went off
+.equ PFD_SENTINEL,    8              #   a sentinel pixel was not as drawn
+.equ PFD_PERIODIC,    0x10           #   the safety repaint
+.equ PFD_STOP,        0x20           #   the stop screen
+.equ PFD_MODE,        0x40           #   the blit mode switched
+.equ PFD_LOAD,        0x80           #   5 and 30 frames after a part's load (the firmware repaints its own
+                                     #   screen around the loads: probes/cnv/README.md, "Speed")
+.equ POSTLOAD_FRAMES, 30
+.equ REPAINT_FRAMES,  500            # a full repaint at least this often (frames)
+# the benchmark (perf.s PerfBench): ns per access x 10, in PF_BENCH
+.equ BN_ALU,          0              # a register add (the loop's cost per access included)
+.equ BN_LCD_W16,      1              # 16-bit store into the LCD frame (the top border rows)
+.equ BN_LCD_W32,      2              # 32-bit store into the LCD frame
+.equ BN_LCD_R16,      3              # 16-bit load from the LCD frame
+.equ BN_RAM_W8,       4              # 8-bit store, work RAM (cached view), 64,000 bytes in a row
+.equ BN_RAM_W32,      5              # 32-bit store, work RAM
+.equ BN_RAM_R8,       6              # 8-bit load, work RAM
+.equ BN_RAM_R32,      7              # 32-bit load, work RAM
+.equ BN_UNC_R32,      8              # 32-bit load, work RAM through its uncached view (+0x40000000)
+.equ BN_COUNT,        9
+.equ RG_COUNT,        14             # PF_REGS: MEMCTR0-7 (0x32000020-2E), 0x32000040, 0x32000042,
+                                     # CHCTR 0x20000070, TM4MD, TM4BR, the program build

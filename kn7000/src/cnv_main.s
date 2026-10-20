@@ -58,6 +58,10 @@ AppName:                            # AH_NAME: 32 bytes, NUL-padded
 .equ CV_TASK_ID,   CNV_VARS + 0x1C  # the game task's id (0 = none)
 .equ CV_FAILCALLS, CNV_VARS + 0x20  # calls since failing, when EXIT cannot be read
 .equ CV_ENDED,     CNV_VARS + 0x30  # we answered 0xFE: the next call is "Continue Next?" -> YES
+.equ CV_REPORT,    CNV_VARS + 0x34  # AWPERF.TXT at quit: 0 not yet, 1 written, 2 not written (none or failed)
+.equ CV_REPORT_N,  CNV_VARS + 0x38  # what the last file call of the report returned (bytes, or < 0)
+.equ CV_REPORT_K,  CNV_VARS + 0x3C  # the report's file: AWPERFk.TXT (0-9), or 10 when all ten exist
+.equ CV_NAME,      CNV_VARS + 0x180 # 16 bytes: that name
 .equ LD_REQ,       CNV_VARS + 0x40  # the part id the game task waits for (written by the game task)
 .equ LD_CUR,       CNV_VARS + 0x44  # the part id whose files are resident (0 while one loads)
 .equ LD_PART,      CNV_VARS + 0x48  # the part id being loaded
@@ -165,6 +169,7 @@ ce_run:
     mov     d0, (CV_TASK_DONE)
     mov     d0, (CV_EXIT_T0)
     mov     d0, (LD_FAILED)
+    mov     d0, (CV_REPORT)
     call    StartTask, 0, 0
 ce_load:                            # a part the game task waits for: one of its files per call
     mov     (LD_REC), d0
@@ -272,6 +277,18 @@ ce_answer:
     mov     (CV_TASK_DONE), d0
     cmp     0, d0
     beq     ce_park                 # wait for the game task to leave first
+    mov     (CV_REPORT), d0         # the speed report, once, before the end (perf.s ReportBuild)
+    cmp     0, d0
+    bne     ce_end
+    mov     2, d0
+    mov     d0, (CV_REPORT)
+    mov     (CV_TASK_ID), d0        # (not when the game never ran)
+    cmp     0, d0
+    beq     ce_end
+    call    ReportWrite, 0, 0
+    bra     ce_park                 # one call more: the next one ends
+ce_end:
+    mov     MAILBOX, a0
     mov     0xFE, d0                # done: hand the instrument back
     movbu   d0, (a0)
     mov     1, d0
@@ -369,6 +386,8 @@ DLY_TSK:
     mov     (FW_DLY), a0
     jmp     (a0)                    # tail call: it returns to our caller
 dq_quit:
+    add     -0x10, sp               # (a frame: it never returns)
+    call    PerfWindowEnd, 0, 0     # the figures so far, into the game's (AWPERF.TXT)
     mov     1, d1
     mov     d1, (CV_TASK_DONE)
     mov     (FW_EXD), a0
@@ -390,6 +409,9 @@ EnsurePart:
     cmp     d2, d1
     beq     ep_ret
     mov     d2, (LD_REQ)
+    mov     PH_LOAD, d0             # not part of any frame (perf.s)
+    call    PerfPhase, 0, 0
+    mov     d0, (0x10, sp)
 ep_wait:
     mov     20, d0
     mov     DLY_TSK, a1
@@ -400,6 +422,10 @@ ep_wait:
     mov     (LD_CUR), d1
     cmp     d2, d1
     bne     ep_wait
+    mov     POSTLOAD_FRAMES, d0     # the firmware repaints its own screen around a load: repaint
+    mov     d0, (PF_POSTLOAD)       # everything a few frames on (perf.s), besides the load bar's
+    mov     (0x10, sp), d0
+    call    PerfPhase, 0, 0
 ep_ret:
     ret     [d2,d3,a2,a3], 0x30
 ep_fail:
@@ -745,10 +771,13 @@ le_count:
     rets
 
 # Progress(d0 = done, d1 = total): a white bar along the LCD's bottom rows, 600 * done / total
-# pixels (the black border; the game's next blit clears it).
+# pixels (the black border; the game's next blit repaints it: PF_DAMAGE).
 Progress:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    mov     (PF_DAMAGE), d2
+    or      PFD_BAR, d2
+    mov     d2, (PF_DAMAGE)
     cmp     0, d1
     beq     pg_done
     mov     d1, d2
@@ -775,6 +804,78 @@ pg_px:
     bne     pg_row
 pg_done:
     ret     [d2,d3,a2,a3], 0x20
+
+# ReportWrite: the speed figures (perf.s ReportBuild) into a new file in the SD card's root folder,
+# AWPERF0.TXT .. AWPERF9.TXT, the first of those names that does not exist yet (it never writes over a
+# file: each one is tried with an "rb" open first, which fails for a missing file, as a missing game
+# file's does), the way the ROM dumper writes its files on the owner's unit (technics-roms-disasm
+# cnv_romdump: DUMPLIST.TXT): the drive switch to the card, open "wb" (an 8.3 name, relative to C:\
+# around every converter call), one write, close, the drive switch back. Only when the loader found a
+# write routine (FW_WRITE); on the main task, once per quit, after the game task has ended. When all
+# ten names exist it writes nothing. CV_REPORT, CV_REPORT_N and CV_REPORT_K say how it went.
+ReportWrite:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     (FW_WRITE), d0
+    cmp     0, d0
+    beq     rw_ret
+    call    ReportBuild, 0, 0       # d0 = its length, in REPORT_BUF
+    mov     d0, d2
+    cmp     REPORT_MAX, d0
+    bhi     rw_ret
+    mov     1, d0                   # the file layer to the SD card
+    mov     (FW_SETEXT), a3
+    calls   (a3)
+    clr     d3                      # AWPERFk.TXT, k = d3
+rw_name:
+    mov     d3, (CV_REPORT_K)
+    cmp     10, d3
+    bcc     rw_back                 # all ten exist: nothing written
+    mov     report_name, a1     # the name, k in it
+    mov     CV_NAME, a0
+    call    StrPut, 0, 0
+    clr     d0
+    movbu   d0, (a0)
+    mov     d3, d0
+    add     0x30, d0
+    movbu   d0, (CV_NAME + 6)
+    mov     CV_NAME, a0             # does it exist?
+    mov     mode_rb, a1
+    mov     (FW_OPEN), a3
+    calls   (a3)
+    exth    d0
+    cmp     0, d0
+    blt     rw_new
+    mov     (FW_CLOSE), a3          # it does: the next name
+    calls   (a3)
+    inc     d3
+    bra     rw_name
+rw_new:
+    mov     CV_NAME, a0
+    mov     mode_wb, a1
+    mov     (FW_OPEN), a3
+    calls   (a3)
+    exth    d0
+    mov     d0, (CV_REPORT_N)
+    cmp     0, d0
+    blt     rw_back
+    mov     REPORT_BUF, a0
+    mov     d2, d0
+    mov     (FW_WRITE), a3
+    calls   (a3)                    # d0 = bytes written
+    mov     d0, (CV_REPORT_N)
+    mov     d0, d3
+    mov     (FW_CLOSE), a3
+    calls   (a3)
+    cmp     d2, d3
+    bne     rw_back
+    mov     1, d0
+    mov     d0, (CV_REPORT)
+rw_back:
+    mov     (FW_RESETEXT), a3       # the file layer back, as the firmware expects between calls
+    calls   (a3)
+rw_ret:
+    ret     [d2,d3,a2,a3], 0x30
 
 # =================================================================================
 # BkUnpack(a0 = packed data, d0 = packed size, a1 = destination, d1 = unpacked size) -> d0 = crc
@@ -960,6 +1061,10 @@ gb_have:
     .align  2
 mode_rb:
     .asciz  "rb"
+mode_wb:
+    .asciz  "wb"
+report_name:
+    .asciz  "AWPERF0.TXT"           # ReportWrite's names: the digit is k
 msg_play:
     .asciz  "HOLD EXIT TO QUIT"
 msg_load:
@@ -977,5 +1082,6 @@ msg_fw_n:
 .include "vm.s"
 .include "interp.s"
 .include "help.s"
+.include "perf.s"
 .include "awpart_tab.s"             # generated: PartLists, GlobalList, ResPacked, ResType, file names
 cnv_image_end:                      # tools/cnv_layout.py: must lie below IMAGE_END_MAX

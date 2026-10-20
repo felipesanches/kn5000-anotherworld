@@ -49,6 +49,8 @@ Hook:
     mov     d0, (FWV_MIDIIN1)
     mov     MIDIOUT1_TXQ, d0
     mov     d0, (FWV_MIDIOUT1)
+    mov     942, d0                 # the program build, for the help screen
+    mov     d0, (FWV_BUILD)
     call    StartTask, 0, 0
 hk_resume:
     mov     (0x10, sp), d0
@@ -396,4 +398,5 @@ aw_mode:
 .include "vm.s"
 .include "interp.s"
 .include "help.s"
+.include "perf_stub.s"              # no speed measurement in this build (perf.s is KN7APP.BIN's)
 .include "awres_tab.s"              # generated: ResAddr, ResSize, ResType

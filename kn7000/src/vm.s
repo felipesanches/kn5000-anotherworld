@@ -102,7 +102,8 @@ dp_ret:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
-# DrawSpanN: flat-colour span on CUR_LINE from min(X1,X2) to max(X1,X2), DRAW_COLOR.
+# DrawSpanN: flat-colour span on CUR_LINE from min(X1,X2) to max(X1,X2), DRAW_COLOR. A span of 8 or more
+# is written 4 bytes at a time between its unaligned ends (the same bytes: fewer stores to RAM).
 DrawSpanN:
     movm    [d2,d3,a2,a3], (sp)
     add     -8, sp
@@ -130,16 +131,40 @@ dn_max:
     mov     (CUR_LINE), a2
     add     d2, a2
     movbu   (DRAW_COLOR), d1
+    cmp     8, d0
+    bcs     dn_loop                 # short: a byte at a time
+dn_head:
+    mov     a2, d2                  # up to a word boundary
+    and     3, d2
+    beq     dn_words
+    movbu   d1, (a2)
+    inc     a2
+    add     -1, d0
+    bra     dn_head
+dn_words:
+    mov     0x01010101, d2
+    mul     d1, d2                  # the colour in all four bytes
+    mov     d0, d3
+    lsr     2, d3
+dn_wloop:
+    mov     d2, (a2)
+    add     4, a2
+    add     -1, d3
+    bne     dn_wloop
+    and     3, d0                   # what is left
+    beq     dn_done
 dn_loop:
     movbu   d1, (a2)
     inc     a2
     add     -1, d0
     bne     dn_loop
+dn_done:
     ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================
 # DrawSpanP: copy a span from PAGE_BITMAP_0 to CUR_LINE (drawLineP: "transparent to
-# the background" segments copy the backdrop page through).
+# the background" segments copy the backdrop page through). Both rows lie at the same offset in their
+# 0x10000-aligned pages, so a span of 8 or more is copied 4 bytes at a time between its ends.
 DrawSpanP:
     movm    [d2,d3,a2,a3], (sp)
     add     -8, sp
@@ -174,6 +199,30 @@ dpn_max:
     mov     PAGE_BITMAP_0, a2
     add     d0, a2
     add     d2, a2                  # src = page0 + HLINEY*320 + xmin
+    cmp     8, d3
+    bcs     dpn_loop                # short: a byte at a time
+dpn_head:
+    mov     a3, d0                  # up to a word boundary (the same for both)
+    and     3, d0
+    beq     dpn_words
+    movbu   (a2), d0
+    movbu   d0, (a3)
+    inc     a2
+    inc     a3
+    add     -1, d3
+    bra     dpn_head
+dpn_words:
+    mov     d3, d2
+    lsr     2, d2
+dpn_wloop:
+    mov     (a2), d0
+    mov     d0, (a3)
+    add     4, a2
+    add     4, a3
+    add     -1, d2
+    bne     dpn_wloop
+    and     3, d3                   # what is left
+    beq     dpn_done
 dpn_loop:
     movbu   (a2), d0
     movbu   d0, (a3)
@@ -181,10 +230,12 @@ dpn_loop:
     inc     a3
     add     -1, d3
     bne     dpn_loop
+dpn_done:
     ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================
-# DrawSpanBlend: blend a span in place -- pixel = (pixel & 7) | 8 (half-bright).
+# DrawSpanBlend: blend a span in place -- pixel = (pixel & 7) | 8 (half-bright); a span of 8 or more 4
+# pixels at a time between its ends.
 DrawSpanBlend:
     movm    [d2,d3,a2,a3], (sp)
     add     -8, sp
@@ -212,6 +263,32 @@ db_max:
     mov     d0, d3
     mov     (CUR_LINE), a3
     add     d2, a3
+    cmp     8, d3
+    bcs     db_loop                 # short: a byte at a time
+db_head:
+    mov     a3, d0                  # up to a word boundary
+    and     3, d0
+    beq     db_words
+    movbu   (a3), d0
+    and     7, d0
+    or      8, d0
+    movbu   d0, (a3)
+    inc     a3
+    add     -1, d3
+    bra     db_head
+db_words:
+    mov     d3, d2
+    lsr     2, d2
+db_wloop:
+    mov     (a3), d0
+    and     0x07070707, d0
+    or      0x08080808, d0
+    mov     d0, (a3)
+    add     4, a3
+    add     -1, d2
+    bne     db_wloop
+    and     3, d3                   # what is left
+    beq     db_done
 db_loop:
     movbu   (a3), d0
     and     7, d0
@@ -220,6 +297,7 @@ db_loop:
     inc     a3
     add     -1, d3
     bne     db_loop
+db_done:
     ret     [d2,d3,a2,a3], 0x18
 
 # ================================================================================

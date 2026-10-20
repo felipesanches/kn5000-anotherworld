@@ -59,18 +59,19 @@
 # vm.s GuardPage) refuses a computed one outside [AW_LO, AW_HI) or on the mailbox page.
 .equ AW_LO,           APP_BASE      # every byte the game writes is in [AW_LO, AW_HI) ...
 .equ AW_HI,           0x5037A000    # ... (0x5037A000 on holds boot data) minus the mailbox page
-.equ IMAGE_END_MAX,   0x502BE000    # KN7APP.BIN itself (header, code, tables) must end before this
-.equ AW_FONT,         0x502BE000    # anotherworld_chargen.rom, 768 bytes
-.equ AW_STRIDX,       0x502BE300    # str_index.rom, 2048 bytes
-.equ AW_STRDAT,       0x502BEB00    # str_data.rom, 4096 bytes, to 0x502BFAFF
+.equ IMAGE_END_MAX,   0x502C0000    # KN7APP.BIN itself (header, code, tables) must end before this
 .equ CNV_VARS,        0x502C0000    # the application's entry and part loader's variables (cnv_main.s)
 .equ FW_VARS,         0x502C0400    # what fwfind.s found (below), then its scratch from +0x40
 .equ VM_POLY_BASE,    0x502C1000    # vm.inc: rasterizer scratch, 0x200 bytes
 .equ VM_INTERP_BASE,  0x502C2000    # vm.inc: the interpreter, 0x1100 bytes
 .equ VM_MISC_BASE,    0x502C4000    # vm.inc: the rest, 0x1400 bytes
 .equ RES_TAB,         0x502C6000    # u32 per resource id: where it is resident now (0 = not)
+.equ VM_PERF_BASE,    0x502C7000    # vm.inc: the speed measurement and the blit's tables, 0x1000 bytes
 .equ HELP_BUF,        0x502C8000    # 64,000 bytes: help pages, the stop screen, and the buffer a
 .equ BITMAP_BUF,      HELP_BUF      #   packed bitmap is unpacked into before LoadBitmap draws it
+.equ AW_FONT,         0x502D8000    # anotherworld_chargen.rom, 768 bytes
+.equ AW_STRIDX,       0x502D8300    # str_index.rom, 2048 bytes
+.equ AW_STRDAT,       0x502D8B00    # str_data.rom, 4096 bytes, to 0x502D9AFF
 .equ VIDEO2_AT,       0x502E8000    # the shared polygons (resource 0x11, 25,108 bytes), loaded once
 .equ PART_AREA,       0x502EE400    # the current part's palette, bytecode, polygons, bitmaps
 .equ PART_END,        0x5031B000    #   (largest part, the city: 164,407 bytes; aw_extract.py --parts)
@@ -78,6 +79,9 @@
 .equ PAGE_BITMAP_1,   0x50330000
 .equ PAGE_BITMAP_2,   0x50340000
 .equ PAGE_BITMAP_3,   0x50350000    # to 0x5035F9FF
+.equ SHADOW,          0x50360000    # 64,000 bytes: the page as the LCD shows it now (display.s BlitPage)
+.equ REPORT_BUF,      0x50370000    # 8 KB: the text of AWPERF.TXT, written to the SD card at quit (cnv_main.s)
+.equ REPORT_MAX,      0x2000
 .equ PAGE_SIZE,       AW_W*AW_H
 
 # ---- task ------------------------------------------------------------------------
@@ -109,6 +113,7 @@
 .equ FW_EXD,          FW_VARS + 0x18   # exd_tsk(): exit and delete the calling task
 .equ FW_SETEXT,       FW_VARS + 0x1C   # SetExtMode(d0 = 1): the file layer to the SD card (or a no-op)
 .equ FW_RESETEXT,     FW_VARS + 0x20   # ResetExtMode: back to the floppy, as the firmware expects (or a no-op)
+.equ FW_WRITE,        FW_VARS + 0x24   # write(a0 = buffer, d0 = bytes) -> d0 = bytes written (0: none; AWPERF.TXT only)
 .equ FILE_PIECE,      0x4000           # a file is read in pieces of this size, as the loader reads KN7APP.BIN
 # The RAM addresses the shared VM reads (the ms counter, the panel bitmaps, the MIDI rings) go to
 # vm.inc's FWV_* variables.

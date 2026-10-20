@@ -1,8 +1,8 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# The help screens (HELP button), after the KN5000 port's HELP_SCREEN: the game pauses and three
-# pages show the controls and the fifteen level codes. PAGE UP / PAGE DOWN turn the pages; EXIT,
+# The help screens (HELP button), after the KN5000 port's HELP_SCREEN: the game pauses and four
+# pages show the controls, the fifteen level codes and the speed figures (perf.s PerfPageBuild). PAGE UP / PAGE DOWN turn the pages; EXIT,
 # HELP again, or any game control returns to the game once everything is released.
 
 # ================================================================================
@@ -12,6 +12,9 @@
 HelpScreen:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    mov     PH_PAUSE, d0            # not part of any frame (perf.s)
+    call    PerfPhase, 0, 0
+    mov     d0, d3                  # the phase to go back to
     mov     palette, a0             # save the game's palette, install the help colours
     mov     HELP_PAL_SAVE, a1
     call    hs_copy_pal, 0, 0
@@ -73,13 +76,14 @@ hs_page_wait:                       # wait for PAGE UP / DOWN to be released
     call    BlitPage, 0, 0          # the screen for the button press
     bra     hs_poll
 hs_idle:                            # nothing pressed: re-show the page every HELP_REFRESH
-    mov     (HELP_TICK), d0         # polls, in case the firmware repainted the screen
-    inc     d0
+    mov     (HELP_TICK), d0         # polls, in case the firmware repainted the screen (the blit
+    inc     d0                      # writes only what the sentinels find changed)
     mov     d0, (HELP_TICK)
     cmp     HELP_REFRESH, d0
     blt     hs_poll
     clr     d0
     mov     d0, (HELP_TICK)
+    call    PerfSentinels, 0, 0
     mov     HELP_BUF, a0
     call    BlitPage, 0, 0
     bra     hs_poll
@@ -101,6 +105,11 @@ hs_exit:                            # wait until every control is released
     call    hs_copy_pal, 0, 0
     mov     (CUR_PAGE_2), a0
     call    BlitPage, 0, 0
+    mov     (PF_STATE), d0          # PAGE UP / DOWN pressed in here are not the game's
+    or      6, d0
+    mov     d0, (PF_STATE)
+    mov     d3, d0
+    call    PerfPhase, 0, 0
     ret     [d2,d3,a2,a3], 0x20
 
 # hs_copy_pal(a0 = from, a1 = to): copy a 16-entry RGB565 palette (32 bytes). Leaf.
@@ -174,6 +183,11 @@ hd_clear:
     mov     HELP_BUF, a0
     mov     a0, (CUR_PAGE_1)
     mov     (HELP_PAGE_NO), d0
+    cmp     3, d0                   # the speed page: its text, now
+    bne     hd_page
+    call    PerfPageBuild, 0, 0
+hd_page:
+    mov     (HELP_PAGE_NO), d0
     asl     2, d0
     mov     help_pages, a0
     add     d0, a0
@@ -225,7 +239,7 @@ help_palette:
     .word   0x0000, 0xFFFF, 0x055F, 0xFFE0
     .word   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 help_pages:
-    .long   help_page0, help_page1, help_page2
+    .long   help_page0, help_page1, help_page2, PF_ITEMS
 
 help_page0:
     .word   108, 8, 2, 0
@@ -402,9 +416,9 @@ hs_page:         .asciz "PAGE"
 hs_page_btn:     .asciz "PAGE UP / PAGE DOWN"
 hs_exit_lbl:     .asciz "EXIT"
 hs_exit_btn:     .asciz "EXIT, or any game control"
-hs_page_1:       .asciz "Page 1/3"
-hs_page_2:       .asciz "Page 2/3"
-hs_page_3:       .asciz "Page 3/3"
+hs_page_1:       .asciz "Page 1/4"
+hs_page_2:       .asciz "Page 2/4"
+hs_page_3:       .asciz "Page 3/4"
 hs_level_codes:  .asciz "LEVEL CODES:"
 hs_level_codes2: .asciz "LEVEL CODES (cont.):"
 hs_c1:           .asciz "LDKD"

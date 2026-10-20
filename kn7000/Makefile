@@ -44,7 +44,7 @@ $(RES_OUT)/awres.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
 # The SP7001 build lives in CS1 (IC23) and the TPAD pool: tools/ic23_guard.py must FIND that (were it
 # ever to call this build clean, the check itself would be broken), and the build goes on only with
 # MAME_ONLY=1.
-build/another.bin: src/main.s src/display.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py tools/ic23_guard.py
+build/another.bin: src/main.s src/display.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s src/perf_stub.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py tools/ic23_guard.py
 	@mkdir -p build
 	@if $(PYTHON) -I tools/ic23_guard.py $(DISASM_REPO)/tools src/main.s -I src -I $(RES_OUT) > build/another.guard; then \
 	  echo "ic23_guard calls the SP7001 build clean, which it is not: the guard is broken"; exit 1; fi
@@ -97,7 +97,7 @@ FLOPPY_SHA1   := b7a67de602694fd2257d59ce4509ca154b0b3064
 # The published overlay build (program 941 is its default KN7000 BIOS; -bios v13 is program 893, the owner's).
 MAME941     ?= ../../kn7000-emulator/run.sh
 SD941       ?= ../../kn7000-emulator/sdcard_from_real_kn7000.img
-APP_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s
+APP_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s src/perf.s
 BIOS        ?= v13
 
 app: build/KN7APP.BIN

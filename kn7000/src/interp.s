@@ -100,11 +100,18 @@ ResPtr:
 # unpacks one here); a bitmap that is not there leaves page 0 alone.
 LoadBitmap:
     movm    [d2,d3,a2,a3], (sp)
-    add     -0x10, sp
+    add     -0x20, sp
+    mov     d0, d2
+    mov     PH_PAGE, d0
+    call    PerfPhase, 0, 0
+    mov     d0, (0x10, sp)
+    mov     d2, d0
     call    BitmapData, 0, 0        # d0 = id -> a0 = the 32,000 bytes of planes, or 0
     cmp     0, a0
     beq     lb_ret
     mov     a0, a2                  # a2 = next plane byte (the planes are consecutive)
+    mov     PAGE_BITMAP_0, a0
+    call    PerfMarkDirty, 0, 0
     mov     PAGE_BITMAP_0, a3
     mov     PAGE_SIZE / 4, d2
     clr     d0
@@ -175,7 +182,9 @@ lb_next:
     cmp     0x10, d3
     bne     lb_plane
 lb_ret:
-    ret     [d2,d3,a2,a3], 0x20
+    mov     (0x10, sp), d0
+    call    PerfPhase, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
 
 # ================================================================================
 # InitForPart(d0 = partId): make the part's resources resident (the platform's EnsurePart: a
@@ -422,24 +431,42 @@ ud_show:
 
 # ================================================================================
 # FillPage(d0 = pageId, d1 = colour): fill a page with one colour index.
+# The colour byte in all four bytes of a word, 8 words a turn (pages are 0x10000-aligned). Phase PAGE.
 FillPageOp:
     movm    [d2,d3,a2,a3], (sp)
-    add     -0x10, sp
+    add     -0x20, sp
     mov     d1, d3                  # save colour
+    mov     d0, d2
+    mov     PH_PAGE, d0
+    call    PerfPhase, 0, 0
+    mov     d0, (0x10, sp)
+    mov     d2, d0
     call    GetPagePtr, 0, 0        # d0 = pageId -> a0 = page
     call    GuardPage, 0, 0         # refuse a page pointer that is not a page
     cmp     0, d0
     bne     fpo_ret
+    call    PerfMarkDirty, 0, 0
     mov     a0, a2
     and     0xff, d3
-    mov     PAGE_SIZE, d2
+    mov     0x01010101, d0
+    mul     d0, d3                  # d3 = the colour, four times
+    mov     PAGE_SIZE / 32, d2
 fpo_loop:
-    movbu   d3, (a2)
-    inc     a2
+    mov     d3, (a2)
+    mov     d3, (4, a2)
+    mov     d3, (8, a2)
+    mov     d3, (12, a2)
+    mov     d3, (16, a2)
+    mov     d3, (20, a2)
+    mov     d3, (24, a2)
+    mov     d3, (28, a2)
+    add     32, a2
     add     -1, d2
     bne     fpo_loop
 fpo_ret:
-    ret     [d2,d3,a2,a3], 0x20
+    mov     (0x10, sp), d0
+    call    PerfPhase, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
 
 # ================================================================================
 # CopyPage(d0 = srcId, d1 = dstId): copy one page to another, matching Another World's
@@ -450,9 +477,13 @@ fpo_ret:
 # lost every scroll frame. Self-copies (src page == dst page) are a no-op.
 CopyPage:
     movm    [d2,d3,a2,a3], (sp)
-    add     -0x10, sp
+    add     -0x20, sp
     mov     d0, d2                  # srcId (raw; keep for the scroll-flag test)
-    mov     d1, d0                  # dstId
+    mov     d1, d3
+    mov     PH_PAGE, d0
+    call    PerfPhase, 0, 0
+    mov     d0, (0x10, sp)
+    mov     d3, d0                  # dstId
     call    GetPagePtr, 0, 0
     mov     a0, a3                  # a3 = dst base
     mov     d2, d0                  # srcId
@@ -465,6 +496,7 @@ CopyPage:
     call    GuardPage, 0, 0
     cmp     0, d0
     bne     cp_ret
+    call    PerfMarkDirty, 0, 0     # a0 = the destination
     # self-copy guard (matches the oracle's early returns)
     mov     a2, d0
     mov     a3, d1
@@ -485,13 +517,27 @@ CopyPage:
 cp_novscroll:
     cmp     0, d3
     bne     cp_scrolled
-    # plain full-page copy, 32-bit words (pages are 0x10000-aligned, PAGE_SIZE % 4 == 0)
-    mov     PAGE_SIZE/4, d2
+    # plain full-page copy, 32-bit words, 8 a turn (pages are 0x10000-aligned, PAGE_SIZE % 32 == 0)
+    mov     PAGE_SIZE/32, d2
 cp_loop:
     mov     (a2), d0
+    mov     (4, a2), d1
     mov     d0, (a3)
-    add     4, a2
-    add     4, a3
+    mov     d1, (4, a3)
+    mov     (8, a2), d0
+    mov     (12, a2), d1
+    mov     d0, (8, a3)
+    mov     d1, (12, a3)
+    mov     (16, a2), d0
+    mov     (20, a2), d1
+    mov     d0, (16, a3)
+    mov     d1, (20, a3)
+    mov     (24, a2), d0
+    mov     (28, a2), d1
+    mov     d0, (24, a3)
+    mov     d1, (28, a3)
+    add     32, a2
+    add     32, a3
     add     -1, d2
     bne     cp_loop
     bra     cp_ret
@@ -554,7 +600,9 @@ cp_sloop:
     add     -1, d2
     bne     cp_sloop
 cp_ret:
-    ret     [d2,d3,a2,a3], 0x20
+    mov     (0x10, sp), d0
+    call    PerfPhase, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
 
 # ================================================================================
 # ReadInput: feed KN7000 controls to the Another World hero variables.
@@ -570,6 +618,7 @@ cp_ret:
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    call    PerfInput, 0, 0         # PAGE UP: the speed overlay; PAGE DOWN: the blit mode (perf.s)
     mov     (FWV_PANEL), a0         # HELP: pause and show the help screens (help.s)
     movbu   (BTN_HELP_OFS, a0), d0
     and     BTN_HELP_BIT, d0
@@ -1014,7 +1063,10 @@ nt_loop:
     # Pace to the AW model: this frame should last var[0xFF] * SLICE_MS ms. Sleep only
     # the remainder after the work already done this frame (measured with the firmware's
     # 1 kHz counter, FWV_KERNEL_MS), clamped to [MIN_YIELD_MS, MAX_YIELD_MS] so the firmware always
-    # gets time and a bad slice count can't freeze us. Then stamp the next frame's start.
+    # gets time and a bad slice count can't freeze us. A frame that has overrun its time yields
+    # only MIN_YIELD_MS (2 ms; 8 before 2026-10-20, and still in the old blit mode): the firmware's
+    # tasks run when they are ready whatever the yield asks, and a longer one only spins. Then the
+    # frame's end for the speed figures (perf.s), and the next frame's start.
     mov     VAR_PAUSE_SLICES, d0
     call    ReadVar, 0, 0           # d0 = var[0xFF] (slice count)
     and     0xffff, d0
@@ -1025,16 +1077,29 @@ nt_loop:
     mov     (FRAME_START_MS), d2    # start of this frame
     sub     d2, d1                  # d1 = elapsed work ms
     sub     d1, d0                  # d0 = sleep_ms = target - elapsed
-    cmp     MIN_YIELD_MS, d0
+    mov     MIN_YIELD_MS, d1
+    mov     (PF_MODE), d2
+    cmp     0, d2
+    beq     nt_floor
+    mov     MIN_YIELD_OLD, d1
+nt_floor:
+    cmp     d1, d0
     bge     nt_minok
-    mov     MIN_YIELD_MS, d0
+    mov     d1, d0
 nt_minok:
     cmp     MAX_YIELD_MS, d0
     ble     nt_maxok
     mov     MAX_YIELD_MS, d0
 nt_maxok:
+    mov     d0, d2                  # the yield, kept across the measuring
+    mov     d0, (PF_ASKED)
+    mov     PH_WAIT, d0
+    call    PerfPhase, 0, 0
+    mov     d2, d0
     mov     DLY_TSK, a1
     calls   (a1)                    # yield sleep_ms to the firmware
+    call    PerfSentinels, 0, 0     # did the firmware draw on the LCD meanwhile? (perf.s)
+    call    PerfFrameEnd, 0, 0
     mov     (FWV_KERNEL_MS), a0
     mov     (a0), d0
     mov     d0, (FRAME_START_MS)    # next frame starts now (after the sleep)
@@ -1630,7 +1695,7 @@ OpDrawString:
     movbu   (3, a2), d2             # y (pixels)
     movbu   (4, a2), d3             # colour
     add     5, a2
-    call    DrawString, 0, 0
+    call    DrawStringTop, 0, 0
     bra     ei_end
 
 # ---- 0x13 SUB: var[dst] -= var[src] -------------------------------------------
@@ -1821,7 +1886,7 @@ o80_yok:
     mov     DRAW_DEPTH, a1
     mov     d3, (a1)
     mov     0xFF, d2                # colour = BLACK/embedded
-    call    ReadAndDrawPolygon, 0, 0
+    call    DrawPolyTop, 0, 0
     bra     ei_ret
 
 # ---- 0x40 ---------------------------------------------------------------------
@@ -1929,8 +1994,49 @@ o40_zoom_done:
     mov     DRAW_DEPTH, a1
     mov     d2, (a1)
     mov     0xFF, d2                # colour
-    call    ReadAndDrawPolygon, 0, 0
+    call    DrawPolyTop, 0, 0
     # reset CUR_VIDEO_DATA to CUR_VIDEO_1
     mov     (CUR_VIDEO_1), a0
     mov     a0, (CUR_VIDEO_DATA)
     bra     ei_ret
+
+# ================================================================================
+# The two drawing ops' entries, for the speed figures (perf.s) and the blit (display.s): phase DRAW
+# while they run, and the page they draw on (CUR_PAGE_1) marked as drawn on.
+# DrawPolyTop: ReadAndDrawPolygon's arguments (a0 = data, d0 = x, d1 = y, d2 = colour).
+DrawPolyTop:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     a0, (0x10, sp)
+    mov     d0, (0x14, sp)
+    mov     d1, (0x18, sp)
+    mov     PH_DRAW, d0
+    call    PerfPhase, 0, 0
+    mov     d0, d3                  # the phase to go back to
+    mov     (CUR_PAGE_1), a0
+    call    PerfMarkDirty, 0, 0
+    mov     (0x10, sp), a0
+    mov     (0x14, sp), d0
+    mov     (0x18, sp), d1
+    call    ReadAndDrawPolygon, 0, 0
+    mov     d3, d0
+    call    PerfPhase, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
+
+# DrawStringTop: DrawString's arguments (d0 = string id, d1 = x, d2 = y, d3 = colour).
+DrawStringTop:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     d0, (0x10, sp)
+    mov     d1, (0x14, sp)
+    mov     PH_DRAW, d0
+    call    PerfPhase, 0, 0
+    mov     d0, (0x18, sp)
+    mov     (CUR_PAGE_1), a0
+    call    PerfMarkDirty, 0, 0
+    mov     (0x10, sp), d0
+    mov     (0x14, sp), d1
+    call    DrawString, 0, 0        # keeps d2, d3
+    mov     (0x18, sp), d0
+    call    PerfPhase, 0, 0
+    ret     [d2,d3,a2,a3], 0x30

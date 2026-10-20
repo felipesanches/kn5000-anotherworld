@@ -22,6 +22,7 @@
 #   2 files   the loader's service table at SVC: magic "KN7S", the loader ABI this build was made for,
 #             file access found (FOUND_FILESIG or FOUND_TABLES), and an address for each of open, read,
 #             close and the drive switch pair                -> FW_OPEN, FW_READ, FW_CLOSE, FW_SETEXT, FW_RESETEXT
+#             (and, when the loader has them, write and the program build: FW_WRITE, FWV_BUILD)
 #   3 tasks   the firmware's own "mov N, d0; mov X, a0; call cre_tsk; mov N, d0; clr d1; call sta_tsk"
 #             sites with both targets in the library: at least two, all agreeing, each a kernel entry
 #             stub ("add -4, sp; mov d1, (0, sp)")                               -> FW_CRE, FW_STA
@@ -189,6 +190,10 @@ fw_files:
     cmp     0, d0
     beq     fw_no
     mov     d0, (FW_RESETEXT)
+    mov     (SVC+SV_WRITE), d0      # optional: the speed report AWPERF.TXT at quit (0: not written)
+    mov     d0, (FW_WRITE)
+    mov     (SVC+SV_BUILD), d0      # optional: the program build, for the speed figures
+    mov     d0, (FWV_BUILD)
     bra     fw_yes
 
 # ---- 3: cre_tsk and sta_tsk, from the firmware's own call sites ----------------------------------

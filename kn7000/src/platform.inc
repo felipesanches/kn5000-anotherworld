@@ -76,6 +76,8 @@
 .equ VM_INTERP_BASE,  0x44070000
 .equ VM_MISC_BASE,    0x44080000
 .equ HELP_BUF,        0x44140000    # 64000 bytes (the pages end at 0x44140000)
+.equ SHADOW,          0x44150000    # 64000 bytes: the page as the LCD shows it now (display.s BlitPage)
+.equ VM_PERF_BASE,    0x44160000    # vm.inc: the speed measurement and the blit's tables, 0x1000 bytes
 .equ AW_FONT,         0x44480000    # anotherworld_chargen.rom, 768 bytes (8x8, chars 0x20+)
 .equ AW_STRIDX,       0x44490000    # str_index.rom, 2048 bytes (LE u16 offset per string id)
 .equ AW_STRDAT,       0x444A0000    # str_data.rom, 4096 bytes (NUL-terminated strings)

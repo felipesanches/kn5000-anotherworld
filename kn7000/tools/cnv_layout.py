@@ -54,7 +54,7 @@ for name, a, b, _ in loader:
 if lsize and lsize > C["LOADER_VARS"] - 0x100 - C["CNV_BASE"]:
     problems.append(f"the loader's image ({lsize} bytes) reaches its line buffer")
 # the vm.inc blocks: their fields' offsets, from the .equ lines
-BLOCKS = {"VM_POLY_BASE": 0x200, "VM_INTERP_BASE": 0x1100, "VM_MISC_BASE": 0x1400}
+BLOCKS = {"VM_POLY_BASE": 0x200, "VM_INTERP_BASE": 0x1100, "VM_MISC_BASE": 0x1400, "VM_PERF_BASE": 0x1000}
 for line in open(vminc):
     m = re.match(r"\s*\.equ\s+(\w+)\s*,\s*(VM_\w+_BASE)\s*\+\s*(0x[0-9A-Fa-f]+)", line)
     if m and int(m.group(3), 16) >= BLOCKS[m.group(2)]:
@@ -90,10 +90,15 @@ regions = [  # name, start, end, what
     ("VM_MISC_BASE", L["VM_MISC_BASE"], L["VM_MISC_BASE"] + BLOCKS["VM_MISC_BASE"],
      "input, help, guard, note trackers"),
     ("RES_TAB", L["RES_TAB"], L["RES_TAB"] + 4 * 146, "where each resource is now"),
+    ("VM_PERF_BASE", L["VM_PERF_BASE"], L["VM_PERF_BASE"] + BLOCKS["VM_PERF_BASE"],
+     "speed figures, the blit's palette and pixel pairs"),
     ("HELP_BUF", L["HELP_BUF"], L["HELP_BUF"] + 64000, "help pages, stop screen, bitmap unpacking"),
     ("VIDEO2_AT", L["VIDEO2_AT"], L["PART_AREA"], "the shared polygons (0x11)"),
     ("PART_AREA", L["PART_AREA"], L["PART_END"], "the current part's files"),
-] + [(f"PAGE_BITMAP_{k}", L[f"PAGE_BITMAP_{k}"], L[f"PAGE_BITMAP_{k}"] + 64000, f"VM page {k}") for k in range(4)]
+] + [(f"PAGE_BITMAP_{k}", L[f"PAGE_BITMAP_{k}"], L[f"PAGE_BITMAP_{k}"] + 64000, f"VM page {k}") for k in range(4)] + [
+    ("SHADOW", L["SHADOW"], L["SHADOW"] + 64000, "the page as the LCD shows it (the blit)"),
+    ("REPORT_BUF", L["REPORT_BUF"], L["REPORT_BUF"] + L["REPORT_MAX"], "the text of AWPERF.TXT"),
+]
 lo, hi, mb, mbe = L["AW_LO"], L["AW_HI"], L["MAILBOX_PAGE"], L["MAILBOX_PAGE_END"]
 for name, a, b, _ in regions:
     if a < lo or b > hi:
