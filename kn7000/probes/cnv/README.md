@@ -57,8 +57,27 @@ and used only from a copy, deleted afterwards):
     probes/cnv/run_cnv_tests.sh $T ic23 v13 $T/owner-ic23.bin owner
     rm -f -- $T/owner-ic23.bin
 
-**Results (2026-10-20, through the loader: `KN7APP.BIN` `b952c2aa...`, the loader floppy `b7a67de6...`,
-overlay binary md5 `2a8e2fce...`):**
+**Results for the speed build (2026-10-20, `KN7APP.BIN` `26aabecb...`, the loader floppy `b7a67de6...`,
+overlay binary md5 `2a8e2fce...`; a copy of the emulator, `EMU`):**
+
+| case                 | session  | report                        | ic23w | same                      | accepted          | pools               | area  | loader |
+|----------------------|----------|-------------------------------|-------|---------------------------|-------------------|---------------------|-------|--------|
+| `ic23 v13 ... blank` | 18 of 18 | AWPERF0, AWPERF1 (2335, 1801) | clean | identical, checksum valid | valid, store kept | identical, no write | clean | clean  |
+| `ic23 v13 ... owner` | 18 of 18 | AWPERF0, AWPERF1 (2335, 1801) | clean | identical, checksum valid | valid, store kept | identical, no write | clean | clean  |
+| `ic23 v16 ... blank` | 18 of 18 | AWPERF0, AWPERF1 (2335, 1801) | clean | identical, checksum valid | valid, store kept | identical, no write | clean | clean  |
+
+`guard`: clean with "11 load(s) from the loader's service table" (the write routine and the program
+build added); "src/main.s: 798 reference(s)"; `cnv_layout: ok`. The saved game IC23s are the same as
+before, SHA-1 prefixes `eb26c67b...` (893 blank), `14f82423...` (893 owner), `bc2305dd...` (941 blank),
+equal to the control runs'; so writing `AWPERF0.TXT` and `AWPERF1.TXT` to the card changed nothing that
+is kept in IC23 or the pools. The `speed` check in all three: the speed page shown, the overlay on and
+off, the old blit and back with the VM running on, IC23's live settings unchanged by PAGE UP and PAGE
+DOWN. The game's RAM saw "loads 326936, SD reads 474104" foreign-but-expected writes (the loader zeroing
+and loading a larger `KN7APP.BIN`), none foreign. The summaries: research-scratch
+`sessions/2026-10-20_aw-perf/acceptance_summary_26aabecb.txt` and `session_*.txt`.
+
+**Results for the build before (2026-10-20, through the loader: `KN7APP.BIN` `b952c2aa...`, the loader
+floppy `b7a67de6...`, overlay binary md5 `2a8e2fce...`):**
 
 | case                 | session  | ic23w | same                      | accepted          | pools               | area  | loader |
 |----------------------|----------|-------|---------------------------|-------------------|---------------------|-------|--------|
@@ -245,7 +264,10 @@ time a tick of the intro took 45.9 ms on average, from 122.7 (the bytecode asks 
 | LCD = the old blit's picture, per tick | 3601 of 3601        | 3600 of 3601: tick 2612, the firmware painting, put right at 2613 |
 | LCD snapshots every 100 ticks          | -                   | 37 of 37 byte-identical to the old build's                        |
 
-The one tick: while the firmware was repainting its text screen (above), 5,347 pixels showed its
+The intro's page checksums of the new build: research-scratch
+`sessions/2026-10-20_aw-perf/intro_checksums_kn7app_26aabecb.log` (`awcnv_cksum.lua` through
+`run_perf.sh`, then `cksum_pages.py` and `compare_frames.py` as above). The one tick: while the firmware
+was repainting its text screen (above), 5,347 pixels showed its
 painting at the check; one sentinel pixel caught it after the next yield and the next blit repainted
 everything. An earlier version with 16 sentinels and no repaints after a load (`c1fd72bc`) missed the
 same painting in the border for 500 ticks, until the periodic repaint; hence the 47 sentinels read
@@ -269,6 +291,7 @@ figures will say what matters.)
       probes/cnv/run_perf.sh $T/fin-lcd probes/cnv/awcnv_lcd.lua           # the same for the old build
     for f in $T/fin-lcd/lcd_*.bin; do cmp $f $T/base-lcd/$(basename $f); done
     probes/cnv/run_perf.sh $T/fin-speed probes/cnv/awcnv_speed.lua
+    AWCK_BIN=$T/fin-ck/pages.bin AWCK_IDX=$T/fin-ck/pages.idx probes/cnv/run_perf.sh $T/fin-ck probes/cnv/awcnv_cksum.lua
 
 The acceptance tests (above) gained two checks for this build: `speed` (the speed page, the overlay on
 and off, the old blit and back with the VM running, IC23's header unchanged) and `report` (the first
