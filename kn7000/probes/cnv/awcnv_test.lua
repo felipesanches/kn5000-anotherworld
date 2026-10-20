@@ -19,6 +19,13 @@
 --            each press (it still handles OCTAVE and SUSTAIN while parked) is listed
 --   keybed   holding C4 sets the hero's action variable var[0xFA] to 1
 --   help     HELP shows the help screens (the VM pauses), PAGE DOWN turns to page 2, EXIT returns
+--   speed    the speed figures (perf.s): HELP and PAGE DOWN three times show the fourth page; PAGE UP
+--            turns the overlay on and off; PAGE DOWN switches to the old blit and back, the VM running
+--            on in both; the figures the game measured (in MAME's time) are printed
+--   report   (after NO) at each quit the game wrote its speed figures to a new file: the first quit
+--            AWPERF0.TXT, the second (after YES) AWPERF1.TXT, never over the first (CV_REPORT = 1,
+--            CV_REPORT_K = 1); the second's text is saved as AWT_OUT/awperf_ram.txt, which
+--            run_cnv_tests.sh compares with the file on the card
 --   prison   OTHER PART & FR opens the code screen (0x3E88); HTDC entered with the keybed D-pad and
 --            action (gen_code_keys.py's grid) takes it to the prison (0x3E83)
 --   city     the code screen again; CLLD takes it to the city (0x3E84), the largest part
@@ -74,7 +81,10 @@ local CV_STATE, CV_QUIT, CV_DONE, CV_CALLS, CV_FAIL, CV_TASK = CV, CV + 4, CV + 
 local LD_CUR, LD_FAILED, LD_IN_READ, LD_MS, LD_LISTS, LD_ERRORS = CV + 0x44, CV + 0x58, CV + 0x5C, CV + 0x64, CV + 0x68, CV + 0x70
 local PART, FRAME_NO, HELP_PAGE = INTERP + 0x102A, MISC + 0x7C, MISC + 0x5C
 local GUARD_WHAT, GUARD_ADDR, GUARD_COUNT = MISC + 0x210, MISC + 0x214, MISC + 0x218
-local CODE_LO, CODE_HI = 0x502BA000, 0x502BE000      -- KN7APP.BIN's image (APP_BASE..IMAGE_END_MAX)
+local PERF = 0x502C7000                              -- vm.inc VM_PERF_BASE: PF_STATE +0x1C, PF_MODE +0x80,
+local PF_STATE, PF_MODE, PF_SHOW, PF_BENCH, PF_REGS = PERF + 0x1C, PERF + 0x80, PERF + 0xC0, PERF + 0x100, PERF + 0x140
+local CV_REPORT, CV_REPORT_N, CV_REPORT_K, REPORT_BUF = CV + 0x34, CV + 0x38, CV + 0x3C, 0x50370000
+local CODE_LO, CODE_HI = 0x502BA000, 0x502C0000      -- KN7APP.BIN's image (APP_BASE..IMAGE_END_MAX)
 local CNV_LO, CNV_HI = 0x502B8000, 0x502E8000        -- the converter area the firmware zeroes
 local APP_BASE = 0x502BA000                          -- the loader's application area: APP_BASE..CNV_HI
 local LOADER_LO, LOADER_HI, LOADER_CODE_HI = 0x502B8000, 0x502BA000, 0x502B9C00  -- resident; its image
@@ -381,6 +391,33 @@ local function game()
   f0 = frame(); wait(2)
   result("help", paused and p0 == 0 and p1 == 1 and frame() > f0,
     string.format("VM paused %s, page %d then %d after PAGE DOWN, running again after EXIT %s", tostring(paused), p0, p1, tostring(frame() > f0)))
+  -- the speed figures: the fourth help page, the overlay, the old blit and back
+  local hb = sp:read_range(0x84000000, 0x840007A3, 8)
+  press("CPC_SEG5", 0x02); wait(2)                        -- HELP
+  for i = 1, 3 do press("CPC_SEG11", 0x20); wait(1.5) end -- PAGE DOWN x3: the speed page
+  local p3 = sp:read_u32(HELP_PAGE)
+  M.video:snapshot()
+  press("CPC_SEG11", 0x80); wait(3)                       -- EXIT
+  press("CPC_SEG11", 0x10); wait(3)                       -- PAGE UP: the overlay on
+  local ovl = sp:read_u32(PF_STATE) & 1
+  M.video:snapshot()
+  press("CPC_SEG11", 0x20); wait(1)                       -- PAGE DOWN: the old blit
+  local m1, f1 = sp:read_u32(PF_MODE), frame(); wait(3)
+  local run1 = frame() > f1
+  M.video:snapshot()
+  press("CPC_SEG11", 0x20); wait(1)                       -- PAGE DOWN: the new blit again
+  local m2, f2 = sp:read_u32(PF_MODE), frame(); wait(3)
+  local run2 = frame() > f2
+  press("CPC_SEG11", 0x10); wait(2)                       -- PAGE UP: the overlay off
+  local ovl2 = sp:read_u32(PF_STATE) & 1
+  local hd = (sp:read_range(0x84000000, 0x840007A3, 8) == hb) and "unchanged" or "CHANGED"
+  local fig = {}
+  for i, k in ipairs({ "fps x10", "frame ms x10", "longest x10", "LCD px/frame" }) do fig[#fig + 1] = k .. " " .. sp:read_u32(PF_SHOW + 4 * (i - 1)) end
+  local bn = {}
+  for i = 0, 8 do bn[#bn + 1] = tostring(sp:read_u32(PF_BENCH + 4 * i)) end
+  result("speed", p3 == 3 and ovl == 1 and m1 == 1 and run1 and m2 == 0 and run2 and ovl2 == 0,
+    string.format("speed page %d; overlay on %d, off %d; old blit %d running %s, new blit %d running %s; IC23 header %s; last window (MAME's time): %s; bench ns x10 %s",
+      p3, ovl, ovl2, m1, tostring(run1), m2, tostring(run2), hd, table.concat(fig, ", "), table.concat(bn, " ")))
   ok, s = to_part("HTDC", 0x3E83)
   result("prison", ok, "HTDC: " .. s .. string.format("; %d ms", sp:read_u32(LD_MS)))
   ok, s = to_part("CLLD", 0x3E84)
@@ -407,6 +444,13 @@ local function game()
     string.format("guard refusals %d (last %d at %08X); no list failed: %s; part lists loaded %d; failed file attempts %d (kind<<24|id<<8|try: %s), files loaded only at a later attempt %d",
       sp:read_u32(GUARD_COUNT), sp:read_u32(GUARD_WHAT), sp:read_u32(GUARD_ADDR), tostring(sp:read_u32(LD_FAILED) == 0),
       sp:read_u32(LD_LISTS), sp:read_u32(LD_ERRORS), table.concat(elog, " "), sp:read_u32(CV + 0x7C)))
+  local rn = sp:read_u32(CV_REPORT_N)
+  if sp:read_u32(CV_REPORT) == 1 and rn > 0 and rn < 0x2000 then
+    local f = io.open(OUT .. "/awperf_ram.txt", "wb"); f:write(sp:read_range(REPORT_BUF, REPORT_BUF + rn - 1, 8)); f:close()
+  end
+  result("report", sp:read_u32(CV_REPORT) == 1 and rn > 0 and sp:read_u32(CV_REPORT_K) == 1,
+    string.format("the second quit's report: state %d, AWPERF%d.TXT, %d bytes written (awperf_ram.txt)",
+    sp:read_u32(CV_REPORT), sp:read_u32(CV_REPORT_K), rn))
   if RES_DIR then
     result("resources", RES.bad == 0 and RES.loads >= 6, string.format("%d parts made resident, %d resident resources compared, %d differ %s",
       RES.loads, RES.checked, RES.bad, table.concat(RES.badlist, " ")))

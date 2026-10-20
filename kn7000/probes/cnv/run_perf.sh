@@ -4,8 +4,9 @@
 # run_perf.sh OUT LUA [MAME ARGS...] -- one MAME run of the KN7APP.BIN build through the loader, for the
 # speed probes (probes/cnv/README.md, "Speed"): the owner's loader floppy as released, a copy of the real
 # KN7000's SD card with the files of CARDFILES added to its root, a fresh NVRAM and cfg in OUT, and the
-# autoboot script LUA (awcnv_perf.lua, awcnv_lcd.lua). The card and floppy copies are deleted afterwards;
-# MAME's output goes to OUT/run.log. Every environment variable is passed on to the script (AWP_*, AWL_*).
+# autoboot script LUA (awcnv_perf.lua, awcnv_fwlcd.lua, awcnv_lcd.lua, awcnv_speed.lua, awcnv_cksum.lua).
+# The speed reports the game wrote to the card (AWPERF0.TXT ...) are copied to OUT; then the card and floppy
+# copies are deleted. MAME's output goes to OUT/run.log. Every environment variable is passed on to the script (AWP_*, AWL_*).
 # Env: EMU (the overlay emulator dir, default ~/compartilhado/kn7000-emulator: kn7000, roms/, plugins/,
 # sdcard_from_real_kn7000.img), CARDFILES (default build/sdcard), BIOS (default v13 = program 893),
 # FLOPPY (default the loader's released floppy image), DISPLAY.
@@ -31,5 +32,8 @@ echo "run_perf: KN7APP.BIN $(sha1sum < "$CARDFILES/KN7APP.BIN" | cut -c1-16), bi
   -rompath ./roms -pluginspath ./plugins -skip_gameinfo -window -nothrottle -harddisk "$OUT/sd.img" \
   -flop "$OUT/floppy.img" -nvram_directory "$OUT/nv" -cfg_directory "$OUT/cfg" -snapshot_directory "$OUT/snap" \
   -autoboot_script "$LUA" "$@" ) >> "$OUT/run.log" 2>&1
+for f in AWPERF0.TXT AWPERF1.TXT AWPERF2.TXT; do
+  python3 -I "$DISASM_REPO/tools/cnv_romdump/fatls.py" "$OUT/sd.img" "C:\\$f" "$OUT/$f" > /dev/null 2>&1 || rm -f -- "$OUT/$f"
+done
 rm -f -- "$OUT/sd.img" "$OUT/floppy.img"
-grep -E '^aw(perf|lcd):' "$OUT/run.log"
+grep -E '^aw(perf|lcd|speed|cnv):' "$OUT/run.log"

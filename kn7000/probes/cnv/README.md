@@ -181,21 +181,23 @@ frames identical.
 
 ## Speed (2026-10-20): where a frame's time goes
 
-On the owner's KN7000 the game ran, but its frame rate was very low. MAME cannot show that: the overlay
-emulator gives every memory access the same cost, with no wait states. What it can do is count the
-accesses the game makes per VM tick in each region; on the instrument the LCD frame lies behind the
-bus controller's slow setting (below) and costs far more than work RAM, so the counts say what the
-wait states multiply. These probes run through the loader exactly as the acceptance tests do
-(`run_perf.sh`: the owner's floppy, a copy of the real card with `CARDFILES` added, fresh NVRAM, program 893):
+On the owner's KN7000 the game ran, but its frame rate was very low. MAME gives every memory access the
+same cost, with no wait states, so it cannot show why; what it can do is count the accesses the game
+makes per VM tick in each region, and check that a faster blit leaves the LCD as it was. The probes
+run through the loader exactly as the acceptance tests do (`run_perf.sh`: the owner's floppy, a copy
+of the real card with `CARDFILES` added, fresh NVRAM, program 893; the game's `AWPERFn.TXT` files are
+copied off the card before it is deleted):
 
 | file              | question                                                                                                                                                                           |
 |-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `run_perf.sh`     | the runner: one MAME run with a given autoboot script and card files; the card copy is deleted after                                                                               |
 | `awcnv_perf.lua`  | per VM tick: the game's stores into the LCD frame (by size), its loads from it, its accesses to the pages and to the rest of its RAM; the firmware's LCD stores; the emulated time |
-| `awcnv_fwlcd.lua` | while the game runs, when and where does the firmware draw on the LCD? 10 s with no input, then each panel button and a key, 4 s each                                              |
-| `lcd_cost.py`     | what the counted LCD stores cost under a wait-state model, or with the instrument's own benchmark figures                                                                          |
+| `awcnv_fwlcd.lua` | while the game runs, when and where does the firmware draw on the LCD? 10 s with no input, then each panel button and a key, 4 s each; or (`AWL_INTRO=1`) through the intro        |
+| `lcd_cost.py`     | what the counted LCD accesses cost at the unit's measured times (pass 9), or at others given                                                                                       |
+| `awcnv_lcd.lua`   | at every VM tick of the intro and the lake: is the whole LCD frame what the old blit made of the same VM state? snapshots for a byte comparison between builds                     |
+| `awcnv_speed.lua` | the owner's run on the instrument, in MAME: the overlay, the old blit and back, the speed page, quitting; what the game measures in MAME's time; `AWPERF0.TXT`                     |
 
-**Before (`KN7APP.BIN` `b952c2aa...`, the intro, ticks 1-300, mean per tick):**
+**Why it was slow.** Before (`KN7APP.BIN` `b952c2aa...`, the intro, ticks 1-300, mean per tick):
 
 | region              | accesses per tick                                |
 |---------------------|--------------------------------------------------|
@@ -207,26 +209,70 @@ wait states multiply. These probes run through the loader exactly as the accepta
 
 Every tick blitted the front page twice (the bytecode's own blit, then `NextThread`'s at the end of
 every frame) and repainted the whole border with each blit: 217,600 stores, about 614 KB, into the LCD
-frame per tick, whatever changed. The firmware programs the bus controller for the region that holds
-the LCD frame, the DSP's latch and its data port (`0x98000000`-`0x9FFFFFFF`, MEMCTR3 at `0x32000026`; 941
-`0x484D7111`) to `0x0424` or `0x0704`, by a board strap it reads at `0x98070000`, and raises it to
-`0x0924` around each DSP data-port access; bits 8-12 look like a wait count. With 4 or 7 waits on a
-16-bit bus at a guessed 16 MHz, `lcd_cost.py` puts those stores at 115 or 173 ms per tick, before any
-other work: a ceiling of 6-9 frames per second, where the gameplay asks for 25 or 50.
+frame per tick, whatever changed. The ROM dumper's pass 9 measured the costs on the owner's unit
+(technics-roms-disasm `cnv_romdump`, 2026-10-20, run by the main session): the core runs at 64 MHz, a
+cached work-RAM access takes one 15.6 ns cycle (a new 16-byte line 389 ns to load), and the LCD frame
+is on a 16-bit bus with four wait states (MEMCTR3 `0x0424`, which also covers the DSP's ports): a
+16-bit store 439 ns, a 32-bit store 888 ns (two accesses), a 16-bit load 694 ns. At those times
+`lcd_cost.py` puts the old build's LCD stores at **136 ms per tick**, a ceiling of 7 frames per second
+before any other work, where the gameplay asks for 25 or 50. (Before pass 9 a model from the bus
+set-up, 4 or 7 waits on a 16-bit bus at a guessed 16 MHz, gave 115 or 173 ms: `lcd_cost.py --model`.)
 
-The firmware drew on the LCD only before the first VM frame (its text screen, 458,880 stores from
-`0x48414F92`). With the game running it drew nothing, in 10 s with no input or after R1/R2 OCTAVE + / -,
-SUSTAIN (twice), PART SELECT RIGHT 1 / LEFT, PAGE UP (twice), PAGE DOWN, HELP, EXIT, OTHER PART & FR or a
-keybed key. **DISPLAY HOLD** is the exception: in the first run, pressed in the intro, the firmware
-repainted the whole screen (152,960 stores) and stopped calling the converter for the rest of the run
-(so EXIT could no longer end the game); in the second, pressed on the level-code screen, it did
-nothing. Do not press DISPLAY HOLD while the game runs.
+**The firmware's own drawing.** The firmware drew on the LCD before the first VM frame (its text
+screen, 458,880 stores from `0x48414F92`), and with the game running it drew nothing in 10 s with no
+input or after R1/R2 OCTAVE + / -, SUSTAIN (twice), PART SELECT RIGHT 1 / LEFT, PAGE UP (twice), PAGE DOWN,
+HELP, EXIT, OTHER PART & FR or a keybed key. But through the intro (`AWL_INTRO=1`) it repainted its whole
+text screen twice (305,920 stores, `0x48414F92`) between ticks 2600 and 2800, when the intro hands over
+to the lake and the lake's files load; in a traced run of the new build (`AWL_TRACE`) that painting was
+split around one of the game's frames (301,406 stores before the frame's check, 4,514 after it), so it is
+not confined to one yield of the game and may land at any moment. The old blit painted over it at every
+blit. **DISPLAY HOLD**: in the first run, pressed in the intro, the firmware repainted the
+whole screen (152,960 stores) and stopped calling the converter for the rest of the run (so EXIT could
+no longer end the game); in the second, pressed on the level-code screen, it did nothing. Do not press
+DISPLAY HOLD while the game runs.
+
+**After** (`KN7APP.BIN` `26aabecb...`, the same ticks): **2,036 32-bit stores into the LCD frame per tick**
+(most ticks a few hundred; 76,800 for each of the two full repaints that follow the intro's load) and
+the 47 sentinel loads, **1.84 ms per tick** at the unit's times (from 135.84); the pages' loads 45,931,
+their stores 16,718; the rest of the RAM 8,358 loads and 2,271 stores (the measuring). In MAME's own
+time a tick of the intro took 45.9 ms on average, from 122.7 (the bytecode asks for 40).
+
+| check                                  | before (`b952c2aa`) | after (`26aabecb`)                                                |
+|----------------------------------------|---------------------|-------------------------------------------------------------------|
+| LCD stores per tick (16 / 32-bit)      | 128,000 / 89,600    | 0 / 2,036                                                         |
+| LCD time per tick at pass 9's costs    | 135.84 ms           | 1.84 ms                                                           |
+| the intro's pages against rustyworld   | 2612 of 2612        | 2612 of 2612                                                      |
+| LCD = the old blit's picture, per tick | 3601 of 3601        | 3600 of 3601: tick 2612, the firmware painting, put right at 2613 |
+| LCD snapshots every 100 ticks          | -                   | 37 of 37 byte-identical to the old build's                        |
+
+The one tick: while the firmware was repainting its text screen (above), 5,347 pixels showed its
+painting at the check; one sentinel pixel caught it after the next yield and the next blit repainted
+everything. An earlier version with 16 sentinels and no repaints after a load (`c1fd72bc`) missed the
+same painting in the border for 500 ticks, until the periodic repaint; hence the 47 sentinels read
+after each yield and the repaints 5 and 30 frames after each load.
+
+**The game's own figures in MAME** (`awcnv_speed.lua`, `26aabecb`, MAME's time, no wait states; the
+intro): new blit 25.1 frames per second, 39.8 ms a frame (blit 7.9 ms, yield 31.1); old blit (PAGE
+DOWN) 8.7 frames per second, 114.1 ms a frame (blit 97.1, border 9.1); over the run 25.0 and 8.7
+frames per second. The speed page and the overlay in their snapshots fit their places; `AWPERF0.TXT`,
+1,979 bytes, holds the same page, the figures per part and blit, the benchmark and the registers.
+(MAME reads 0 from the bus controller's registers and gives every access the same 43 ns; the unit's
+figures will say what matters.)
 
     T=~/compartilhado/tmp/aw-perf    # EMU=a copy of kn7000-emulator; CARDFILES=the build's card files
     probes/cnv/run_perf.sh $T/base-perf probes/cnv/awcnv_perf.lua           # AWP_MAX=300
     probes/cnv/run_perf.sh $T/base-fwlcd2 probes/cnv/awcnv_fwlcd.lua         # DISPLAY HOLD last
     AWL_HOLD_EARLY=1 probes/cnv/run_perf.sh $T/base-fwlcd probes/cnv/awcnv_fwlcd.lua   # ... as the first run
-    python3 -I probes/cnv/lcd_cost.py $T/base-perf/perf.tsv
+    AWL_INTRO=1 probes/cnv/run_perf.sh $T/base-fwintro probes/cnv/awcnv_fwlcd.lua
+    python3 -I probes/cnv/lcd_cost.py $T/base-perf/perf.tsv $T/fin-perf/perf.tsv [--model]
+    AWL_PAL=0x$(grep ' palette$' build/kn7app.map | cut -c3-10) AWL_TRACE=2605-2650 \
+      probes/cnv/run_perf.sh $T/fin-lcd probes/cnv/awcnv_lcd.lua           # the same for the old build
+    for f in $T/fin-lcd/lcd_*.bin; do cmp $f $T/base-lcd/$(basename $f); done
+    probes/cnv/run_perf.sh $T/fin-speed probes/cnv/awcnv_speed.lua
+
+The acceptance tests (above) gained two checks for this build: `speed` (the speed page, the overlay on
+and off, the old blit and back with the VM running, IC23's header unchanged) and `report` (the first
+quit leaves `AWPERF0.TXT`, the second `AWPERF1.TXT` beside it, the text the game built).
 
 ## What the platform does with a converter
 

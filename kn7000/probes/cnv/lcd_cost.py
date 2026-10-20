@@ -4,16 +4,15 @@
 # lcd_cost.py -- what would a frame's LCD stores cost on the instrument? (probes/cnv/README.md, "Speed")
 #
 # MAME counts the game's stores into the LCD frame per VM tick (awcnv_perf.lua: perf.tsv, lcd_w16 and
-# lcd_w32), but has no wait states. The firmware programs the bus controller for the region the LCD
-# frame lies in (0x98000000-0x9FFFFFFF, the DSP's latch and data port too: MEMCTR3 at 0x32000026) to
-# 0x0424 or 0x0704, depending on a board strap it reads at 0x98070000 (941 0x484D7111), and raises it
-# to 0x0924 around each DSP data-port access: bits 8-12 look like a wait count (4, 7; 9 for the DSP).
-# This prints, for each perf.tsv, the mean stores per tick and their cost under a model: an access is
-# (2 + waits) cycles of the bus clock, a 32-bit store on a 16-bit bus two accesses. Neither the bus
-# clock nor the width is known for the LCD region: the defaults (16 MHz, 16 bits) are a guess. With
-# --w16-ns/--w32-ns (the instrument's own benchmark, the help screen's fourth page or AWPERF.TXT) the
-# measured costs replace the model.
-#   python3 -I probes/cnv/lcd_cost.py OLD/perf.tsv NEW/perf.tsv [--bus-mhz 16] [--w16-ns N --w32-ns N]
+# lcd_w32) and its loads from it (lcd_r), but has no wait states. This prints, for each perf.tsv, the mean
+# accesses per tick and what they cost at the times the ROM dumper's pass 9 measured on the owner's unit
+# (technics-roms-disasm cnv_romdump, 2026-10-20: a 16-bit bus to the LCD frame, a 16-bit store 439 ns, a
+# 32-bit store 888 ns, a 16-bit load 694 ns; the firmware leaves MEMCTR3, which covers the region, at
+# 0x0424). Before that measurement the model was a guess: an access of (2 + waits) cycles of a 16 MHz bus
+# clock, 4 or 7 waits (MEMCTR3 0x0424 or 0x0704 by the board strap); --model prints those too. Other
+# figures (the game's own benchmark, the help screen's fourth page or AWPERFn.TXT) go in with --w16-ns,
+# --w32-ns and --r16-ns.
+#   python3 -I probes/cnv/lcd_cost.py OLD/perf.tsv NEW/perf.tsv [--model] [--w16-ns N --w32-ns N --r16-ns N]
 import argparse
 import csv
 
@@ -27,27 +26,29 @@ def means(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tsv", nargs="+")
-    ap.add_argument("--bus-mhz", type=float, default=16.0)
+    ap.add_argument("--model", action="store_true", help="also the wait-state guess (16 MHz bus, 4 or 7 waits)")
     ap.add_argument("--w16-ns", type=float)
     ap.add_argument("--w32-ns", type=float)
+    ap.add_argument("--r16-ns", type=float)
     a = ap.parse_args()
-    cyc = 1000.0 / a.bus_mhz
-    models = [(f"{w} waits, {a.bus_mhz:g} MHz, 16-bit bus", (2 + w) * cyc, 2 * (2 + w) * cyc) for w in (4, 7)]
+    models = [("pass 9", 439.3, 888.5, 693.6)]
+    if a.model:
+        models += [(f"guess, {w} waits", (2 + w) * 62.5, 2 * (2 + w) * 62.5, (2 + w) * 62.5) for w in (4, 7)]
     if a.w16_ns and a.w32_ns:
-        models.append(("measured on the instrument", a.w16_ns, a.w32_ns))
-    head = ["perf.tsv", "ticks", "16-bit stores", "32-bit stores"] + [f"ms per tick: {m[0]}" for m in models]
+        models.append(("given", a.w16_ns, a.w32_ns, a.r16_ns or 0.0))
+    head = ["perf.tsv", "ticks", "16-bit stores", "32-bit stores", "16-bit loads"] + [f"LCD ms per tick, {m[0]}" for m in models]
     rows = []
     for p in a.tsv:
         n, m = means(p)
-        rows.append([p, str(n), f"{m['lcd_w16']:,.0f}", f"{m['lcd_w32']:,.0f}"]
-                    + [f"{(m['lcd_w16'] * c16 + m['lcd_w32'] * c32) / 1e6:.1f}" for _, c16, c32 in models])
+        rows.append([p, str(n), f"{m['lcd_w16']:,.0f}", f"{m['lcd_w32']:,.0f}", f"{m['lcd_r']:,.0f}"]
+                    + [f"{(m['lcd_w16'] * c16 + m['lcd_w32'] * c32 + m['lcd_r'] * r16) / 1e6:.2f}" for _, c16, c32, r16 in models])
     w = [max(len(r[i]) for r in [head] + rows) for i in range(len(head))]
     print("| " + " | ".join(c.ljust(w[i]) for i, c in enumerate(head)) + " |")
     print("|" + "|".join("-" * (x + 2) for x in w) + "|")
     for r in rows:
         print("| " + " | ".join(c.ljust(w[i]) for i, c in enumerate(r)) + " |")
-    for name, c16, c32 in models:
-        print(f"lcd_cost: {name}: {c16:.0f} ns per 16-bit store, {c32:.0f} ns per 32-bit store")
+    for name, c16, c32, r16 in models:
+        print(f"lcd_cost: {name}: {c16:.0f} ns per 16-bit store, {c32:.0f} ns per 32-bit store, {r16:.0f} ns per 16-bit load")
 
 
 if __name__ == "__main__":

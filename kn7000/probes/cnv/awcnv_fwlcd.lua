@@ -9,7 +9,8 @@
 -- (NO_SPLASH). From the first VM frame on, a write tap over the LCD frame 0x9CE00000-0x9CE4AFFF counts every
 -- store from outside KN7APP.BIN's image (the firmware, the loader), per window: 10 s with no input, then
 -- each panel button below pressed once (0.4 s) and the 4 s after it, a keybed key, 10 s with no input, and
--- last DISPLAY HOLD (twice) and EXIT (twice). For each window:
+-- last DISPLAY HOLD (twice) and EXIT (twice). AWL_INTRO=1 instead lets the intro run with no input into the
+-- lake, one window per 200 VM ticks to tick 2800 (the intro ends at tick 2612 and loads the lake). For each window:
 -- the stores, the rectangle they covered, the converter calls meanwhile and the PCs that stored; a
 -- snapshot 1 s after each press. Printed as "awlcd: ..." lines and written to AWL_OUT/fwlcd.txt.
 --   probes/cnv/run_perf.sh OUT probes/cnv/awcnv_fwlcd.lua
@@ -89,6 +90,16 @@ local co = coroutine.create(function()
   newwin("loader to first frame")
   wait_until(function() return (sp:read_u32(FRAME_NO) & 0xffff) > 0 end, 120)
   endwin()
+  if os.getenv("AWL_INTRO") then
+    for t = 200, 2800, 200 do
+      newwin(string.format("ticks to %d", t))
+      wait_until(function() return (sp:read_u32(FRAME_NO) & 0xffff) > t end, 600)
+      endwin()
+    end
+    outf:close()
+    M:exit()
+    while true do coroutine.yield() end
+  end
   newwin("first 5 s of the intro"); wait(5); endwin()
   newwin("10 s, no input"); wait(10); endwin()
   for _, b in ipairs(PRESSES) do

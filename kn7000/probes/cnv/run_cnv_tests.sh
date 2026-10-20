@@ -19,7 +19,9 @@
 #                      no-op application noop_app.s as KN7APP.BIN) and a game run (the whole session,
 #                      awcnv_test.lua), both ending with POWER OFF, then a boot of each saved IC23 (the
 #                      firmware's verdict) ending with POWER OFF. Prints:
-#                        session   every awcnv_test.lua check of the game run passed      (b)
+#                        session   every awcnv_test.lua check of the game run passed (18)  (b)
+#                        report    the game run left AWPERF0.TXT (first quit) and AWPERF1.TXT (second
+#                                  quit, the text it built) on the card and nothing more; the control none
 #                        ic23w     no write into CS1 from the converter area (the loader and the game),
 #                                  none past 256 KB                                       (c)
 #                        same      the saved IC23s of the control and game runs are byte-identical,
@@ -70,6 +72,9 @@ mame() {
     DISPLAY="${DISPLAY:-:0}" timeout 3600 ./kn7000 kn7000 -bios "$B" -rompath ./roms -pluginspath ./plugins \
     -skip_gameinfo -window -nothrottle -harddisk "$R/sd.img" -flop "$R/floppy.img" -nvram_directory "$R/nv" \
     -cfg_directory "$R/cfg" -snapshot_directory "$R/snap" -autoboot_script "$HERE/awcnv_test.lua" ) > "$R/run.log" 2>&1
+  for f in AWPERF0.TXT AWPERF1.TXT AWPERF2.TXT; do      # the game's speed reports, if any
+    python3 -I "$DISASM_REPO/tools/cnv_romdump/fatls.py" "$R/sd.img" "C:\\$f" "$R/$f" > /dev/null 2>&1 || rm -f -- "$R/$f"
+  done
   rm -f -- "$R/sd.img" "$R/floppy.img"
 }
 
@@ -117,7 +122,11 @@ while [ $# -gt 0 ]; do
     G="$C/game"; K="$C/control"
     grep '^awcnv_test:' "$G/run.log" > "$C/session.txt"
     nf=$(grep -c ' FAIL ' "$C/session.txt"); np=$(grep -c ' PASS ' "$C/session.txt")
-    say "$B/$N session   $([ "$nf" = 0 ] && [ "$np" -ge 16 ] && echo PASS || echo FAIL)  $np checks passed, $nf failed ($C/session.txt)"
+    say "$B/$N session   $([ "$nf" = 0 ] && [ "$np" -ge 18 ] && echo PASS || echo FAIL)  $np checks passed, $nf failed ($C/session.txt)"
+    if [ -s "$G/AWPERF0.TXT" ] && [ ! -e "$G/AWPERF2.TXT" ] && cmp -s "$G/AWPERF1.TXT" "$G/awperf_ram.txt"; then
+      rp="on the card: AWPERF0.TXT $(stat -c%s "$G/AWPERF0.TXT") bytes (first quit), AWPERF1.TXT $(stat -c%s "$G/AWPERF1.TXT") bytes (second quit), the text the game built"
+    else rp="AWPERF0/1.TXT missing, a third, or not the text the game built"; fi
+    say "$B/$N report    $(echo "$rp" | grep -q '^on the card' && [ ! -e "$K/AWPERF0.TXT" ] && echo PASS || echo FAIL)  $rp; none from the control run"
     say "$B/$N ic23w     $(grep -q 'IC23 verdict: CLEAN' "$G/ic23.txt" && grep -q 'IC23 verdict: CLEAN' "$K/ic23.txt" && echo PASS || echo FAIL)  game: $(head -1 "$G/ic23.txt" | cut -c3-)"
     if cmp -s "$C/ic23-control.bin" "$C/ic23-game.bin"; then same=identical; else same="DIFFER: $(cmp -l "$C/ic23-control.bin" "$C/ic23-game.bin" | wc -l) bytes"; fi
     ck="$(python3 -I "$HERE/ic23_file.py" "$C/ic23-game.bin")"
