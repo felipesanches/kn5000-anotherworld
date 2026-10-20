@@ -51,6 +51,11 @@
 .equ LD_LISTS,     CNV_VARS + 0x68  # lists loaded so far (the global one, then each part)
 .equ LD_BAD_ID,    CNV_VARS + 0x6C  # the resource id (or 0xFFFF) of the file that failed
 .equ LD_ERRORS,    CNV_VARS + 0x70  # files that failed so far
+.equ LD_HELD,      CNV_VARS + 0x74  # calls a new list has waited for the panel to be let go
+.equ LD_TRIES,     CNV_VARS + 0x78  # failed attempts at the current record
+.equ LD_RETRIED,   CNV_VARS + 0x7C  # files that loaded at a second or third attempt, so far
+.equ FILE_TRIES,   3                # attempts per file before the list fails
+.equ HELD_CALLS,   100              # at most about 5 s: then it loads anyway
 .equ BK_CRC,       CNV_VARS + 0x80  # unpacker state
 .equ BK_LEFT,      CNV_VARS + 0x84
 .equ BK_N,         CNV_VARS + 0x88
@@ -149,7 +154,27 @@ ce_load:                            # a part the game task waits for: one of its
     mov     (LD_CUR), d1
     cmp     d1, d0
     beq     ce_poll_exit
+    call    PanelIdle, 0, 0         # not while a panel button is down: a list keeps the main task
+    cmp     0, d0                   # busy for a file per call, and the button's release must not
+    bne     ce_held                 # be the panel event it misses (probes/cnv/README.md)
+    clr     d0
+    mov     d0, (LD_HELD)
+    mov     (LD_REQ), d0
     mov     d0, (LD_PART)           # a new part: forget the old one's files, start its list
+    clr     d1
+    mov     d1, (LD_CUR)
+    call    PartListStart, 0, 0
+    bra     ce_poll_exit
+ce_held:
+    mov     (LD_HELD), d0
+    inc     d0
+    mov     d0, (LD_HELD)
+    cmp     HELD_CALLS, d0
+    blt     ce_poll_exit
+    clr     d0                      # held too long (or stuck): load anyway
+    mov     d0, (LD_HELD)
+    mov     (LD_REQ), d0
+    mov     d0, (LD_PART)
     clr     d1
     mov     d1, (LD_CUR)
     call    PartListStart, 0, 0
@@ -479,8 +504,10 @@ pl_clear:
     ret     [d2,d3,a2,a3], 0x30
 
 # LoadStep: load the record at LD_REC -- check its destination, open its file in the floppy's
-# current folder, read it there, close it, unpack it in place if it is packed -- and move on.
-#   -> d0 = 0 more to come, 1 the list is done, 2 the file failed (logged; LD_BAD_ID)
+# current folder, read it there, close it, unpack it in place if it is packed -- and move on. A file
+# that fails (open, short read, not intact) is logged and tried again on the next call, up to
+# FILE_TRIES attempts; a destination the guard refuses is not.
+#   -> d0 = 0 more to come, 1 the list is done, 2 the file failed for good (LD_BAD_ID)
 # The firmware's routines store their arguments in the caller's frame at sp+4..sp+0x10, so nothing
 # of ours lives there.
 LoadStep:
@@ -543,6 +570,15 @@ lst_len:
     cmp     0, d0
     bne     lst_crc
 lst_place:
+    mov     (LD_TRIES), d0          # count a file that needed more than one attempt
+    cmp     0, d0
+    beq     lst_first
+    mov     (LD_RETRIED), d0
+    inc     d0
+    mov     d0, (LD_RETRIED)
+    clr     d0
+    mov     d0, (LD_TRIES)
+lst_first:
     mov     (LD_REC), a2
     movhu   (LR_ID, a2), d0
     cmp     RES_COUNT, d0
@@ -578,7 +614,22 @@ lst_fail:
     mov     (LD_BAD_ID), d1
     asl     8, d1
     or      d1, d0
+    mov     (LD_TRIES), d1          # the attempt number in the low byte
+    or      d1, d0
     call    LogError, 0, 0
+    mov     (GUARD_WHAT), d0        # a refused destination is not tried again
+    cmp     0, d0
+    bne     lst_give_up
+    mov     (LD_TRIES), d0          # a read can fail now and work next time (a floppy is a
+    inc     d0                      # floppy): the same record again on the next call
+    mov     d0, (LD_TRIES)
+    cmp     FILE_TRIES, d0
+    bcc     lst_give_up
+    clr     d0
+    bra     lst_ret
+lst_give_up:
+    clr     d0
+    mov     d0, (LD_TRIES)
     mov     2, d0
     bra     lst_ret
 
@@ -603,6 +654,27 @@ grg_bad:
     jmp     GuardTrip               # a leaf: it returns to our caller with d0 = 1
 grg_ok:
     clr     d0
+    rets
+
+# PanelIdle -> d0 = 0 when no panel button is down: the firmware's switch bitmaps (16 CPR segments
+# at FWV_PANEL, 16 CPL/CPC segments at FWV_PANEL + 0x30) are all zero; else 1. Leaf.
+PanelIdle:
+    mov     (FWV_PANEL), a0
+    mov     16, d1
+pi_seg:
+    movbu   (a0), d0
+    cmp     0, d0
+    bne     pi_held
+    movbu   (PANEL_CPL_OFS, a0), d0
+    cmp     0, d0
+    bne     pi_held
+    inc     a0
+    add     -1, d1
+    bne     pi_seg
+    clr     d0
+    rets
+pi_held:
+    mov     1, d0
     rets
 
 # LogError(d0 = (kind << 24) | detail): count it and keep the first 32. Leaf.
