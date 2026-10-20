@@ -279,6 +279,8 @@ source (`kn7000/tools/cnv_romdump/loader.s`, `kn7cnv.inc`) and measured in MAME 
 ## Sound
 
 **First iteration (2026-10-20): sound effects and music, played by the KN7000's own tone generator.**
+**On the instrument (2026-10-21):** Felipe ran this build (`KN7APP.BIN` `97fbd9e6...`, from the menu's `AW\`)
+on his KN7000 (program 893) and reported that the sound plays properly; no further detail was recorded.
 The game never outputs a sample. It becomes a MIDI source inside the instrument (`src/audio.s`), and
 the firmware plays its notes by its normal path, the one an external sequencer on MIDI IN uses.
 
