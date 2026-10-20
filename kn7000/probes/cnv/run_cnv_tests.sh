@@ -95,7 +95,7 @@ while [ $# -gt 0 ]; do
     G="$C/game"; K="$C/control"
     grep '^awcnv_test:' "$G/run.log" > "$C/session.txt"
     nf=$(grep -c ' FAIL ' "$C/session.txt"); np=$(grep -c ' PASS ' "$C/session.txt")
-    say "$B/$N session   $([ "$nf" = 0 ] && [ "$np" -ge 15 ] && echo PASS || echo FAIL)  $np checks passed, $nf failed ($C/session.txt)"
+    say "$B/$N session   $([ "$nf" = 0 ] && [ "$np" -ge 16 ] && echo PASS || echo FAIL)  $np checks passed, $nf failed ($C/session.txt)"
     say "$B/$N ic23w     $(grep -q 'IC23 verdict: CLEAN' "$G/ic23.txt" && grep -q 'IC23 verdict: CLEAN' "$K/ic23.txt" && echo PASS || echo FAIL)  game: $(head -1 "$G/ic23.txt" | cut -c3-)"
     if cmp -s "$C/ic23-control.bin" "$C/ic23-game.bin"; then same=identical; else same="DIFFER: $(cmp -l "$C/ic23-control.bin" "$C/ic23-game.bin" | wc -l) bytes"; fi
     ck="$(python3 -I "$HERE/ic23_file.py" "$C/ic23-game.bin")"

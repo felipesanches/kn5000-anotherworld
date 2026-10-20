@@ -9,7 +9,10 @@
 --   splash   the splash (part 0x3E80, loaded from the floppy) plays
 --   intro    it hands over to the intro (0x3E81, loaded at the switch)
 --   skip     holding C4 (keybed) skips the intro: the lake (0x3E82)
---   panel    PART SELECT RIGHT 1 sets the hero's left/right variable var[0xFC] to +1
+--   panel    the panel's D-pad and fire (PART SELECT RIGHT 1 / LEFT, R1/R2 OCTAVE + / -, SUSTAIN) each
+--            set their hero variable (var[0xFC] +1 / -1, var[0xE5] -1 / +1, var[0xFA] 1)
+--   settings those presses leave IC23's live panel settings (its header) unchanged: the firmware,
+--            parked on the converter, does not act on them (e.g. no octave change)
 --   keybed   holding C4 sets the hero's action variable var[0xFA] to 1
 --   help     HELP shows the help screens (the VM pauses), PAGE DOWN turns to page 2, EXIT returns
 --   prison   OTHER PART & FR opens the code screen (0x3E88); HTDC entered with the keybed D-pad and
@@ -247,12 +250,25 @@ local function game()
   ok = ok and wait_until(function() return sp:read_u32(LD_CUR) == 0x3E82 end, 60)
   wait(4)
   result("skip", ok, string.format("part %04X frame %d; lake files loaded in %d ms", part(), frame(), sp:read_u32(LD_MS)))
-  local seen = 0
-  local f = field("CPR_SEG1", 0x02); f:set_value(1)
-  wait_until(function() if var(0xFC) == 1 then seen = 1 end; return seen == 1 end, 1.5)
-  f:set_value(0)
-  result("panel", seen == 1, "var[0xFC] reached " .. seen)
-  wait(1); seen = 0
+  -- the five panel buttons of the D-pad and fire, each with the hero variable it must set; and the
+  -- live panel settings in IC23's header (0x84000000-0x840007A3) must not change: while AW.CNV
+  -- parks the firmware, a press must reach the game and not, say, the R1/R2 octave
+  local function header() return sp:read_range(0x84000000, 0x840007A3, 8) end
+  local h0, got = header(), {}
+  for _, b in ipairs({ { "RIGHT", "CPR_SEG1", 0x02, 0xFC, 1 }, { "LEFT", "CPR_SEG2", 0x01, 0xFC, -1 },
+                       { "UP", "CPR_SEG6", 0x02, 0xE5, -1 }, { "DOWN", "CPR_SEG7", 0x02, 0xE5, 1 },
+                       { "FIRE", "CPR_SEG5", 0x08, 0xFA, 1 } }) do
+    local f = field(b[2], b[3]); f:set_value(1)
+    local ok = wait_until(function() return var(b[4]) == b[5] end, 1.5)
+    f:set_value(0); wait(0.8)
+    got[#got + 1] = b[1] .. (ok and "" or "(no)")
+  end
+  local h1, nd = header(), 0
+  for i = 1, #h0 do if h0:byte(i) ~= h1:byte(i) then nd = nd + 1 end end
+  local all = not table.concat(got, " "):find("no")
+  result("panel", all, "each button set its hero variable: " .. table.concat(got, " "))
+  result("settings", nd == 0, string.format("IC23 live settings (header) bytes changed by those presses: %d", nd))
+  wait(1); local seen = 0
   keyfield(60):set_value(1)
   wait_until(function() if var(0xFA) == 1 then seen = 1 end; return seen == 1 end, 1.5)
   keyfield(60):set_value(0)
