@@ -22,6 +22,34 @@ Scale:
     ret     [a2,a3], 0x10
 
 # ================================================================================
+# The run-time guard's checks (vm.inc GUARD_*). Every write the VM makes goes through a page
+# pointer (GetPagePtr: one of the four pages), the VM stack (OpCall), the variables (index & 0xFF),
+# the thread tables (index & 0x3F) or the rasterizer, which clips to the page; the checks below
+# catch a page pointer or stack pointer that something has corrupted. A refused write is skipped
+# and recorded, and GameTask (display.s) stops the game after the instruction.
+#
+# GuardPage(a0 = page) -> d0 = 0 when a0 is one of the four pages, else 1 (recorded). Leaf.
+GuardPage:
+    mov     a0, d0
+    mov     PAGE_BITMAP_0, d1
+    sub     d1, d0                  # page - page 0: 0, 0x10000, 0x20000 or 0x30000
+    and     0xFFFCFFFF, d0
+    bne     gpg_bad
+    rets
+gpg_bad:
+    mov     GUARD_PAGE, d0
+    mov     a0, d1
+# GuardTrip(d0 = GUARD_* reason, d1 = the refused address): record it; d0 = 1. Leaf.
+GuardTrip:
+    mov     d0, (GUARD_WHAT)
+    mov     d1, (GUARD_ADDR)
+    mov     (GUARD_COUNT), d0
+    inc     d0
+    mov     d0, (GUARD_COUNT)
+    mov     1, d0
+    rets
+
+# ================================================================================
 # FillPage(d0 = colour): memset CUR_PAGE to a colour index.
 FillPage:
     movm    [d2,d3,a2,a3], (sp)
@@ -420,6 +448,9 @@ FillPolygon:
     mov     d0, (0x10, sp)          # cx
     mov     d1, (0x14, sp)          # cy
     mov     (CUR_PAGE_1), a0        # draw to the current page
+    call    GuardPage, 0, 0         # (keeps d2) refuse a page pointer that is not a page
+    cmp     0, d0
+    bne     poly_done
     mov     a0, (CUR_PAGE)
     and     0xff, d2
     mov     d2, d0
@@ -667,6 +698,12 @@ DrawString:
     mov     d1, (0xc, sp)           # x0 (line start)
     mov     d2, (8, sp)             # y
     mov     d3, (0x10, sp)          # colour
+    mov     d0, (0x14, sp)          # stringId
+    mov     (CUR_PAGE_1), a0        # the page DrawChar draws on must be a page
+    call    GuardPage, 0, 0
+    cmp     0, d0
+    bne     dstr_done
+    mov     (0x14, sp), d0
     and     0xffff, d0              # stringId
     asl     1, d0
     cmp     AW_STRIDX_SZ, d0        # guard: id out of the index table -> draw nothing

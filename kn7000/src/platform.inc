@@ -3,6 +3,17 @@
 #
 # KN7000 / SP7001 platform definitions for the Another World port.
 #
+# *** MAME ONLY. NOT FOR A REAL INSTRUMENT. *** This build keeps the game in the 0x44000000 window.
+# MAME's upstream driver maps 16 MB of plain RAM there as a placeholder; on a real KN7000 the
+# window is chip select CS1, which is IC23 alone: the 256 KB battery-backed SRAM holding the panel
+# settings and the 104 PANEL MEMORY records, repeating every 256 KB through the whole window
+# (confirmed on Felipe's unit, 2026-10-20). Every game write would land on the stored settings, and
+# the firmware's power-off stamps the damage valid (kn7000_mame notes/ic23-nvram-2026-10-20). Its
+# loader also uses STAGING_BIG in the user-memory pool (the TPAD pads). The STYLE CONVERT build
+# (platformcnv.inc) is the one that stays out of both; this one cannot follow it there, because
+# the plug-in's file API works only during the plug-in load, so it cannot load per part (README.md).
+# The Makefile runs tools/ic23_guard.py on it and refuses to build it without MAME_ONLY=1.
+#
 # The game rides along with the SP7001 base plug-in BASEEXT.XAP: tools/xap_addon.py
 # (in kn7000_disassembly) places this module in the plug-in's unused tail and
 # redirects XapEntry's first instruction to our hook. The hook runs on the
@@ -46,21 +57,32 @@
 .equ AW_X0,           160           # (640-320)/2
 .equ AW_Y0,           20            # (240-200)/2
 
-# ---- RAM for the game ----------------------------------------------------------
+# ---- RAM for the game (MAME ONLY, see the top) ------------------------------------
 # Work RAM 0x50000000-0x503FFFFF is real but heavily used by the firmware, and is
-# the only region the SD read can DMA into. The 0x44000000 window (16 MB) is CPU-
-# writable scratch the firmware does not use, but the SD read cannot target it --
-# so the loader reads into a work-RAM staging buffer and copies to 0x44.
+# the only region the SD read can DMA into. The 0x44000000 window is NOT free RAM on
+# an instrument: it is CS1 = IC23, the battery-backed settings SRAM (above). In MAME's
+# upstream driver it is a 16 MB placeholder, which is the only reason this build runs.
+# The SD read cannot target it, so the loader reads into a work-RAM staging buffer
+# and copies to 0x44.
 .equ STAGING,         0x50300000    # work-RAM staging buffer for SD reads
-.equ STAGING_BIG,     0x50200000    # work-RAM buffer large enough for the whole AWDATA
+.equ STAGING_BIG,     0x50200000    # work-RAM buffer large enough for the whole AWDATA (in the TPAD pool!)
 .equ GAME_RAM,        0x44000000    # the game image + page buffers live here
 .equ PAGE_BITMAP_0,   0x44100000    # four 320x200 pages, one per 0x10000
 .equ PAGE_BITMAP_1,   0x44110000
 .equ PAGE_BITMAP_2,   0x44120000
 .equ PAGE_BITMAP_3,   0x44130000
 .equ PAGE_SIZE,       AW_W*AW_H     # 64000 bytes, one colour index per pixel
+.equ VM_POLY_BASE,    0x44050000    # vm.inc's three blocks
+.equ VM_INTERP_BASE,  0x44070000
+.equ VM_MISC_BASE,    0x44080000
+.equ HELP_BUF,        0x44140000    # 64000 bytes (the pages end at 0x44140000)
+.equ AW_FONT,         0x44480000    # anotherworld_chargen.rom, 768 bytes (8x8, chars 0x20+)
+.equ AW_STRIDX,       0x44490000    # str_index.rom, 2048 bytes (LE u16 offset per string id)
+.equ AW_STRDAT,       0x444A0000    # str_data.rom, 4096 bytes (NUL-terminated strings)
+.equ TRACE_BUF,       0x44800000    # main.s TraceInsn: 8 bytes/entry
+.equ TRACE_MAX,       200000        # enough to hold the whole intro
 
-# ---- RAM the VM reads (program 942; build 941 has each 0x10 lower: platform941.inc) ----
+# ---- RAM the VM reads (program 942; main.s Hook copies them to vm.inc's FWV_* variables) ----
 .equ KERNEL_MS,       0x500D3C68     # firmware 1 kHz millisecond counter (u32)
 .equ PANEL_CPR,       0x5006BE60     # CPR_SEGn button bitmap at PANEL_CPR + n
 .equ PANEL_CPL,       0x5006BE90     # CPL_SEGn / CPC_SEGn button bitmap at PANEL_CPL + n

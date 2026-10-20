@@ -23,22 +23,26 @@ HelpScreen:
     mov     d0, (HELP_TICK)
 hs_wait_help:                       # let go of HELP first
     call    HelpSleep, 0, 0
-    movbu   (BTN_HELP_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_HELP_OFS, a0), d0
     and     BTN_HELP_BIT, d0
     bne     hs_wait_help
     call    HelpDrawPage, 0, 0
 hs_poll:
     call    HelpSleep, 0, 0
-    movbu   (BTN_PAGE_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_PAGE_OFS, a0), d0
     and     BTN_EXIT_BIT, d0
     bne     hs_exit
-    movbu   (BTN_HELP_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_HELP_OFS, a0), d0
     and     BTN_HELP_BIT, d0
     bne     hs_exit
     call    HelpGameInput, 0, 0
     cmp     0, d0
     bne     hs_exit
-    movbu   (BTN_PAGE_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_PAGE_OFS, a0), d0
     and     BTN_PAGEUP_BIT, d0
     beq     hs_no_up
     mov     (HELP_PAGE_NO), d0      # PAGE UP: previous page
@@ -48,7 +52,8 @@ hs_poll:
     mov     d0, (HELP_PAGE_NO)
     bra     hs_page_draw
 hs_no_up:
-    movbu   (BTN_PAGE_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_PAGE_OFS, a0), d0
     and     BTN_PAGEDN_BIT, d0
     beq     hs_idle
     mov     (HELP_PAGE_NO), d0      # PAGE DOWN: next page
@@ -60,7 +65,8 @@ hs_page_draw:
     call    HelpDrawPage, 0, 0
 hs_page_wait:                       # wait for PAGE UP / DOWN to be released
     call    HelpSleep, 0, 0
-    movbu   (BTN_PAGE_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_PAGE_OFS, a0), d0
     and     BTN_PAGEUP_BIT | BTN_PAGEDN_BIT, d0
     bne     hs_page_wait
     mov     HELP_BUF, a0            # show the page again: the firmware may have repainted
@@ -79,10 +85,12 @@ hs_idle:                            # nothing pressed: re-show the page every HE
     bra     hs_poll
 hs_exit:                            # wait until every control is released
     call    HelpSleep, 0, 0
-    movbu   (BTN_PAGE_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_PAGE_OFS, a0), d0
     and     BTN_EXIT_BIT, d0
     bne     hs_exit
-    movbu   (BTN_HELP_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_HELP_OFS, a0), d0
     and     BTN_HELP_BIT, d0
     bne     hs_exit
     call    HelpGameInput, 0, 0
@@ -123,19 +131,24 @@ HelpGameInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
     clr     d2
-    movbu   (BTN_LEFT_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_LEFT_OFS, a0), d0
     and     BTN_LEFT_BIT, d0
     or      d0, d2
-    movbu   (BTN_RIGHT_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_RIGHT_OFS, a0), d0
     and     BTN_RIGHT_BIT, d0
     or      d0, d2
-    movbu   (BTN_UP_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_UP_OFS, a0), d0
     and     BTN_UP_BIT, d0
     or      d0, d2
-    movbu   (BTN_DOWN_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_DOWN_OFS, a0), d0
     and     BTN_DOWN_BIT, d0
     or      d0, d2
-    movbu   (BTN_FIRE_ADDR), d0
+    mov     (FWV_PANEL), a0
+    movbu   (BTN_FIRE_OFS, a0), d0
     and     BTN_FIRE_BIT, d0
     or      d0, d2
     clr     d0                      # any note 0..127

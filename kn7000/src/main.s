@@ -1,7 +1,11 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# Another World on the Technics SX-KN7000 -- platform layer.
+# Another World on the Technics SX-KN7000 -- platform layer of the SP7001 ride-along build.
+#
+# *** MAME ONLY. NOT FOR A REAL INSTRUMENT. *** It keeps the game in the 0x44000000 window, which on
+# a real KN7000 is IC23, the battery-backed SRAM with the panel settings and memories (platform.inc).
+# The real-instrument build is the STYLE CONVERT one, cnv_main.s (README-CNV.md).
 #
 # A port of the Another World bytecode VM from the KN5000 version
 # (github.com/felipesanches/kn5000-anotherworld, TLCS-900) to the KN7000's
@@ -11,7 +15,8 @@
 #   * The hook runs as BASEEXT's XapEntry, on the firmware's loading task -- the
 #     only context where the SD file API is valid. It loads every game resource
 #     (C:\TECHNICS\DATA\AWRxx.AW) plus the font and strings from the card into the 0x44
-#     scratch window, starts our game task, then resumes XapEntry so BASEEXT still works.
+#     window (MAME's placeholder RAM; IC23 on an instrument), starts our game task, then resumes
+#     XapEntry so BASEEXT still works.
 #   * The game task runs the VM: GameReset, then ExecuteInstruction forever. The VM
 #     blits its front page to the 640x240 RGB565 LCD frame through a 16-colour
 #     palette; it persists on the static SP7001 screen (the firmware repaints only
@@ -33,6 +38,14 @@ Hook:
     mov     a0, (0x18, sp)
     mov     a1, (0x1c, sp)
     call    LoadGameData, 0, 0      # SD load here, where the file API is valid
+    mov     KERNEL_MS, d0           # program 942's addresses for the shared code (vm.inc FWV_*)
+    mov     d0, (FWV_KERNEL_MS)
+    mov     PANEL_CPR, d0
+    mov     d0, (FWV_PANEL)
+    mov     MIDIIN1_RXQ, d0
+    mov     d0, (FWV_MIDIIN1)
+    mov     MIDIOUT1_TXQ, d0
+    mov     d0, (FWV_MIDIOUT1)
     call    StartTask, 0, 0
     mov     (0x10, sp), d0
     mov     (0x14, sp), d1
@@ -295,6 +308,45 @@ lgd_flag:
     mov     d0, (a0)
 lgd_done:
     ret     [d2,d3,a2,a3], 0x30
+
+# =================================================================================
+# The shared VM's platform hooks (interp.s). Every resource is resident here.
+# EnsurePart(d0 = part id): nothing to load. Leaf.
+EnsurePart:
+    rets
+
+# BitmapData(d0 = resource id) -> a0 = its 32,000 bytes of planes (resident, unpacked). Leaf.
+BitmapData:
+    and     0xff, d0
+    asl     2, d0
+    mov     ResAddr, a0
+    add     d0, a0
+    mov     (a0), a0
+    rets
+
+# TraceInsn(d1 = opcode, kept): log (frame u16, thread u8, opcode u8, pc u16) to TRACE_BUF.
+TraceInsn:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     (TRACE_COUNT), d0
+    cmp     TRACE_MAX, d0
+    bge     ti_ret
+    mov     d0, d3
+    asl     3, d3
+    mov     TRACE_BUF, a3
+    add     d3, a3
+    movhu   (FRAME_NO), d3
+    movhu   d3, (a3)
+    movbu   (CURRENT_THREAD), d3
+    movbu   d3, (2, a3)
+    movbu   d1, (3, a3)
+    movhu   (VM_PC), d3
+    movhu   d3, (4, a3)
+    inc     d0
+    mov     TRACE_COUNT, a3
+    mov     d0, (a3)
+ti_ret:
+    ret     [d2,d3,a2,a3], 0x20
 
 .include "display.s"
 path_font:

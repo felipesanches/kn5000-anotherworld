@@ -1,0 +1,690 @@
+# (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
+# Licensed under the terms of the GNU General Public License v3 or later
+#
+# fwfind.s -- AW.CNV's run-time firmware search. AW.CNV carries no firmware address: on its first
+# calls it finds what it needs by the code, in the program flash (0x48400000-0x487FFFFF) and in the
+# kernel library the boot copies to RAM at 0x4C000000, the way the ROM dumper's loader does
+# (technics-roms-disasm kn7000/tools/cnv_romdump/loader.s, whose FindSig, CountSig, Read32U and file
+# signatures are reused here; that loader ran on the owner's program 893 on 2026-10-19).
+# tools/aw_find_fw.py runs exactly these searches, with the same rules, over the program images of
+# 893, 935, 941 and 942, and checks the 941 and 942 results against the addresses measured in MAME.
+#
+# FwStep(d0 = step 0..FW_STEPS-1) -> d0 = 0 when that step found everything it looks for, else 1.
+# One step per converter call (cnv_main.s), each a scan or two of the flash. What they find:
+#   0 panel   the panel decoder's two "mov CPR, a0 ... mov CPL, a0" sites: one hit each, the same two
+#             bitmaps, CPL = CPR + 0x30, CPR in work RAM                         -> FWV_PANEL
+#   1 clock   the routine the firmware yields with (adds d0 ms to the kernel's millisecond counter
+#             and rotates the ready queue until then), in the library RAM: one hit, its three counter
+#             operands equal; and the kernel's 1 kHz tick handler: one hit, its two counter operands
+#             equal to that                                                     -> FW_DLY, FWV_KERNEL_MS
+#   2 files   the fmm layer as the dumper finds it (the drive switch, fmmopen within 4 KB after it,
+#             fmmclose and fmmread by their dispatch tables), and OpenHere, the open-in-the-current-
+#             folder routine STYLE CONVERT loads a converter with: one hit, whose last call enters
+#             fmmopen after its 5-byte prologue                                  -> FW_OPEN, FW_READ, FW_CLOSE
+#   3 tasks   the firmware's own "mov N, d0; mov X, a0; call cre_tsk; mov N, d0; clr d1; call sta_tsk"
+#             sites with both targets in the library: at least two, all agreeing, each a kernel entry
+#             stub ("add -4, sp; mov d1, (0, sp)")                               -> FW_CRE, FW_STA
+#   4 exit    its "clr d0; movbu d0, (X); call exd_tsk; ret" sites: at least two, all agreeing, a
+#             stub that is neither cre_tsk nor sta_tsk                           -> FW_EXD
+#   5 rings   the library's per-port MIDI ring wrappers: one hit, both headers in work RAM, MIDI IN 1
+#             below MIDI OUT 1                                                   -> FWV_MIDIIN1, FWV_MIDIOUT1
+# Calling convention as the rest of the port; every routine that calls makes a frame first.
+
+.equ FL_LO,         0x48400000      # the program flash, as the dumper scans it
+.equ FL_HI,         0x487FFF00
+.equ LIB_LO,        0x4C000000      # the kernel library in RAM
+.equ LIB_HI,        0x4C040000
+.equ WR_LO,         0x50000000      # work RAM: where a found RAM address must lie
+.equ WR_HI,         0x503FFF00
+# the search's scratch (FW_VARS + 0x40.., platformcnv.inc)
+.equ FS_LASTHIT,    FW_VARS + 0x40  # CountSig: the first hit
+.equ FS_TOPEN,      FW_VARS + 0x44  # FindFileSig: fmmopen's dispatch table
+.equ FS_DRIVE,      FW_VARS + 0x48  # FindFileSig: the drive byte's address
+.equ FS_EXT,        FW_VARS + 0x4C  # FindFileSig: the drive switch
+.equ FS_HITS,       FW_VARS + 0x50
+.equ FS_A,          FW_VARS + 0x54  # a found pair, while the rest of the sites are checked
+.equ FS_B,          FW_VARS + 0x58
+.equ FS_N,          FW_VARS + 0x5C
+.equ FS_BAD,        FW_VARS + 0x60
+
+FwStep:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    cmp     0, d0
+    beq     fw_panel
+    cmp     1, d0
+    beq     fw_clock
+    cmp     2, d0
+    beq     fw_files
+    cmp     3, d0
+    beq     fw_tasks
+    cmp     4, d0
+    beq     fw_exit
+    cmp     5, d0
+    beq     fw_rings
+    bra     fw_no
+
+# ---- 0: the panel switch bitmaps ----------------------------------------------------------------
+fw_panel:
+    mov     sig_panel1, a0
+    call    CountFlash, 0, 0
+    cmp     1, d0
+    bne     fw_no
+    mov     (FS_LASTHIT), a2
+    mov     sig_panel2, a0
+    call    CountFlash, 0, 0
+    cmp     1, d0
+    bne     fw_no
+    mov     (FS_LASTHIT), a3
+    mov     a2, a0                  # CPR, from the first site
+    add     2, a0
+    call    Read32U, 0, 0
+    mov     d0, d2
+    mov     a3, a0                  # the same from the second
+    add     2, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     fw_no
+    mov     a2, a0                  # CPL from both, = CPR + 0x30
+    add     15, a0
+    call    Read32U, 0, 0
+    mov     d0, d3
+    mov     a3, a0
+    add     13, a0
+    call    Read32U, 0, 0
+    cmp     d3, d0
+    bne     fw_no
+    mov     d2, d0
+    add     PANEL_CPL_OFS, d0
+    cmp     d3, d0
+    bne     fw_no
+    mov     d2, d0
+    call    InWorkRam, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     d2, (FWV_PANEL)
+    bra     fw_yes
+
+# ---- 1: the yield routine and the kernel's millisecond counter ----------------------------------
+fw_clock:
+    mov     sig_dly, a0
+    mov     LIB_LO, d0
+    mov     LIB_HI - 0x100, d1
+    call    CountSig, 0, 0
+    cmp     1, d0
+    bne     fw_no
+    mov     (FS_LASTHIT), a2
+    mov     a2, a0
+    add     7, a0
+    call    Read32U, 0, 0
+    mov     d0, d2                  # the counter, three times in the routine
+    mov     a2, a0
+    add     14, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     fw_no
+    mov     a2, a0
+    add     30, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     fw_no
+    mov     sig_tick, a0            # and twice in the tick handler
+    call    CountFlash, 0, 0
+    cmp     1, d0
+    bne     fw_no
+    mov     (FS_LASTHIT), a3
+    mov     a3, a0
+    add     7, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     fw_no
+    mov     a3, a0
+    add     14, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     fw_no
+    mov     d2, d0
+    call    InWorkRam, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     a2, (FW_DLY)
+    mov     d2, (FWV_KERNEL_MS)
+    bra     fw_yes
+
+# ---- 2: the file routines -------------------------------------------------------------------------
+fw_files:
+    call    FindFileSig, 0, 0       # FW_FMMOPEN, FW_READ, FW_CLOSE
+    cmp     0, d0
+    beq     fw_no
+    mov     sig_openhere, a0
+    call    CountFlash, 0, 0
+    cmp     1, d0
+    bne     fw_no
+    mov     (FS_LASTHIT), a2
+    mov     a2, a3                  # its last call (cd rel16 ..), at +46, must enter fmmopen + 5
+    add     46, a3
+    movbu   (1, a3), d0
+    movbu   (2, a3), d1
+    asl     8, d1
+    or      d1, d0
+    exth    d0
+    add     a3, d0
+    mov     (FW_FMMOPEN), d1
+    add     5, d1
+    cmp     d1, d0
+    bne     fw_no
+    mov     a2, (FW_OPEN)
+    bra     fw_yes
+
+# ---- 3: cre_tsk and sta_tsk, from the firmware's own call sites ----------------------------------
+fw_tasks:
+    clr     d0
+    mov     d0, (FS_N)
+    mov     d0, (FS_BAD)
+    mov     FL_LO, a2
+ft_next:
+    mov     sig_cresta, a0
+    mov     a2, d0
+    mov     FL_HI, d1
+    call    FindSig, 0, 0
+    cmp     0, d0
+    beq     ft_done
+    mov     d0, a2                  # a hit: "fc dc X dd R 00 00 80 ?? 04 dd R 00 00"
+    movbu   (-2, a2), d0            # preceded by "mov N, d0" with the same N as the second one
+    cmp     0x80, d0
+    bne     ft_skip
+    movbu   (-1, a2), d0
+    movbu   (14, a2), d1
+    cmp     d1, d0
+    bne     ft_skip
+    mov     a2, a0                  # cre_tsk = hit + 6 + rel32
+    add     7, a0
+    call    Read32U, 0, 0
+    add     6, d0
+    add     a2, d0
+    mov     d0, d2
+    mov     a2, a0                  # sta_tsk = hit + 16 + rel32
+    add     17, a0
+    call    Read32U, 0, 0
+    add     16, d0
+    add     a2, d0
+    mov     d0, d3
+    mov     d2, d0                  # both into the library, or not a site of these
+    call    InLib, 0, 0
+    cmp     0, d0
+    bne     ft_skip
+    mov     d3, d0
+    call    InLib, 0, 0
+    cmp     0, d0
+    bne     ft_skip
+    mov     (FS_N), d0
+    cmp     0, d0
+    bne     ft_cmp
+    mov     d2, (FS_A)
+    mov     d3, (FS_B)
+    bra     ft_count
+ft_cmp:
+    mov     (FS_A), d0              # every site must name the same two routines
+    cmp     d2, d0
+    bne     ft_disagree
+    mov     (FS_B), d0
+    cmp     d3, d0
+    beq     ft_count
+ft_disagree:
+    mov     1, d0
+    mov     d0, (FS_BAD)
+ft_count:
+    mov     (FS_N), d0
+    inc     d0
+    mov     d0, (FS_N)
+ft_skip:
+    inc     a2
+    bra     ft_next
+ft_done:
+    mov     (FS_BAD), d0
+    cmp     0, d0
+    bne     fw_no
+    mov     (FS_N), d0
+    cmp     2, d0
+    blt     fw_no
+    mov     (FS_A), a0
+    call    IsStub, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     (FS_B), a0
+    call    IsStub, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     (FS_A), d0
+    mov     d0, (FW_CRE)
+    mov     (FS_B), d0
+    mov     d0, (FW_STA)
+    bra     fw_yes
+
+# ---- 4: exd_tsk, from the firmware's tasks that end themselves ------------------------------------
+fw_exit:
+    clr     d0
+    mov     d0, (FS_N)
+    mov     d0, (FS_BAD)
+    mov     FL_LO, a2
+fx_next:
+    mov     sig_exd, a0
+    mov     a2, d0
+    mov     FL_HI, d1
+    call    FindSig, 0, 0
+    cmp     0, d0
+    beq     fx_done
+    mov     d0, a2                  # a hit: "fc 82 X dd R 00 00 df", preceded by "clr d0"
+    movbu   (-1, a2), d0
+    cmp     0, d0
+    bne     fx_skip
+    mov     a2, a0                  # exd_tsk = hit + 6 + rel32
+    add     7, a0
+    call    Read32U, 0, 0
+    add     6, d0
+    add     a2, d0
+    mov     d0, d2
+    call    InLib, 0, 0
+    cmp     0, d0
+    bne     fx_skip
+    mov     (FS_N), d0
+    cmp     0, d0
+    bne     fx_cmp
+    mov     d2, (FS_A)
+    bra     fx_count
+fx_cmp:
+    mov     (FS_A), d0
+    cmp     d2, d0
+    beq     fx_count
+    mov     1, d0
+    mov     d0, (FS_BAD)
+fx_count:
+    mov     (FS_N), d0
+    inc     d0
+    mov     d0, (FS_N)
+fx_skip:
+    inc     a2
+    bra     fx_next
+fx_done:
+    mov     (FS_BAD), d0
+    cmp     0, d0
+    bne     fw_no
+    mov     (FS_N), d0
+    cmp     2, d0
+    blt     fw_no
+    mov     (FS_A), a0
+    call    IsStub, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     (FS_A), d0              # and not one of the two found before
+    mov     (FW_CRE), d1
+    cmp     d1, d0
+    beq     fw_no
+    mov     (FW_STA), d1
+    cmp     d1, d0
+    beq     fw_no
+    mov     d0, (FW_EXD)
+    bra     fw_yes
+
+# ---- 5: the MIDI rings -------------------------------------------------------------------------
+fw_rings:
+    mov     sig_rings, a0
+    call    CountFlash, 0, 0
+    cmp     1, d0
+    bne     fw_no
+    mov     (FS_LASTHIT), a2
+    mov     a2, a0
+    add     17, a0
+    call    Read32U, 0, 0
+    mov     d0, d2                  # MIDI IN 1 receive
+    mov     a2, a0
+    add     35, a0
+    call    Read32U, 0, 0
+    mov     d0, d3                  # MIDI OUT 1 transmit
+    cmp     d3, d2
+    bcc     fw_no                   # IN below OUT
+    mov     d2, d0
+    call    InWorkRam, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     d3, d0
+    call    InWorkRam, 0, 0
+    cmp     0, d0
+    bne     fw_no
+    mov     d2, (FWV_MIDIIN1)
+    mov     d3, (FWV_MIDIOUT1)
+fw_yes:
+    clr     d0
+    bra     fw_ret
+fw_no:
+    mov     1, d0
+fw_ret:
+    ret     [d2,d3,a2,a3], 0x30
+
+# InWorkRam(d0 = address) -> d0 = 0 inside [WR_LO, WR_HI], else 1. Leaf.
+InWorkRam:
+    mov     WR_LO, d1
+    cmp     d1, d0
+    bcs     iw_no
+    mov     WR_HI, d1
+    cmp     d1, d0
+    bhi     iw_no
+    clr     d0
+    rets
+iw_no:
+    mov     1, d0
+    rets
+
+# InLib(d0 = address) -> d0 = 0 inside [LIB_LO, LIB_HI), else 1. Leaf.
+InLib:
+    mov     LIB_LO, d1
+    cmp     d1, d0
+    bcs     il_no
+    mov     LIB_HI, d1
+    cmp     d1, d0
+    bcc     il_no
+    clr     d0
+    rets
+il_no:
+    mov     1, d0
+    rets
+
+# IsStub(a0 = routine) -> d0 = 0 when it starts with a kernel entry stub's
+# "add -4, sp; mov d1, (0, sp)" (f8 fe fc 46 00), else 1. Leaf.
+IsStub:
+    movbu   (a0), d0
+    cmp     0xf8, d0
+    bne     is_no
+    movbu   (1, a0), d0
+    cmp     0xfe, d0
+    bne     is_no
+    movbu   (2, a0), d0
+    cmp     0xfc, d0
+    bne     is_no
+    movbu   (3, a0), d0
+    cmp     0x46, d0
+    bne     is_no
+    movbu   (4, a0), d0
+    cmp     0, d0
+    bne     is_no
+    rets
+is_no:
+    mov     1, d0
+    rets
+
+# CountFlash(a0 = signature) -> d0 = hits in the program flash; FS_LASTHIT = the first.
+CountFlash:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     FL_LO, d0
+    mov     FL_HI, d1
+    call    CountSig, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
+
+# FindFileSig -> d0 = 1 when the drive switch and the fmmopen/fmmclose/fmmread dispatchers were each
+# found exactly once (FW_FMMOPEN, FW_CLOSE, FW_READ), else 0. The dumper's (loader.s), without
+# fmmwrite.
+FindFileSig:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     sig_ext, a0
+    call    CountFlash, 0, 0
+    cmp     1, d0
+    bne     ff_no
+    mov     (FS_LASTHIT), a2
+    mov     a2, (FS_EXT)
+    mov     a2, a0
+    add     8, a0
+    call    Read32U, 0, 0
+    mov     d0, d2                  # the drive byte address, three times in the signature
+    mov     d0, (FS_DRIVE)
+    mov     a2, a0
+    add     18, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     ff_no
+    mov     a2, a0
+    add     27, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     ff_no
+    mov     sig_fmmopen, a0         # fmmopen, within 4 KB after the drive switch
+    mov     a2, d0
+    mov     a2, d1
+    add     0x1000, d1
+    call    CountSig, 0, 0
+    cmp     1, d0
+    bne     ff_no
+    mov     (FS_LASTHIT), a3
+    mov     a3, (FW_FMMOPEN)
+    mov     a3, a0
+    add     8, a0
+    call    Read32U, 0, 0
+    mov     d0, (FS_TOPEN)
+    mov     a3, a0
+    add     28, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     ff_no
+    mov     sig_close, a0           # fmmclose: table 12 bytes after fmmopen's
+    mov     5, d0
+    mov     12, d1
+    mov     25, a1
+    call    FindDispatcher, 0, 0
+    cmp     0, d0
+    beq     ff_no
+    mov     d0, (FW_CLOSE)
+    mov     sig_rw, a0              # fmmread: 0x3C bytes after
+    mov     8, d0
+    mov     0x3C, d1
+    mov     28, a1
+    call    FindDispatcher, 0, 0
+    cmp     0, d0
+    beq     ff_no
+    mov     d0, (FW_READ)
+    mov     1, d0
+    bra     ff_ret
+ff_no:
+    clr     d0
+ff_ret:
+    ret     [d2,d3,a2,a3], 0x30
+
+# FindDispatcher(a0 = signature, d0 = table operand offset, d1 = table distance from fmmopen's,
+# a1 = drive operand offset) -> d0 = the one hit within 4 KB of the drive switch whose table and
+# drive byte fit, or 0. (loader.s)
+FindDispatcher:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     a0, (0x14, sp)
+    mov     d0, (0x18, sp)
+    mov     (FS_TOPEN), d2
+    add     d1, d2
+    mov     a1, (0x1C, sp)
+    mov     (FS_EXT), a2
+    mov     a2, d3
+    add     0x1000, d3
+    mov     0, a3
+    clr     d0
+    mov     d0, (FS_HITS)
+fd_next:
+    mov     (0x14, sp), a0
+    mov     a2, d0
+    mov     d3, d1
+    call    FindSig, 0, 0
+    cmp     0, d0
+    beq     fd_done
+    mov     d0, a2
+    mov     a2, a0
+    mov     (0x18, sp), d0
+    add     d0, a0
+    call    Read32U, 0, 0
+    cmp     d2, d0
+    bne     fd_skip
+    mov     a2, a0
+    mov     (0x1C, sp), d0
+    add     d0, a0
+    call    Read32U, 0, 0
+    mov     (FS_DRIVE), d1
+    cmp     d1, d0
+    bne     fd_skip
+    mov     a2, a3
+    mov     (FS_HITS), d0
+    inc     d0
+    mov     d0, (FS_HITS)
+fd_skip:
+    inc     a2
+    bra     fd_next
+fd_done:
+    mov     (FS_HITS), d0
+    cmp     1, d0
+    bne     fd_none
+    mov     a3, d0
+    bra     fd_ret
+fd_none:
+    clr     d0
+fd_ret:
+    ret     [d2,d3,a2,a3], 0x30
+
+# CountSig(a0 = signature, d0 = start, d1 = end) -> d0 = hits; FS_LASTHIT = the first. (loader.s)
+CountSig:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     a0, a2
+    mov     d1, d3
+    clr     d2
+    mov     d2, (FS_LASTHIT)
+cs_next:
+    mov     a2, a0
+    mov     d3, d1
+    call    FindSig, 0, 0
+    cmp     0, d0
+    beq     cs_done
+    cmp     0, d2
+    bne     cs_more
+    mov     d0, (FS_LASTHIT)
+cs_more:
+    inc     d2
+    inc     d0
+    bra     cs_next
+cs_done:
+    mov     d2, d0
+    ret     [d2,d3,a2,a3], 0x30
+
+# FindSig(a0 = signature, d0 = start, d1 = end) -> d0 = first address in [start, end) where it
+# matches, or 0. Elements are 16-bit: 0x00nn = byte nn, 0x0100 = any byte, 0xFFFF = end; the first
+# is a byte. (loader.s)
+FindSig:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     a0, a2
+    movhu   (a2), d3
+    mov     d0, a3
+    mov     d1, (0x14, sp)
+fs_loop:
+    mov     (0x14, sp), d0
+    cmp     d0, a3
+    bcc     fs_none
+    movbu   (a3), d2
+    cmp     d3, d2
+    bne     fs_next
+    mov     a2, a0
+    mov     a3, a1
+fs_cmp:
+    movhu   (a0), d2
+    mov     0xFFFF, d0
+    cmp     d0, d2
+    beq     fs_hit
+    btst    0x100, d2
+    bne     fs_any
+    movbu   (a1), d1
+    cmp     d2, d1
+    bne     fs_next
+fs_any:
+    add     2, a0
+    inc     a1
+    bra     fs_cmp
+fs_next:
+    inc     a3
+    bra     fs_loop
+fs_hit:
+    mov     a3, d0
+    bra     fs_ret
+fs_none:
+    clr     d0
+fs_ret:
+    ret     [d2,d3,a2,a3], 0x30
+
+# Read32U(a0 = address) -> d0 = the little-endian u32 there, at any alignment. Leaf. (loader.s)
+Read32U:
+    movbu   (3, a0), d0
+    asl     8, d0
+    movbu   (2, a0), d1
+    or      d1, d0
+    asl     8, d0
+    movbu   (1, a0), d1
+    or      d1, d0
+    asl     8, d0
+    movbu   (a0), d1
+    or      d1, d0
+    rets
+
+# =================================================================================================
+# The signatures: 0x00nn = byte nn, 0x0100 = any byte (an operand that moves between builds), 0xFFFF
+# ends. tools/aw_find_fw.py carries the same ones.
+    .align  2
+sig_panel1:     # PanelFrameDecode: mov CPR, a0; mov a2, d0; and 0xc0, d0; beq; mov CPL, a0; ... (941 0x484AD22F)
+    .word   0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0xf1, 0xd8, 0xf8, 0xe0, 0xc0, 0xc8, 0x08
+    .word   0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0xf1, 0xd8, 0xf8, 0xe0, 0x0f, 0xf1, 0x60
+    .word   0xf0, 0x40, 0xf0, 0x5c, 0xFFFF
+sig_panel2:     # the same choice in the next routine (941 0x484AD3DD)
+    .word   0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0xf8, 0xef, 0xc0, 0xc8, 0x08
+    .word   0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0xf8, 0xb8, 0x10, 0x85, 0x0f, 0xf2, 0x0d
+    .word   0xf1, 0x64, 0xFFFF
+sig_dly:        # the yield routine: d2 = MS + d0; while (MS < d2) rotate the ready queue (941 lib 0x4C03DD6F)
+    .word   0xcf, 0xa0, 0xf8, 0xfe, 0xf0, 0xfc, 0xa6, 0x100, 0x100, 0x100, 0x100, 0xe2
+    .word   0xfc, 0xa4, 0x100, 0x100, 0x100, 0x100, 0xa2, 0xc7, 0x100, 0x00, 0x81
+    .word   0xcd, 0x100, 0x100, 0x00, 0x00, 0xfc, 0xa4, 0x100, 0x100, 0x100, 0x100
+    .word   0xa2, 0xc5, 0x100, 0x00, 0xdf, 0xa0, 0x18, 0xFFFF
+sig_tick:       # the kernel's 1 kHz tick handler: mov (MS), d0; inc d0; mov d0, (MS) (loader.s)
+    .word   0xcf, 0x80, 0xf8, 0xfe, 0xf0, 0xfc, 0xa4, 0x100, 0x100, 0x100, 0x100, 0x40
+    .word   0xfc, 0x81, 0x100, 0x100, 0x100, 0x100, 0xf8, 0xec, 0x01, 0xc8, 0x09
+    .word   0xdd, 0x100, 0x100, 0x100, 0x100, 0x80, 0x0c, 0xfa, 0xfc, 0xff, 0xf7, 0xcb, 0xcb
+    .word   0xfc, 0xac, 0x18, 0x01, 0x00, 0x34, 0xfa, 0xe0, 0x00, 0xff, 0xf8, 0xe4, 0x01
+    .word   0xfc, 0x83, 0x18, 0x01, 0x00, 0x34, 0xFFFF
+sig_ext:        # SetExtMode, ResetExtMode, CheckExtMode (loader.s; 941 0x48532346)
+    .word   0x81, 0x15, 0xa5, 0x03, 0xc2, 0x08, 0xfc, 0x82, 0x100, 0x100, 0x100, 0x100
+    .word   0xde, 0x00, 0x00, 0x00, 0xfc, 0x82, 0x100, 0x100, 0x100, 0x100, 0xde, 0x00, 0x00
+    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0xde, 0x00, 0x00, 0xFFFF
+sig_fmmopen:    # fmmopen (loader.s sig_open; 941 0x48532390)
+    .word   0xcf, 0x30, 0xf8, 0xfe, 0xe4, 0x97, 0xfc, 0xde, 0x100, 0x100, 0x100, 0x100
+    .word   0x3d, 0x21, 0x10, 0x85, 0xf4, 0xdb, 0xf0, 0x42, 0x49, 0xf0, 0x51, 0x45, 0x44, 0xd9
+    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0x3d, 0x54, 0x21, 0x10, 0xf3, 0xa1, 0x9d
+    .word   0xf0, 0xf2, 0xdf, 0x30, 0x24, 0xFFFF
+sig_close:      # fmmclose and the other argument-less dispatchers (loader.s; 941 0x485323BC)
+    .word   0xf8, 0xfe, 0xec, 0xfc, 0xdd, 0x100, 0x100, 0x100, 0x100
+    .word   0x3c, 0x20, 0x08, 0x85, 0xf4, 0xdb, 0xf0, 0x41, 0x45, 0xf0, 0x50, 0x41, 0x44, 0xd9
+    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0x3c, 0x54, 0x20, 0x08, 0xf3, 0x80
+    .word   0xf0, 0xf0, 0xdf, 0x00, 0x14, 0xFFFF
+sig_rw:         # fmmread and fmmwrite (loader.s; 941 0x48532463, 0x4853248F)
+    .word   0xcf, 0xa0, 0xf8, 0xfe, 0xe4, 0x82, 0xfc, 0xde, 0x100, 0x100, 0x100, 0x100
+    .word   0x3d, 0x21, 0x10, 0x85, 0xf4, 0xdb, 0xf0, 0x42, 0x49, 0xf0, 0x51, 0x45, 0x44, 0xd9
+    .word   0xfc, 0xa8, 0x100, 0x100, 0x100, 0x100, 0x3d, 0x54, 0x21, 0x10, 0xf3, 0x91, 0x88
+    .word   0xf0, 0xf1, 0xdf, 0xa0, 0x24, 0xFFFF
+sig_openhere:   # OpenHere(a0 = name, a1 = mode): drive + current folder + name, then fmmopen (941 0x48531AC5)
+    .word   0xcf, 0x30, 0xfa, 0xfe, 0x64, 0xff, 0x47, 0xb0, 0x93, 0x3e, 0x22, 0x10, 0x98
+    .word   0xfc, 0xdd, 0x100, 0x100, 0x100, 0x100, 0xcd, 0x100, 0x100, 0x00, 0x00, 0x98
+    .word   0xfc, 0xdd, 0x100, 0x100, 0x100, 0x100, 0xcd, 0x100, 0x100, 0x00, 0x00, 0x98, 0x9d
+    .word   0xcd, 0x100, 0x100, 0x00, 0x00, 0x5d, 0xb0, 0x98, 0xcd, 0x100, 0x100, 0x30, 0x24
+    .word   0xdf, 0x30, 0xa4, 0xFFFF
+sig_cresta:     # mov X, a0; call cre_tsk, 0, 0; mov N, d0; clr d1; call sta_tsk, 0, 0 (941 0x48405D51)
+    .word   0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0xdd, 0x100, 0x100, 0x100, 0x100, 0x00, 0x00
+    .word   0x80, 0x100, 0x04, 0xdd, 0x100, 0x100, 0x100, 0x100, 0x00, 0x00, 0xFFFF
+sig_exd:        # movbu d0, (X); call exd_tsk, 0, 0; ret (941 0x48472381)
+    .word   0xfc, 0x82, 0x100, 0x100, 0x100, 0x100, 0xdd, 0x100, 0x100, 0x100, 0x100, 0x00, 0x00
+    .word   0xdf, 0xFFFF
+sig_rings:      # the end of one wrapper, then MIDI IN 1's and MIDI OUT 1's enqueue wrappers (941 0x487DD987)
+    .word   0x2c, 0xff, 0x03, 0xfc, 0x83, 0x100, 0x100, 0x100, 0x100, 0xde, 0x00, 0x00
+    .word   0xf8, 0xfe, 0xf0, 0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100, 0x14, 0xcd, 0x100, 0x100
+    .word   0x30, 0x08, 0xdf, 0x00, 0x10, 0xf8, 0xfe, 0xf0, 0xfc, 0xdc, 0x100, 0x100, 0x100, 0x100
+    .word   0x14, 0xcd, 0x100, 0x100, 0x30, 0x08, 0xdf, 0x00, 0x10, 0xFFFF
+    .align  4

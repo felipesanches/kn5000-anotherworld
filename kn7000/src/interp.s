@@ -95,11 +95,15 @@ ResPtr:
 # LoadBitmap(d0 = resource id): draw a 320x200 screen bitmap into page 0, as the original
 # engine's copyBitmapPtr. The MS-DOS bitmap is four 8000-byte bit planes; plane k supplies
 # bit k of every pixel, and within a byte the MSB is the leftmost of its 8 pixels
-# (rustyworld video.rs load_bg). Page 0 is cleared, then each plane ORs its bit in.
+# (rustyworld video.rs load_bg). Page 0 is cleared, then each plane ORs its bit in. The
+# platform's BitmapData gives the planes (the STYLE CONVERT build keeps bitmaps packed and
+# unpacks one here); a bitmap that is not there leaves page 0 alone.
 LoadBitmap:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    call    ResPtr, 0, 0
+    call    BitmapData, 0, 0        # d0 = id -> a0 = the 32,000 bytes of planes, or 0
+    cmp     0, a0
+    beq     lb_ret
     mov     a0, a2                  # a2 = next plane byte (the planes are consecutive)
     mov     PAGE_BITMAP_0, a3
     mov     PAGE_SIZE / 4, d2
@@ -170,11 +174,13 @@ lb_next:
     asl     1, d3
     cmp     0x10, d3
     bne     lb_plane
+lb_ret:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
-# InitForPart(d0 = partId): reset threads and point the VM at this part's resources
-# (PartTable; every part's resources are resident). An id outside 0x3E80..0x3E89 is ignored.
+# InitForPart(d0 = partId): make the part's resources resident (the platform's EnsurePart: a
+# no-op where everything is resident, a load from the floppy in the STYLE CONVERT build), reset
+# threads and point the VM at them (PartTable). An id outside 0x3E80..0x3E89 is ignored.
 InitForPart:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
@@ -183,6 +189,9 @@ InitForPart:
     blt     ifp_ret
     cmp     PART_LAST, d0
     bgt     ifp_ret
+    mov     d0, d2
+    call    EnsurePart, 0, 0        # d0 = partId; returns once its resources are resident
+    mov     d2, d0
     movhu   d0, (CURRENT_PART_ID)
     mov     PREV_LR_BITS, a0        # reset the sticky direction state on a part switch
     clr     d1
@@ -250,8 +259,11 @@ ifp_ret:
 GameReset:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    clr     d0                      # reset the instruction trace
-    mov     TRACE_COUNT, a0
+    clr     d0
+    mov     d0, (GUARD_WHAT)        # a new game: nothing refused yet
+    mov     d0, (GUARD_ADDR)
+    mov     d0, (GUARD_COUNT)
+    mov     TRACE_COUNT, a0         # reset the instruction trace
     mov     d0, (a0)
     mov     FRAME_NO, a0
     mov     d0, (a0)
@@ -415,6 +427,9 @@ FillPageOp:
     add     -0x10, sp
     mov     d1, d3                  # save colour
     call    GetPagePtr, 0, 0        # d0 = pageId -> a0 = page
+    call    GuardPage, 0, 0         # refuse a page pointer that is not a page
+    cmp     0, d0
+    bne     fpo_ret
     mov     a0, a2
     and     0xff, d3
     mov     PAGE_SIZE, d2
@@ -423,6 +438,7 @@ fpo_loop:
     inc     a2
     add     -1, d2
     bne     fpo_loop
+fpo_ret:
     ret     [d2,d3,a2,a3], 0x20
 
 # ================================================================================
@@ -442,6 +458,13 @@ CopyPage:
     mov     d2, d0                  # srcId
     call    GetPagePtr, 0, 0
     mov     a0, a2                  # a2 = src base
+    call    GuardPage, 0, 0         # refuse page pointers that are not pages
+    cmp     0, d0
+    bne     cp_ret
+    mov     a3, a0
+    call    GuardPage, 0, 0
+    cmp     0, d0
+    bne     cp_ret
     # self-copy guard (matches the oracle's early returns)
     mov     a2, d0
     mov     a3, d1
@@ -547,12 +570,14 @@ cp_ret:
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    movbu   (BTN_HELP_ADDR), d0     # HELP: pause and show the help screens (help.s)
+    mov     (FWV_PANEL), a0         # HELP: pause and show the help screens (help.s)
+    movbu   (BTN_HELP_OFS, a0), d0
     and     BTN_HELP_BIT, d0
     beq     ri_nohelp
     call    HelpScreen, 0, 0
 ri_nohelp:
-    movbu   (BTN_CODES_ADDR), d0    # OTHER PART & FR: the level-code screen, as the DOS
+    mov     (FWV_PANEL), a0         # OTHER PART & FR: the level-code screen, as the DOS
+    movbu   (BTN_CODES_OFS, a0), d0
     and     BTN_CODES_BIT, d0       # game's C key -- not from the protection or code screens
     beq     ri_nocodes
     movhu   (CURRENT_PART_ID), d0
@@ -595,32 +620,32 @@ ri_clear:
 #      write the six hero variables (d2 is preserved across WriteVar). ----
 ri_gameplay:
     clr     d2                      # d2 = OR of held inputs' AW masks
-    mov     BTN_RIGHT_ADDR, a0      # RIGHT -> mask |= 1
-    movbu   (a0), d0
+    mov     (FWV_PANEL), a0         # RIGHT -> mask |= 1
+    movbu   (BTN_RIGHT_OFS, a0), d0
     and     BTN_RIGHT_BIT, d0
     beq     rig_nr
     or      1, d2
 rig_nr:
-    mov     BTN_LEFT_ADDR, a0       # LEFT -> mask |= 2
-    movbu   (a0), d0
+    mov     (FWV_PANEL), a0         # LEFT -> mask |= 2
+    movbu   (BTN_LEFT_OFS, a0), d0
     and     BTN_LEFT_BIT, d0
     beq     rig_nl
     or      2, d2
 rig_nl:
-    mov     BTN_DOWN_ADDR, a0       # DOWN -> mask |= 4
-    movbu   (a0), d0
+    mov     (FWV_PANEL), a0         # DOWN -> mask |= 4
+    movbu   (BTN_DOWN_OFS, a0), d0
     and     BTN_DOWN_BIT, d0
     beq     rig_nd
     or      4, d2
 rig_nd:
-    mov     BTN_UP_ADDR, a0         # UP -> mask |= 8
-    movbu   (a0), d0
+    mov     (FWV_PANEL), a0         # UP -> mask |= 8
+    movbu   (BTN_UP_OFS, a0), d0
     and     BTN_UP_BIT, d0
     beq     rig_nu
     or      8, d2
 rig_nu:
-    mov     BTN_FIRE_ADDR, a0       # FIRE -> mask |= 0x80
-    movbu   (a0), d0
+    mov     (FWV_PANEL), a0         # FIRE -> mask |= 0x80
+    movbu   (BTN_FIRE_OFS, a0), d0
     and     BTN_FIRE_BIT, d0
     beq     rig_nf
     or      0x80, d2
@@ -751,9 +776,9 @@ ri_ret:
 # NotesInit: point each tracker at its ring. The read pointer is left 0, so the first poll
 # syncs to the ring's newest byte and starts with no notes held.
 NotesInit:
-    mov     MIDIIN1_RXQ, d0
+    mov     (FWV_MIDIIN1), d0
     mov     d0, (NOTES_MIDI + NS_HDR)
-    mov     MIDIOUT1_TXQ, d0
+    mov     (FWV_MIDIOUT1), d0
     mov     d0, (NOTES_KBD + NS_HDR)
     clr     d0
     mov     d0, (NOTES_MIDI + NS_RP)
@@ -988,14 +1013,15 @@ nt_loop:
     movhu   d0, (a2)
     # Pace to the AW model: this frame should last var[0xFF] * SLICE_MS ms. Sleep only
     # the remainder after the work already done this frame (measured with the firmware's
-    # 1 kHz KERNEL_MS), clamped to [MIN_YIELD_MS, MAX_YIELD_MS] so the firmware always
+    # 1 kHz counter, FWV_KERNEL_MS), clamped to [MIN_YIELD_MS, MAX_YIELD_MS] so the firmware always
     # gets time and a bad slice count can't freeze us. Then stamp the next frame's start.
     mov     VAR_PAUSE_SLICES, d0
     call    ReadVar, 0, 0           # d0 = var[0xFF] (slice count)
     and     0xffff, d0
     mov     SLICE_MS, d1
     mul     d1, d0                  # d0 = target_ms = slices * SLICE_MS
-    mov     (KERNEL_MS), d1         # now
+    mov     (FWV_KERNEL_MS), a0
+    mov     (a0), d1                # now
     mov     (FRAME_START_MS), d2    # start of this frame
     sub     d2, d1                  # d1 = elapsed work ms
     sub     d1, d0                  # d0 = sleep_ms = target - elapsed
@@ -1009,7 +1035,8 @@ nt_minok:
 nt_maxok:
     mov     DLY_TSK, a1
     calls   (a1)                    # yield sleep_ms to the firmware
-    mov     (KERNEL_MS), d0
+    mov     (FWV_KERNEL_MS), a0
+    mov     (a0), d0
     mov     d0, (FRAME_START_MS)    # next frame starts now (after the sleep)
     call    ReadInput, 0, 0         # map the keybed to the fire button (intro skip)
     # deferred part switch, requested by OpLoad (0x19 with id >= 0x3E80). The intro
@@ -1093,25 +1120,7 @@ ExecuteInstruction:
     add     d0, a2
     movbu   (a2), d1                # d1 = opcode
     inc     a2
-    # --- VM instruction trace: (frame u16, thread u8, opcode u8, pc u16) ---
-    mov     (TRACE_COUNT), d0
-    cmp     TRACE_MAX, d0
-    bge     ei_notrace
-    mov     d0, d3
-    asl     3, d3
-    mov     TRACE_BUF, a3
-    add     d3, a3
-    movhu   (FRAME_NO), d3
-    movhu   d3, (a3)
-    movbu   (CURRENT_THREAD), d3
-    movbu   d3, (2, a3)
-    movbu   d1, (3, a3)
-    movhu   (VM_PC), d3
-    movhu   d3, (4, a3)
-    inc     d0
-    mov     TRACE_COUNT, a3
-    mov     d0, (a3)
-ei_notrace:
+    call    TraceInsn, 0, 0         # the platform's instruction trace (d1 = opcode, kept; vm.inc)
     # --- 0x80: VIDEO (cinematic, CUR_VIDEO_1) ---
     mov     d1, d0
     and     0x80, d0
@@ -1320,19 +1329,37 @@ OpCall:
     movhu   (VM_PC), d0
     add     3, d0
     mov     (VM_SP_PTR), a3
+    mov     a3, d1                  # guard: the push must land inside VM_STACK
+    cmp     VM_STACK, d1
+    bcs     oc_bad
+    cmp     VM_STACK + VM_STACK_SIZE - 2, d1
+    bhi     oc_bad
     movhu   d0, (a3)
     add     2, a3
     mov     a3, (VM_SP_PTR)
     movhu   d3, (VM_PC)
+    bra     ei_ret
+oc_bad:
+    mov     GUARD_VMSTACK, d0       # d1 = the stack pointer: refuse the call, stop the game
+    call    GuardTrip, 0, 0
     bra     ei_ret
 
 # ---- 0x05 RET: PC = pop -------------------------------------------------------
 OpRet:
     mov     (VM_SP_PTR), a3
     add     -2, a3
+    mov     a3, d1                  # guard: the pop must come from inside VM_STACK
+    cmp     VM_STACK, d1
+    bcs     or_bad
+    cmp     VM_STACK + VM_STACK_SIZE - 2, d1
+    bhi     or_bad
     movhu   (a3), d0
     mov     a3, (VM_SP_PTR)
     movhu   d0, (VM_PC)
+    bra     ei_ret
+or_bad:
+    mov     GUARD_VMSTACK, d0       # d1 = the stack pointer: refuse the return, stop the game
+    call    GuardTrip, 0, 0
     bra     ei_ret
 
 # ---- 0x06 PAUSE_THREAD: save PC as requested, next thread ---------------------

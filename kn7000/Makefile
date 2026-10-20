@@ -1,8 +1,13 @@
-# Another World for the KN7000 (ride-along module in the SP7001 SD plug-in).
-# See README.md. Needs kn7000_disassembly beside this repo (assembler + XAP/SD tools)
-# and its extracted vendor BASEEXT.XAP.
+# Another World for the KN7000. Two builds:
+#   make cnv / make floppy   AW.CNV, the STYLE CONVERT build for a stock KN7000 (README-CNV.md):
+#                            the one meant for a real instrument; stays out of IC23 and the user pools.
+#   make MAME_ONLY=1 sp7001  BASEEXT.XAP, the SP7001 ride-along build (README.md): MAME ONLY. It keeps
+#                            the game in the 0x44000000 window, which on a real KN7000 is IC23 (the
+#                            battery-backed panel memories); the build refuses to run without MAME_ONLY=1.
+# Needs the KN7000 toolchain (technics-roms-disasm/kn7000: assembler + XAP/SD tools) beside this repo,
+# and for the SP7001 build its extracted vendor BASEEXT.XAP.
 
-DISASM_REPO ?= ../../kn7000_disassembly
+DISASM_REPO ?= ../../technics-roms-disasm/kn7000
 PYTHON      ?= python3
 XAPASM      := $(PYTHON) $(DISASM_REPO)/tools/xapasm.py
 BASE_XAP    ?= $(DISASM_REPO)/baserom/sp7001_baseext.xap
@@ -24,14 +29,25 @@ RES_OUT     := build/res
 FONT_DIR    ?= ../../custom-kn5000-roms/anotherworld/src/hardcoded_data
 SD_ADDFILE  := $(PYTHON) $(DISASM_REPO)/tools/sd_addfile.py
 
-all: build/BASEEXT.XAP
+all: floppy
 
-$(RES_OUT)/awres.inc $(RES_OUT)/awbank.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
+sp7001: build/BASEEXT.XAP
+
+$(RES_OUT)/awres.inc: tools/aw_extract.py $(AW_DATA)/MEMLIST.BIN
 	@mkdir -p $(RES_OUT)
-	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $(RES_OUT)/awres.inc --banks $(RES_OUT)/awbank.inc
+	$(PYTHON) tools/aw_extract.py $(AW_DATA) $(RES_OUT) --inc $(RES_OUT)/awres.inc
 
-build/another.bin: src/main.s src/display.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py
+# The SP7001 build lives in CS1 (IC23) and the TPAD pool: tools/ic23_guard.py must FIND that (were it
+# ever to call this build clean, the check itself would be broken), and the build goes on only with
+# MAME_ONLY=1.
+build/another.bin: src/main.s src/display.s src/platform.inc src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(DISASM_REPO)/tools/xapasm.py tools/ic23_guard.py
 	@mkdir -p build
+	@if $(PYTHON) -I tools/ic23_guard.py $(DISASM_REPO)/tools src/main.s -I src -I $(RES_OUT) > build/another.guard; then \
+	  echo "ic23_guard calls the SP7001 build clean, which it is not: the guard is broken"; exit 1; fi
+	@tail -1 build/another.guard
+	@if [ "$(MAME_ONLY)" != 1 ]; then \
+	  echo "The SP7001 build writes the 0x44000000 window: IC23, the panel memories, on a real KN7000."; \
+	  echo "It is for MAME only. Build it with: make MAME_ONLY=1 ...   (for an instrument: make floppy)"; exit 1; fi
 	$(XAPASM) src/main.s -I src -I $(RES_OUT) -o $@ -m build/another.map
 
 build/BASEEXT.XAP: build/another.bin $(BASE_XAP) $(DISASM_REPO)/tools/xap_addon.py
@@ -63,35 +79,56 @@ test: card
 	  -snapshot_directory build -str 50 -window -nothrottle
 	@echo "---- build/awrun.log ----"; cat build/awrun.log
 
-# ---- the STYLE CONVERT build: a stock KN7000 (program 941), no SP7001 -- README-CNV.md -------
-# AW.CNV is loaded by DISK MENU > STYLE CONVERT and runs the same VM. The floppy holds it, the
-# game's original BANK01..0D (unpacked on the instrument) and the font/string tables, on a blank
-# disk the KN7000 itself formatted (FLOPPY_TOOLS: kn7000_mame tools/floppy-images).
+# ---- the STYLE CONVERT build: a stock KN7000 (any program build), no SP7001 -- README-CNV.md ----
+# AW.CNV is loaded by DISK MENU > STYLE CONVERT and runs the same VM. The floppy holds it and the game
+# files it loads part by part (AWRxx.AW: each resource the game draws or runs, as MEMLIST.BIN finds it
+# in BANKxx; the font and the strings), on a blank disk the KN7000 itself formatted (FLOPPY_TOOLS:
+# kn7000_mame tools/floppy-images).
 FLOPPY_TOOLS ?= ../../kn7000_mame/tools/floppy-images
-# The published overlay build (program 941 is its default KN7000 BIOS).
+# The published overlay build (program 941 is its default KN7000 BIOS; -bios v13 is program 893).
 MAME941     ?= ../../kn7000-emulator/run.sh
 SD941       ?= ../../kn7000-emulator/sdcard_from_real_kn7000.img
+CNV_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s
+BIOS        ?= v16
 
 cnv: build/AW.CNV
 
-# tools/leafcheck.py first: a routine entered with `call X, 0, 0` must not call anything before
-# it makes a frame (the nested call overwrites its return address; that hung the first unpacker).
-build/AW.CNV: src/cnv_main.s src/platform941.inc src/display.s src/vm.s src/vm.inc src/interp.s src/help.s $(RES_OUT)/awres.inc $(RES_OUT)/awbank.inc $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py
+$(RES_OUT)/awpart.inc: tools/aw_extract.py tools/aw_partinfo.py src/platformcnv.inc $(AW_DATA)/MEMLIST.BIN
+	@mkdir -p $(RES_OUT)
+	$(PYTHON) -I tools/aw_extract.py $(AW_DATA) $(RES_OUT) --parts $@ src/platformcnv.inc $(FONT_DIR)
+
+# Before AW.CNV is written, three checks must pass (each stops the build otherwise):
+#   tools/leafcheck.py   a routine entered with `call X, 0, 0` must not call anything before it makes
+#                        a frame (the nested call overwrites its return address; that hung the first
+#                        unpacker);
+#   tools/ic23_guard.py  no address the build names may lie in CS1 (IC23) or the user pools: "clean";
+#   tools/cnv_layout.py  the memory map (src/platformcnv.inc) stays in the converter's RAM, off the
+#                        mailbox page, without overlaps, and the image fits below the font.
+build/AW.CNV: $(CNV_SRC) src/platformcnv.inc src/vm.inc $(RES_OUT)/awpart.inc $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py tools/ic23_guard.py tools/cnv_layout.py
 	@mkdir -p build
-	$(PYTHON) -I tools/leafcheck.py src/cnv_main.s src/display.s src/vm.s src/interp.s src/help.s
-	$(XAPASM) src/cnv_main.s -I src -I $(RES_OUT) -o $@ -m build/AW.map
+	$(PYTHON) -I tools/leafcheck.py $(CNV_SRC)
+	$(PYTHON) -I tools/ic23_guard.py $(DISASM_REPO)/tools src/cnv_main.s -I src -I $(RES_OUT)
+	$(XAPASM) src/cnv_main.s -I src -I $(RES_OUT) -o build/AW.CNV.tmp -m build/AW.map
+	$(PYTHON) -I tools/cnv_layout.py src/platformcnv.inc src/vm.inc build/AW.map build/AW.CNV.tmp
+	mv -f build/AW.CNV.tmp $@
 
 floppy: build/another_floppy.img
 
-build/another_floppy.img: build/AW.CNV tools/make_cnv_floppy.py
-	$(PYTHON) -I tools/make_cnv_floppy.py $@ build/AW.CNV $(AW_DATA) $(FONT_DIR) $(FLOPPY_TOOLS)
+build/another_floppy.img: build/AW.CNV tools/make_cnv_floppy.py $(RES_OUT)/awpart.inc
+	$(PYTHON) -I tools/make_cnv_floppy.py $@ build/AW.CNV $(RES_OUT) $(FLOPPY_TOOLS)
+	@sha1sum build/AW.CNV $@
 
 # Boot the stock KN7000 with the floppy in the drive; then DISK MENU, STYLE CONVERT, OK.
+# BIOS=v13 runs program 893 (the owner's), v16 (the default) program 941.
 cnvrun: build/another_floppy.img
 	cp $(SD941) build/sd941.img && chmod u+w build/sd941.img
-	$(MAME941) kn7000 -window -flop $(abspath build/another_floppy.img) -harddisk $(abspath build/sd941.img)
+	$(MAME941) kn7000 -bios $(BIOS) -window -flop $(abspath build/another_floppy.img) -harddisk $(abspath build/sd941.img)
+
+# Does the run-time firmware search find everything in every program build we have? (tools/aw_find_fw.py)
+fwfind:
+	$(PYTHON) -I tools/aw_find_fw.py
 
 clean:
 	rm -rf -- build
 
-.PHONY: all card run test clean cnv floppy cnvrun
+.PHONY: all sp7001 card run test clean cnv floppy cnvrun fwfind

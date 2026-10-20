@@ -4,8 +4,11 @@
 # Shared by both KN7000 builds (main.s: SP7001 plug-in; cnv_main.s: STYLE CONVERT .CNV):
 # the game task, the page blit and the border fill, and their data.
 
+.equ SG_REASONS,      5             # StopGame's reasons (sg_why), GUARD_PAGE .. GUARD_FILE
+
 # =================================================================================
-# The game task: let the firmware settle, reset the VM, then run it forever.
+# The game task: let the firmware settle, reset the VM, then run it until the run-time guard
+# refuses a write (vm.inc GUARD_*), which stops the game.
 GameTask:
     add     -0x10, sp
     mov     2500, d0                # let the firmware reach its static screen first
@@ -14,7 +17,98 @@ GameTask:
     call    GameReset, 0, 0
 gt_loop:
     call    ExecuteInstruction, 0, 0
-    bra     gt_loop
+    mov     (GUARD_WHAT), d0
+    cmp     0, d0
+    beq     gt_loop
+    call    StopGame, 0, 0          # does not return
+
+# StopGame: the game cannot go on (vm.inc GUARD_WHAT says why). Show it on the LCD, with the
+# address involved, and keep yielding: the platform ends the task from DLY_TSK when the player
+# quits (cnv_main.s). The text uses the help screens' font, palette and HelpText (help.s).
+StopGame:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     HELP_BUF, a0            # a black page of its own
+    mov     PAGE_SIZE / 4, d1
+    clr     d0
+sg_clear:
+    mov     d0, (a0)
+    add     4, a0
+    add     -1, d1
+    bne     sg_clear
+    mov     HELP_BUF, a0            # HelpText draws on CUR_PAGE_1 (the VM is not running)
+    mov     a0, (CUR_PAGE_1)
+    mov     help_palette, a0
+    mov     palette, a1
+    call    hs_copy_pal, 0, 0
+    mov     sg_title, a3
+    mov     76, d0
+    mov     64, d1
+    mov     2, d2
+    call    HelpText, 0, 0
+    mov     (GUARD_WHAT), d0        # the reason: sg_why[GUARD_WHAT - 1]
+    add     -1, d0
+    cmp     SG_REASONS, d0
+    bcs     sg_known
+    mov     SG_REASONS - 1, d0      # out of range: the last, generic one
+sg_known:
+    asl     2, d0
+    mov     sg_why, a0
+    add     d0, a0
+    mov     (a0), a3
+    mov     16, d0
+    mov     88, d1
+    mov     1, d2
+    call    HelpText, 0, 0
+    mov     (GUARD_ADDR), d0        # "AT 0x12345678"
+    mov     GUARD_TEXT, a0
+    call    HexText, 0, 0
+    mov     GUARD_TEXT, a3
+    mov     16, d0
+    mov     102, d1
+    mov     1, d2
+    call    HelpText, 0, 0
+    mov     sg_quit, a3
+    mov     16, d0
+    mov     130, d1
+    mov     3, d2
+    call    HelpText, 0, 0
+sg_loop:
+    mov     HELP_BUF, a0            # show it, again every second: the firmware may repaint
+    call    BlitPage, 0, 0
+    mov     1000, d0
+    mov     DLY_TSK, a1
+    calls   (a1)
+    bra     sg_loop
+
+# HexText(d0 = value, a0 = 16-byte buffer): "AT 0x" and eight upper-case hex digits, NUL-ended.
+# Leaf; uses d0, d1, a0, a1.
+HexText:
+    mov     d0, a1                  # the value, shifted left a nibble per digit
+    mov     0x30205441, d0          # "AT 0"
+    mov     d0, (a0)
+    mov     0x78, d0                # "x"
+    movbu   d0, (4, a0)
+    add     5, a0
+    mov     8, d1
+ht_digit:
+    mov     a1, d0
+    lsr     28, d0                  # the top nibble
+    cmp     10, d0
+    bcs     ht_dec
+    add     7, d0
+ht_dec:
+    add     0x30, d0
+    movbu   d0, (a0)
+    inc     a0
+    mov     a1, d0
+    asl     4, d0
+    mov     d0, a1
+    add     -1, d1
+    bne     ht_digit
+    clr     d0
+    movbu   d0, (a0)
+    rets
 
 # =================================================================================
 # BlitPage(a0 = a 320x200 8-bit-indexed page): draw it centred into the 640x240
@@ -104,3 +198,14 @@ game_ctsk:
     .align  4
 palette:
     .space  16*2, 0
+    .align  4
+sg_why:                             # GUARD_WHAT 1.. (vm.inc)
+    .long   sg_page, sg_stack, sg_load, sg_bitmap, sg_file     # SG_REASONS of them
+sg_title:   .asciz  "ANOTHER WORLD STOPPED"
+sg_page:    .asciz  "a page pointer was not a page"
+sg_stack:   .asciz  "the VM stack ran over"
+sg_load:    .asciz  "a load outside the game's RAM"
+sg_bitmap:  .asciz  "a bitmap that was not loaded"
+sg_file:    .asciz  "a game file was missing or bad"
+sg_quit:    .asciz  "Hold EXIT to quit."
+    .align  4

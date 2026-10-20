@@ -1,47 +1,65 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# Another World on the Technics SX-KN7000, program 941, with no SP7001: the game is a style
-# converter. DISK MENU > STYLE CONVERT lists AW.CNV, and choosing it loads this file to 0x502B8000
-# and calls its first byte (platform941.inc says how the firmware drives a converter).
+# Another World on the Technics SX-KN7000 with no SP7001: the game is a style converter. DISK MENU >
+# STYLE CONVERT lists AW.CNV, and choosing it loads this file to 0x502B8000 and calls its first byte
+# on the firmware's main task (platformcnv.inc says how the firmware drives a converter). Any
+# program build: 893 (v1.3), 935, 941 (v1.6), 942.
 #
-# First call (on the firmware's main task, where the file layer is in use anyway):
-#   * read the font, the strings and the game's own BANK01..BANK0D from the floppy, unpacking every
-#     resource (ByteKiller) to the RAM address the SD build loads it to (awbank_tab.s);
-#   * start the game task (display.s: GameTask runs the VM, as in the SP7001 build);
-#   * answer request 5, a short text, which parks the firmware on the converter.
-# Every later call answers 5 again, until EXIT has been held for QUIT_HOLD_MS: then the game task
-# ends itself at its next yield (DLY_TSK below) and the following call answers 0xFE, which hands
-# the instrument back: the firmware shows a message (EXIT), then "Continue Next?". YES calls the
-# converter again, which starts a new game at once; NO leaves STYLE CONVERT.
+# Each call does one step and returns; every call but the last answers request 5 (a short text),
+# which parks the firmware on the converter while the game task runs:
+#   * the first FW_STEPS calls find the firmware's routines and RAM (fwfind.s);
+#   * the next ones read the font, the strings and the shared polygons from the floppy, one file
+#     per call (GlobalList), then start the game task (display.s GameTask runs the VM);
+#   * from then on, whenever the game task asks for a part (EnsurePart, at a part switch), each call
+#     reads one of that part's files and unpacks it in place (LoadStep), until the part is resident.
+# Holding EXIT for QUIT_HOLD_MS asks the game task to end itself at its next yield (DLY_TSK below);
+# the following call answers 0xFE, which hands the instrument back: the firmware shows a message
+# (EXIT), then "Continue Next?". YES calls the converter again, which starts a new game; NO leaves.
+#
+# Memory: platformcnv.inc. The game writes nothing outside [AW_LO, AW_HI) but the mailbox and the LCD:
+# not CS1 (IC23, the panel memories), not the user-memory pools (tools/ic23_guard.py checks every
+# address named here; GuardRange checks every computed load destination at run time).
 
-.include "platform941.inc"
+.include "platformcnv.inc"
 .include "vm.inc"
-.include "awres.inc"                # generated: RES_COUNT, RES_BASE, RES_END
-.include "awbank.inc"               # generated: BANK_FILES, BANK_RECS, BANK_MAX
+.include "awpart.inc"               # generated: RES_COUNT, PART_LISTS, LR_* (tools/aw_extract.py --parts)
 .mnbase 0x502B8000                  # CNV_BASE: the firmware loads AW.CNV here
+.equ ResAddr,      RES_TAB          # interp.s ResPtr: the table the part loader fills
 
 # ---- our variables (CNV_VARS, zeroed by the firmware with the whole area on each load) ----
-.equ CV_STATE,     CNV_VARS + 0x00  # 0 first call, 1 started
+.equ CV_STATE,     CNV_VARS + 0x00  # 0 first call, 1 searching, 2 global files, 3 running, 4 failed
 .equ CV_QUIT_REQ,  CNV_VARS + 0x04  # set by the entry when EXIT has been held long enough
 .equ CV_TASK_DONE, CNV_VARS + 0x08  # set when no game task runs (ended, or never started)
-.equ CV_EXIT_T0,   CNV_VARS + 0x0C  # KERNEL_MS when EXIT went down (0 = up)
+.equ CV_EXIT_T0,   CNV_VARS + 0x0C  # the ms counter when EXIT went down (0 = up)
 .equ CV_CALLS,     CNV_VARS + 0x10  # entry calls so far
-.equ CV_LOAD_ERR,  CNV_VARS + 0x14  # files that failed to open/read + resources that failed to unpack
-.equ CV_LOAD_MS,   CNV_VARS + 0x18  # how long the load took
+.equ CV_FAIL,      CNV_VARS + 0x14  # why the game cannot start: 0x100 + search step, 0x200 file, 0x300 task
+.equ CV_STEP,      CNV_VARS + 0x18  # the firmware search's next step
 .equ CV_TASK_ID,   CNV_VARS + 0x1C  # the game task's id (0 = none)
-.equ CV_BANK,      CNV_VARS + 0x20  # loader: bank file index
-.equ CV_REC,       CNV_VARS + 0x24  # loader: next BankRec
-.equ CV_FILE_LEFT, CNV_VARS + 0x28  # ReadFile: bytes still to read
-.equ CV_FILE_DST,  CNV_VARS + 0x2C  # ReadFile: where the next chunk goes
+.equ CV_FAILCALLS, CNV_VARS + 0x20  # calls since failing, when EXIT cannot be read
 .equ CV_ENDED,     CNV_VARS + 0x30  # we answered 0xFE: the next call is "Continue Next?" -> YES
-.equ BK_CRC,       CNV_VARS + 0x40  # unpacker state
-.equ BK_LEFT,      CNV_VARS + 0x44
-.equ BK_N,         CNV_VARS + 0x48
-.equ BK_ACC,       CNV_VARS + 0x4C
-.equ BK_D1,        CNV_VARS + 0x50
-.equ BK_D2,        CNV_VARS + 0x54
-.equ CV_ERRLOG,    CNV_VARS + 0x100 # u32 per failed step: (kind << 24) | detail
+.equ LD_REQ,       CNV_VARS + 0x40  # the part id the game task waits for (written by the game task)
+.equ LD_CUR,       CNV_VARS + 0x44  # the part id whose files are resident (0 while one loads)
+.equ LD_PART,      CNV_VARS + 0x48  # the part id being loaded
+.equ LD_REC,       CNV_VARS + 0x4C  # the next record of the list being loaded (0 = no load running)
+.equ LD_DONE,      CNV_VARS + 0x50  # records loaded of this list
+.equ LD_TOTAL,     CNV_VARS + 0x54  # records in this list
+.equ LD_FAILED,    CNV_VARS + 0x58  # a file of the list could not be loaded: the game stops
+.equ LD_IN_READ,   CNV_VARS + 0x5C  # 1 while fmmread fills a destination for us (the probes' taps)
+.equ LD_T0,        CNV_VARS + 0x60  # the ms counter when this list started
+.equ LD_MS,        CNV_VARS + 0x64  # how long the last list took
+.equ LD_LISTS,     CNV_VARS + 0x68  # lists loaded so far (the global one, then each part)
+.equ LD_BAD_ID,    CNV_VARS + 0x6C  # the resource id (or 0xFFFF) of the file that failed
+.equ LD_ERRORS,    CNV_VARS + 0x70  # files that failed so far
+.equ BK_CRC,       CNV_VARS + 0x80  # unpacker state
+.equ BK_LEFT,      CNV_VARS + 0x84
+.equ BK_N,         CNV_VARS + 0x88
+.equ BK_ACC,       CNV_VARS + 0x8C
+.equ BK_D1,        CNV_VARS + 0x90
+.equ BK_D2,        CNV_VARS + 0x94
+.equ CV_ERRLOG,    CNV_VARS + 0x100 # u32 per failed file, the first 32: (kind << 24) | (id << 8)
+.equ CV_TEXT,      CNV_VARS + 0x200 # the failure text being built
+.equ FAIL_CALLS,   200              # about 10 s of calls: end a failed run when EXIT cannot be read
 
 # =================================================================================
 # The entry: called by the firmware with `calls (a0)`, a0 = CNV_BASE, on its main task.
@@ -53,53 +71,121 @@ CnvEntry:
     mov     d0, (CV_CALLS)
     mov     (CV_STATE), d0
     cmp     0, d0
-    bne     ce_running
+    beq     ce_first
+    cmp     1, d0
+    beq     ce_search
+    cmp     2, d0
+    beq     ce_global
+    cmp     3, d0
+    beq     ce_run
+    bra     ce_failed
+
+ce_first:                           # a fresh load: everything here is zero
     mov     1, d0
     mov     d0, (CV_STATE)
-    mov     (KERNEL_MS), d0
-    mov     d0, (CV_LOAD_MS)
-    call    CnvLoad, 0, 0
-    mov     (KERNEL_MS), d0
-    mov     (CV_LOAD_MS), d1
-    sub     d1, d0
-    mov     d0, (CV_LOAD_MS)
-    mov     (CV_LOAD_ERR), d0
+ce_search:                          # one step of the firmware search per call
+    mov     (CV_STEP), d0
+    call    FwStep, 0, 0
     cmp     0, d0
-    bne     ce_no_task              # the game data is incomplete: show why, start nothing
+    bne     ce_search_fail
+    mov     (CV_STEP), d0
+    inc     d0
+    mov     d0, (CV_STEP)
+    mov     FW_STEPS, d1
+    call    Progress, 0, 0
+    mov     (CV_STEP), d0
+    cmp     FW_STEPS, d0
+    blt     ce_park
+    mov     2, d0                   # all found: the global files next
+    mov     d0, (CV_STATE)
+    mov     GlobalList, a0
+    call    ListStart, 0, 0
+    bra     ce_park
+ce_search_fail:
+    mov     (CV_STEP), d0
+    add     0x100, d0
+    bra     ce_fail_now
+
+ce_global:                          # one global file per call, then the game task
+    call    LoadStep, 0, 0
+    cmp     0, d0
+    beq     ce_park
+    cmp     1, d0
+    bne     ce_global_fail
+    call    ListEnd, 0, 0
+    mov     3, d0
+    mov     d0, (CV_STATE)
     call    StartTask, 0, 0
-    bra     ce_running
-ce_no_task:
+    bra     ce_poll_exit
+ce_global_fail:
+    mov     0x200, d0
+ce_fail_now:
+    mov     d0, (CV_FAIL)
+    mov     4, d0
+    mov     d0, (CV_STATE)
     mov     1, d0
     mov     d0, (CV_TASK_DONE)
-ce_running:
-    # A call after we answered 0xFE is the firmware's "Continue Next?" answered YES: play again
-    # (the data is still in RAM). NO leaves STYLE CONVERT without calling us.
+    bra     ce_failed
+
+ce_run:
+    # A call after we answered 0xFE is the firmware's "Continue Next?" answered YES: play again.
+    # NO leaves STYLE CONVERT without calling us.
     mov     (CV_ENDED), d0
     cmp     0, d0
-    beq     ce_poll_exit
+    beq     ce_load
     clr     d0
     mov     d0, (CV_ENDED)
     mov     d0, (CV_QUIT_REQ)
     mov     d0, (CV_TASK_DONE)
     mov     d0, (CV_EXIT_T0)
-    mov     (CV_LOAD_ERR), d0
-    cmp     0, d0
-    bne     ce_no_task
+    mov     d0, (LD_FAILED)
     call    StartTask, 0, 0
+ce_load:                            # a part the game task waits for: one of its files per call
+    mov     (LD_REC), d0
+    cmp     0, d0
+    bne     ce_load_step
+    mov     (LD_REQ), d0
+    cmp     0, d0
+    beq     ce_poll_exit
+    mov     (LD_CUR), d1
+    cmp     d1, d0
+    beq     ce_poll_exit
+    mov     d0, (LD_PART)           # a new part: forget the old one's files, start its list
+    clr     d1
+    mov     d1, (LD_CUR)
+    call    PartListStart, 0, 0
+    bra     ce_poll_exit
+ce_load_step:
+    call    LoadStep, 0, 0
+    cmp     0, d0
+    beq     ce_poll_exit
+    cmp     1, d0
+    bne     ce_load_fail
+    call    ListEnd, 0, 0
+    mov     (LD_PART), d0           # resident: the game task goes on
+    mov     d0, (LD_CUR)
+    bra     ce_poll_exit
+ce_load_fail:
+    mov     1, d0                   # the game task stops (EnsurePart) and shows why
+    mov     d0, (LD_FAILED)
+
 ce_poll_exit:
     # EXIT held for QUIT_HOLD_MS -> quit request (the firmware ignores EXIT while we answer 5)
-    movbu   (EXIT_BYTE), d0
+    mov     (FWV_PANEL), a0
+    movbu   (EXIT_OFS, a0), d0
     btst    EXIT_BIT, d0
     beq     ce_exit_up
     mov     (CV_EXIT_T0), d1
     cmp     0, d1
     bne     ce_exit_held
-    mov     (KERNEL_MS), d1
+    mov     (FWV_KERNEL_MS), a0
+    mov     (a0), d1
     or      1, d1
     mov     d1, (CV_EXIT_T0)
     bra     ce_answer
 ce_exit_held:
-    mov     (KERNEL_MS), d0
+    mov     (FWV_KERNEL_MS), a0
+    mov     (a0), d0
     sub     d1, d0
     cmp     QUIT_HOLD_MS, d0
     blt     ce_answer
@@ -109,6 +195,26 @@ ce_exit_held:
 ce_exit_up:
     clr     d0
     mov     d0, (CV_EXIT_T0)
+    bra     ce_answer
+
+ce_failed:                          # the game cannot start: say why; EXIT (or time) ends it
+    mov     (FWV_PANEL), a0
+    cmp     0, a0
+    beq     ce_failed_count         # the panel was not found: no EXIT to read
+    movbu   (EXIT_OFS, a0), d0
+    btst    EXIT_BIT, d0
+    beq     ce_answer
+    bra     ce_failed_quit
+ce_failed_count:
+    mov     (CV_FAILCALLS), d0
+    inc     d0
+    mov     d0, (CV_FAILCALLS)
+    cmp     FAIL_CALLS, d0
+    blt     ce_answer
+ce_failed_quit:
+    mov     1, d0
+    mov     d0, (CV_QUIT_REQ)
+
 ce_answer:
     mov     MAILBOX, a0
     mov     (CV_QUIT_REQ), d0
@@ -123,14 +229,10 @@ ce_answer:
     mov     d0, (CV_ENDED)
     bra     ce_ret
 ce_park:
+    mov     MAILBOX, a0
     mov     5, d0                   # request 5: show our text, call us again
     movbu   d0, (a0)
-    mov     msg_play, a1
-    mov     (CV_LOAD_ERR), d0
-    cmp     0, d0
-    beq     ce_copy
-    mov     msg_err, a1
-ce_copy:
+    call    AnswerText, 0, 0        # a1 = the text
     inc     a0
 ce_cpy:
     movbu   (a1), d0
@@ -142,33 +244,49 @@ ce_cpy:
 ce_ret:
     ret     [d2,d3,a2,a3], 0x30
 
-# =================================================================================
-# DLY_TSK(d0 = ms): every yield of the VM and the help screen comes through here (display.s,
-# interp.s, help.s call DLY_TSK). If the entry has asked us to quit, end the task here, between
-# frames; otherwise it is the firmware's dly_tsk.
-DLY_TSK:
-    mov     (CV_QUIT_REQ), d1
-    cmp     0, d1
-    bne     dq_quit
-    mov     FW_DLY_TSK, a0
-    jmp     (a0)                    # tail call: dly_tsk returns to our caller
-dq_quit:
-    mov     1, d1
-    mov     d1, (CV_TASK_DONE)
-    mov     FW_EXD_TSK, a0
-    calls   (a0)                    # exit and delete this task; does not return
-dq_hang:
-    bra     dq_hang
+# AnswerText -> a1 = the text request 5 shows: what is going on, or why the game cannot start
+# (CV_FAIL; "STEP n" names the firmware search step that failed, fwfind.s). Keeps a0. Leaf.
+AnswerText:
+    mov     (CV_STATE), d0
+    cmp     3, d0
+    beq     at_play
+    cmp     4, d0
+    beq     at_fail
+    mov     msg_load, a1
+    rets
+at_play:
+    mov     msg_play, a1
+    mov     (LD_FAILED), d0
+    cmp     0, d0
+    beq     at_ret
+    mov     msg_file, a1
+at_ret:
+    rets
+at_fail:
+    mov     (CV_FAIL), d0
+    cmp     0x200, d0
+    beq     at_file
+    mov     msg_task, a1
+    cmp     0x300, d0
+    beq     at_ret
+    and     15, d0                  # 0x100 + step: "AW: UNKNOWN FIRMWARE, STEP n"
+    add     0x30, d0
+    movbu   d0, (msg_fw_n)
+    mov     msg_fw, a1
+    rets
+at_file:
+    mov     msg_file, a1
+    rets
 
 # Create and start the game task, trying slot 10 then 9.
 StartTask:
     movm    [d2,d3,a2,a3], (sp)
-    add     -0x10, sp
+    add     -0x20, sp
     mov     TASK_ID_FIRST, d2
 st_try:
     mov     d2, d0
     mov     game_ctsk, a0
-    mov     FW_CRE_TSK, a1
+    mov     (FW_CRE), a1
     calls   (a1)
     cmp     0, d0                    # E_OK
     beq     st_start
@@ -177,141 +295,310 @@ st_try:
     bge     st_try
     mov     1, d0                    # no free slot: nothing runs, so EXIT can end at once
     mov     d0, (CV_TASK_DONE)
+    mov     0x300, d0
+    mov     d0, (CV_FAIL)
+    mov     4, d0
+    mov     d0, (CV_STATE)
     bra     st_done
 st_start:
     mov     d2, (CV_TASK_ID)
     mov     d2, d0
     clr     d1
-    mov     FW_STA_TSK, a1
+    mov     (FW_STA), a1
     calls   (a1)
 st_done:
-    ret     [d2,d3,a2,a3], 0x20
-
-# =================================================================================
-# CnvLoad: font + strings + every resource, from the floppy's current folder (the one STYLE
-# CONVERT listed). Skipped when a previous run left everything in RAM (AW_LOADED_FLAG). A bar along
-# the bottom of the LCD shows the progress.
-CnvLoad:
-    movm    [d2,d3,a2,a3], (sp)
-    add     -0x20, sp
-    mov     (AW_LOADED_FLAG), d0
-    cmp     0x600D, d0
-    beq     cl_done
-    clr     d0
-    call    Progress, 0, 0
-    mov     name_font, a0
-    mov     AW_FONT, a1
-    mov     AW_FONT_SZ, d0
-    call    ReadFile, 0, 0
-    mov     name_stridx, a0
-    mov     AW_STRIDX, a1
-    mov     AW_STRIDX_SZ, d0
-    call    ReadFile, 0, 0
-    mov     name_strdat, a0
-    mov     AW_STRDAT, a1
-    mov     AW_STRDAT_SZ, d0
-    call    ReadFile, 0, 0
-    clr     d0
-    mov     d0, (CV_BANK)
-    mov     BankRec, a0
-    mov     a0, (CV_REC)
-cl_bank:
-    mov     (CV_BANK), d0           # the name BANKxx
-    asl     2, d0
-    mov     BankNo, a0
-    add     d0, a0
-    mov     (a0), d0
-    mov     d0, d1
-    lsr     4, d1
-    call    HexDigit, 0, 0
-    movbu   d1, (name_bank_xx)
-    mov     d0, d1
-    call    HexDigit, 0, 0
-    movbu   d1, (name_bank_xx + 1)
-    mov     (CV_BANK), d0           # read the whole bank file to BANK_STAGE
-    asl     2, d0
-    mov     BankSize, a0
-    add     d0, a0
-    mov     (a0), d0
-    mov     name_bank, a0
-    mov     BANK_STAGE, a1
-    call    ReadFile, 0, 0
-cl_rec:                             # unpack every resource of this bank
-    mov     (CV_REC), a2
-    mov     BankRec + BANK_RECS*20, d0
-    mov     a2, d1
-    cmp     d0, d1
-    bcc     cl_next_bank            # all records done
-    movbu   (a2), d0                # this record's bank number
-    mov     (CV_BANK), d1
-    asl     2, d1
-    mov     BankNo, a0
-    add     d1, a0
-    mov     (a0), d1
-    cmp     d1, d0
-    bne     cl_next_bank            # it belongs to the next bank
-    mov     (4, a2), d0             # offset in the bank file
-    mov     BANK_STAGE, a0
-    add     d0, a0                  # a0 = packed data
-    mov     (8, a2), d0             # packed size
-    mov     (16, a2), a1            # destination
-    mov     (12, a2), d1            # unpacked size
-    movbu   (1, a2), d2
-    cmp     0, d2
-    beq     cl_copy
-    call    BkUnpack, 0, 0          # d0 = crc (0 = good)
-    cmp     0, d0
-    beq     cl_rec_next
-    mov     0x02000000, d0          # kind 2: unpack failure, detail = resource id
-    mov     (CV_REC), a2
-    movhu   (2, a2), d1
-    or      d1, d0
-    call    LogError, 0, 0
-    bra     cl_rec_next
-cl_copy:                            # stored as is: copy d1 bytes a0 -> a1
-    cmp     0, d1
-    beq     cl_rec_next
-cl_copy_b:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d1
-    bne     cl_copy_b
-cl_rec_next:
-    mov     (CV_REC), a2
-    add     20, a2
-    mov     a2, (CV_REC)
-    bra     cl_rec
-cl_next_bank:
-    mov     (CV_BANK), d0
-    inc     d0
-    mov     d0, (CV_BANK)
-    call    Progress, 0, 0
-    mov     (CV_BANK), d0
-    cmp     BANK_FILES, d0
-    blt     cl_bank
-    mov     (CV_LOAD_ERR), d0
-    cmp     0, d0
-    bne     cl_done
-    mov     0x600D, d0
-    mov     d0, (AW_LOADED_FLAG)
-cl_done:
     ret     [d2,d3,a2,a3], 0x30
 
-# HexDigit(d1 = value): d1 = the upper-case hex digit of its low nibble. Leaf; keeps d0.
-HexDigit:
-    and     15, d1
-    cmp     10, d1
-    blt     hd_num
-    add     7, d1
-hd_num:
-    add     0x30, d1
+# =================================================================================
+# DLY_TSK(d0 = ms): every yield of the VM and the help screen comes through here (display.s,
+# interp.s, help.s call DLY_TSK). If the entry has asked us to quit, end the task here, between
+# frames; otherwise it is the firmware's yield.
+DLY_TSK:
+    mov     (CV_QUIT_REQ), d1
+    cmp     0, d1
+    bne     dq_quit
+    mov     (FW_DLY), a0
+    jmp     (a0)                    # tail call: it returns to our caller
+dq_quit:
+    mov     1, d1
+    mov     d1, (CV_TASK_DONE)
+    mov     (FW_EXD), a0
+    calls   (a0)                    # exit and delete this task; does not return
+dq_hang:
+    bra     dq_hang
+
+# =================================================================================
+# The game task's side of part loading (interp.s InitForPart calls these).
+#
+# EnsurePart(d0 = part id 0x3E80..0x3E89): return once that part's files are resident. Unless they
+# already are, ask the converter for them (LD_REQ) and yield until it has loaded them, a file per
+# converter call. The VM does not run meanwhile. If a file cannot be loaded, the game stops.
+EnsurePart:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     d0, d2
+    mov     (LD_CUR), d1
+    cmp     d2, d1
+    beq     ep_ret
+    mov     d2, (LD_REQ)
+ep_wait:
+    mov     20, d0
+    mov     DLY_TSK, a1
+    calls   (a1)
+    mov     (LD_FAILED), d0
+    cmp     0, d0
+    bne     ep_fail
+    mov     (LD_CUR), d1
+    cmp     d2, d1
+    bne     ep_wait
+ep_ret:
+    ret     [d2,d3,a2,a3], 0x30
+ep_fail:
+    mov     GUARD_FILE, d0
+    mov     (LD_BAD_ID), d1
+    call    GuardTrip, 0, 0
+    call    StopGame, 0, 0          # does not return
+
+# BitmapData(d0 = resource id) -> a0 = the bitmap's 32,000 bytes of planes, or 0. A packed bitmap
+# (ResPacked != 0) is unpacked into BITMAP_BUF. A bitmap that is not resident stops the game: the
+# part lists hold every bitmap each part's bytecode LOADs (tools/aw_extract.py --parts).
+# BkUnpack's state is shared with LoadStep; they never run at once: LoadStep runs on the main task
+# only while the game task waits in EnsurePart (or before it exists), and a task of priority 3 is
+# never preempted by another of the same priority.
+BitmapData:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    and     0xff, d0
+    mov     d0, d2
+    cmp     RES_COUNT, d2
+    bcc     bd_missing
+    mov     d2, d0
+    asl     2, d0
+    mov     RES_TAB, a0
+    add     d0, a0
+    mov     (a0), a0
+    cmp     0, a0
+    beq     bd_missing
+    mov     d2, d0
+    asl     2, d0
+    mov     ResPacked, a1
+    add     d0, a1
+    mov     (a1), d0                # packed size, or 0: stored as is
+    cmp     0, d0
+    beq     bd_ret
+    mov     BITMAP_BUF, a1
+    mov     PAGE_SIZE / 2, d1       # 32,000 bytes of planes
+    call    BkUnpack, 0, 0          # d0 = 0 when intact
+    cmp     0, d0
+    bne     bd_bad
+    mov     BITMAP_BUF, a0
+bd_ret:
+    ret     [d2,d3,a2,a3], 0x30
+bd_missing:
+    mov     GUARD_BITMAP, d0
+    mov     d2, d1
+    call    GuardTrip, 0, 0
+    mov     0, a0
+    bra     bd_ret
+bd_bad:
+    mov     GUARD_FILE, d0
+    mov     d2, d1
+    call    GuardTrip, 0, 0
+    mov     0, a0
+    bra     bd_ret
+
+# TraceInsn(d1 = opcode): no instruction trace in this build. Leaf.
+TraceInsn:
+    rets
+
+# =================================================================================
+# The converter's side: lists of files (GlobalList, PartList0..8 in awpart_tab.s; 20-byte records,
+# awpart.inc LR_*), loaded one record per call.
+
+# ListStart(a0 = list): count its records, start the clock and the bar. Leaf.
+ListStart:
+    mov     a0, (LD_REC)
+    clr     d0
+    mov     d0, (LD_DONE)
+ls_count:
+    mov     (LR_NAME, a0), d1
+    cmp     0, d1
+    beq     ls_counted
+    inc     d0
+    add     LR_LEN, a0
+    bra     ls_count
+ls_counted:
+    mov     d0, (LD_TOTAL)
+    mov     (FWV_KERNEL_MS), a0
+    mov     (a0), d0
+    mov     d0, (LD_T0)
+    rets
+
+# ListEnd: the list is loaded. Leaf.
+ListEnd:
+    clr     d0
+    mov     d0, (LD_REC)
+    mov     (FWV_KERNEL_MS), a0
+    mov     (a0), d0
+    mov     (LD_T0), d1
+    sub     d1, d0
+    mov     d0, (LD_MS)
+    mov     (LD_LISTS), d0
+    inc     d0
+    mov     d0, (LD_LISTS)
+    rets
+
+# PartListStart: LD_PART's list; every resource of the part before it is gone (RES_TAB entries
+# cleared, but the shared polygons'), as its space is reused.
+PartListStart:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     RES_TAB, a0
+    mov     RES_COUNT, d1
+    clr     d0
+pl_clear:
+    mov     d0, (a0)
+    add     4, a0
+    add     -1, d1
+    bne     pl_clear
+    mov     VIDEO2_AT, d0
+    mov     d0, (RES_TAB + 4 * RES_VIDEO2)
+    mov     (LD_PART), d0           # PartLists[part - 0x3E80]
+    add     -PART_FIRST, d0
+    asl     2, d0
+    mov     PartLists, a0
+    add     d0, a0
+    mov     (a0), a0
+    call    ListStart, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
+
+# LoadStep: load the record at LD_REC -- check its destination, open its file in the floppy's
+# current folder, read it there, close it, unpack it in place if it is packed -- and move on.
+#   -> d0 = 0 more to come, 1 the list is done, 2 the file failed (logged; LD_BAD_ID)
+# The firmware's routines store their arguments in the caller's frame at sp+4..sp+0x10, so nothing
+# of ours lives there.
+LoadStep:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     (LD_REC), a2
+    mov     (LR_NAME, a2), d0
+    cmp     0, d0
+    bne     lst_go
+    mov     1, d0
+    bra     lst_ret
+lst_go:
+    movhu   (LR_ID, a2), d0
+    mov     d0, (LD_BAD_ID)         # (named if it fails)
+    mov     (LR_DEST, a2), a0       # the destination, as long as the bigger of packed and unpacked,
+    mov     (LR_READ, a2), d0       # must lie in the game's RAM, clear of the mailbox page
+    mov     (LR_SIZE, a2), d1
+    cmp     d0, d1
+    bls     lst_len
+    mov     d1, d0
+lst_len:
+    call    GuardRange, 0, 0
+    cmp     0, d0
+    bne     lst_guard
+    mov     (LR_NAME, a2), a0
+    mov     mode_rb, a1
+    mov     (FW_OPEN), a3
+    calls   (a3)
+    exth    d0
+    cmp     0, d0
+    blt     lst_open_fail
+    mov     1, d0
+    mov     d0, (LD_IN_READ)
+    mov     (LD_REC), a2
+    mov     (LR_DEST, a2), a0
+    mov     (LR_READ, a2), d0
+    mov     (FW_READ), a3
+    calls   (a3)                    # d0 = bytes read
+    mov     d0, (0x14, sp)
+    clr     d0
+    mov     d0, (LD_IN_READ)
+    mov     (FW_CLOSE), a3
+    calls   (a3)
+    mov     (LD_REC), a2
+    mov     (0x14, sp), d0
+    mov     (LR_READ, a2), d1
+    cmp     d1, d0
+    bne     lst_short
+    movbu   (LR_FLAGS, a2), d0
+    btst    LR_INPLACE, d0
+    beq     lst_place
+    mov     (LR_DEST, a2), a0       # BkUnpack(a0 = packed, d0 = packed size, a1 = dst, d1 = size)
+    mov     a0, a1
+    mov     (LR_READ, a2), d0
+    mov     (LR_SIZE, a2), d1
+    call    BkUnpack, 0, 0
+    cmp     0, d0
+    bne     lst_crc
+lst_place:
+    mov     (LD_REC), a2
+    movhu   (LR_ID, a2), d0
+    cmp     RES_COUNT, d0
+    bcc     lst_next                # not a resource (the font, the strings)
+    asl     2, d0
+    mov     RES_TAB, a0
+    add     d0, a0
+    mov     (LR_DEST, a2), d1
+    mov     d1, (a0)
+lst_next:
+    add     LR_LEN, a2
+    mov     a2, (LD_REC)
+    mov     (LD_DONE), d0
+    inc     d0
+    mov     d0, (LD_DONE)
+    mov     (LD_TOTAL), d1
+    call    Progress, 0, 0
+    clr     d0
+lst_ret:
+    ret     [d2,d3,a2,a3], 0x30
+lst_guard:
+    mov     0x04000000, d0          # kind 4: a destination outside the game's RAM
+    bra     lst_fail
+lst_open_fail:
+    mov     0x01000000, d0          # kind 1: the open failed
+    bra     lst_fail
+lst_short:
+    mov     0x03000000, d0          # kind 3: a short read
+    bra     lst_fail
+lst_crc:
+    mov     0x02000000, d0          # kind 2: the unpacked data is not intact
+lst_fail:
+    mov     (LD_BAD_ID), d1
+    asl     8, d1
+    or      d1, d0
+    call    LogError, 0, 0
+    mov     2, d0
+    bra     lst_ret
+
+# GuardRange(a0 = start, d0 = length) -> d0 = 0 when [start, start + length) lies inside
+# [AW_LO, AW_HI) and clear of the mailbox page; else 1, recorded as GUARD_LOAD. Leaf.
+GuardRange:
+    mov     a0, d1
+    cmp     AW_LO, d1
+    bcs     grg_bad
+    add     d0, d1                  # d1 = end
+    bcs     grg_bad
+    cmp     AW_HI, d1
+    bhi     grg_bad
+    cmp     MAILBOX_PAGE, d1        # ends at or before the mailbox page
+    bls     grg_ok
+    mov     a0, d1
+    cmp     MAILBOX_PAGE_END, d1    # or starts at or after its end
+    bcc     grg_ok
+grg_bad:
+    mov     GUARD_LOAD, d0
+    mov     a0, d1
+    jmp     GuardTrip               # a leaf: it returns to our caller with d0 = 1
+grg_ok:
+    clr     d0
     rets
 
 # LogError(d0 = (kind << 24) | detail): count it and keep the first 32. Leaf.
 LogError:
-    mov     (CV_LOAD_ERR), d1
+    mov     (LD_ERRORS), d1
     cmp     32, d1
     bcc     le_count
     asl     2, d1
@@ -319,18 +606,23 @@ LogError:
     add     d1, a0
     mov     d0, (a0)
 le_count:
-    mov     (CV_LOAD_ERR), d1
+    mov     (LD_ERRORS), d1
     inc     d1
-    mov     d1, (CV_LOAD_ERR)
+    mov     d1, (LD_ERRORS)
     rets
 
-# Progress(d0 = banks done, 0..BANK_FILES): a white bar along the LCD's bottom rows.
+# Progress(d0 = done, d1 = total): a white bar along the LCD's bottom rows, 600 * done / total
+# pixels (the black border; the game's next blit clears it).
 Progress:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    mov     600, d1                 # bar width = 600 * done / BANK_FILES
+    cmp     0, d1
+    beq     pg_done
+    mov     d1, d2
+    mov     600, d1
     mulu    d0, d1
-    mov     BANK_FILES, d2
+    clr     d3
+    mov     d3, mdr
     divu    d2, d1
     cmp     0, d1
     beq     pg_done
@@ -351,74 +643,13 @@ pg_px:
 pg_done:
     ret     [d2,d3,a2,a3], 0x20
 
-# ReadFile(a0 = 8.3 name, a1 = destination, d0 = bytes): open it in the floppy's current folder
-# and read it through the work-RAM bounce buffer, BOUNCE_SIZE at a time (the floppy read is a DMA
-# into work RAM). A failure is logged (kind 1: open, kind 3: short read; detail = bytes left).
-# The firmware's routines store their arguments in the caller's frame at sp+4..sp+0x10, so
-# nothing of ours lives there.
-ReadFile:
-    movm    [d2,d3,a2,a3], (sp)
-    add     -0x20, sp
-    mov     a1, (CV_FILE_DST)
-    mov     d0, (CV_FILE_LEFT)
-    mov     mode_rb, a1             # a0 = name
-    mov     FW_OPEN_HERE, a3
-    calls   (a3)
-    exth    d0
-    cmp     0, d0
-    bge     rf_chunk
-    mov     0x01000000, d0          # kind 1: the open failed
-    mov     (CV_FILE_LEFT), d1
-    or      d1, d0
-    call    LogError, 0, 0
-    bra     rf_ret
-rf_chunk:
-    mov     (CV_FILE_LEFT), d0
-    cmp     0, d0
-    beq     rf_close
-    mov     BOUNCE_SIZE, d1
-    cmp     d1, d0
-    bls     rf_n
-    mov     d1, d0
-rf_n:
-    mov     d0, (0x14, sp)          # this chunk's length
-    mov     BOUNCE, a0
-    mov     FW_FMMREAD, a3
-    calls   (a3)                    # d0 = bytes read
-    mov     (0x14, sp), d1
-    cmp     d1, d0
-    bne     rf_short
-    mov     BOUNCE, a0              # copy the chunk up: d1 bytes, BOUNCE -> CV_FILE_DST
-    mov     (CV_FILE_DST), a1
-    mov     d1, d2
-rf_copy:
-    movbu   (a0), d0
-    movbu   d0, (a1)
-    inc     a0
-    inc     a1
-    add     -1, d2
-    bne     rf_copy
-    mov     a1, (CV_FILE_DST)
-    mov     (CV_FILE_LEFT), d0
-    sub     d1, d0
-    mov     d0, (CV_FILE_LEFT)
-    bra     rf_chunk
-rf_short:
-    mov     0x03000000, d0          # kind 3: a short read
-    mov     (CV_FILE_LEFT), d1
-    or      d1, d0
-    call    LogError, 0, 0
-rf_close:
-    mov     FW_FMMCLOSE, a3
-    calls   (a3)
-rf_ret:
-    ret     [d2,d3,a2,a3], 0x30
-
 # =================================================================================
 # BkUnpack(a0 = packed data, d0 = packed size, a1 = destination, d1 = unpacked size) -> d0 = crc
 # (0 = intact). ByteKiller, as tools/aw_extract.py unpack(): 32-bit big-endian words are read from
 # the END of the packed data (unpacked size, crc, then the first bit-buffer word); the output is
-# written backwards from its last byte. a2 = next word to read, d3 = bit buffer, a3 = output.
+# written backwards from its last byte. a2 = next word to read, d3 = bit buffer, a3 = output. Works
+# in place (packed data at the start of the destination), as the original engine unpacks: the
+# build checks every resource that is unpacked so (aw_extract.py unpack_in_place).
 BkUnpack:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
@@ -593,32 +824,25 @@ gb_have:
 
 # =================================================================================
 .include "display.s"
-    .align  4
-name_font:
-    .asciz  "AWFONT.AW"
-    .align  2
-name_stridx:
-    .asciz  "AWSTRIDX.AW"
-    .align  2
-name_strdat:
-    .asciz  "AWSTRDAT.AW"
-    .align  2
-name_bank:
-    .ascii  "BANK"
-name_bank_xx:
-    .asciz  "00"
     .align  2
 mode_rb:
     .asciz  "rb"
-    .align  2
 msg_play:
     .asciz  "HOLD EXIT TO QUIT"
-    .align  2
-msg_err:
-    .asciz  "GAME FILES MISSING"
+msg_load:
+    .asciz  "LOADING ANOTHER WORLD"
+msg_file:
+    .asciz  "AW: A GAME FILE IS MISSING OR BAD"
+msg_task:
+    .asciz  "AW: NO TASK SLOT FREE"
+msg_fw:
+    .ascii  "AW: UNKNOWN FIRMWARE, STEP "
+msg_fw_n:
+    .asciz  "0"
     .align  4
+.include "fwfind.s"
 .include "vm.s"
 .include "interp.s"
 .include "help.s"
-.include "awres_tab.s"              # generated: ResAddr, ResSize, ResType (and the SD packs)
-.include "awbank_tab.s"             # generated: BankNo, BankSize, BankRec
+.include "awpart_tab.s"             # generated: PartLists, GlobalList, ResPacked, ResType, file names
+cnv_image_end:                      # tools/cnv_layout.py: must lie below IMAGE_END_MAX
