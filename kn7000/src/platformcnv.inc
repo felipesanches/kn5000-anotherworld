@@ -65,6 +65,11 @@
 .equ AW_STRDAT,       0x502BEB00    # str_data.rom, 4096 bytes, to 0x502BFAFF
 .equ CNV_VARS,        0x502C0000    # the application's entry and part loader's variables (cnv_main.s)
 .equ FW_VARS,         0x502C0400    # what fwfind.s found (below), then its scratch from +0x40
+.equ AW_PATHS,        0x502C0800    # the game's folder and the name being opened (cnv_main.s AppPath):
+.equ AW_PREFIX,       AW_PATHS      #   16 bytes: "AW\" from the program menu's launch block, "" in the root
+.equ AW_PATHBUF,      AW_PATHS+0x10 #   32 bytes: AW_PREFIX and a file name
+.equ AW_PATHNAME,     AW_PATHS+0x30 #   the name AppPath was given
+.equ AW_PATHS_LEN,    0x40
 .equ VM_POLY_BASE,    0x502C1000    # vm.inc: rasterizer scratch, 0x200 bytes
 .equ VM_INTERP_BASE,  0x502C2000    # vm.inc: the interpreter, 0x1100 bytes
 .equ VM_MISC_BASE,    0x502C4000    # vm.inc: the rest, 0x1400 bytes

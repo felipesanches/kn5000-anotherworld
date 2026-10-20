@@ -105,6 +105,7 @@ CnvEntry:
     bra     ce_failed
 
 ce_first:                           # a fresh load: everything here is zero
+    call    LaunchFolder, 0, 0      # the folder the program menu started us from, if it did
     mov     1, d0
     mov     d0, (CV_STATE)
 ce_search:                          # one step of the firmware search per call
@@ -565,6 +566,7 @@ lst_len:
     calls   (a3)
     mov     (LD_REC), a2
     mov     (LR_NAME, a2), a0
+    call    AppPath, 0, 0           # in the game's folder: AW_PREFIX + the name
     mov     mode_rb, a1
     mov     (FW_OPEN), a3
     calls   (a3)
@@ -684,6 +686,76 @@ lst_give_up:
     mov     d0, (LD_TRIES)
     mov     2, d0
     bra     lst_ret
+
+# LaunchFolder: AW_PREFIX = the folder the game's files are in, relative to C:\ (the loader keeps file
+# names relative to C:\ around every call). When the program menu (technics-roms-disasm kn7000/tools/kn7menu)
+# started the game from a folder of its own, its launch block (kn7cnv.inc LB_*) holds that folder, "AW\";
+# when the loader started it from the root, the block is zero (the loader zeroes the whole application area
+# before it loads) and the prefix stays empty: the files are read from the root, as before. Leaf.
+LaunchFolder:
+    clr     d0
+    movbu   d0, (AW_PREFIX)
+    mov     (LB_ADDR+LB_MAGIC), d0
+    mov     LAUNCH_MAGIC, d1
+    cmp     d1, d0
+    bne     lnf_ret
+    mov     (LB_ADDR+LB_CHECK), d0
+    mov     LAUNCH_CHECK, d1
+    cmp     d1, d0
+    bne     lnf_ret
+    mov     (LB_ADDR+LB_ABI), d0
+    cmp     LAUNCH_ABI, d0
+    bne     lnf_ret
+    mov     LB_ADDR+LB_PREFIX, a0   # at most 15 characters and the NUL
+    mov     AW_PREFIX, a1
+    mov     15, d1
+lnf_cpy:
+    movbu   (a0), d0
+    movbu   d0, (a1)
+    cmp     0, d0
+    beq     lnf_ret
+    inc     a0
+    inc     a1
+    add     -1, d1
+    bne     lnf_cpy
+    clr     d0
+    movbu   d0, (a1)
+lnf_ret:
+    rets
+
+# AppPath(a0 = a file name) -> a0 = AW_PATHBUF: AW_PREFIX and the name ("AW\AWR11.AW", or "AWR11.AW" in the
+# root), at most 15 characters of each. Leaf.
+AppPath:
+    mov     a0, (AW_PATHNAME)
+    mov     AW_PREFIX, a1
+    mov     AW_PATHBUF, a0
+    mov     15, d1
+ap_pre:
+    movbu   (a1), d0
+    cmp     0, d0
+    beq     ap_name
+    movbu   d0, (a0)
+    inc     a0
+    inc     a1
+    add     -1, d1
+    bne     ap_pre
+ap_name:
+    mov     (AW_PATHNAME), a1
+    mov     15, d1
+ap_nm:
+    movbu   (a1), d0
+    movbu   d0, (a0)
+    cmp     0, d0
+    beq     ap_ret
+    inc     a0
+    inc     a1
+    add     -1, d1
+    bne     ap_nm
+    clr     d0
+    movbu   d0, (a0)
+ap_ret:
+    mov     AW_PATHBUF, a0
+    rets
 
 # GuardRange(a0 = start, d0 = length) -> d0 = 0 when [start, start + length) lies inside
 # [AW_LO, AW_HI) and clear of the mailbox page; else 1, recorded as GUARD_LOAD. Leaf.

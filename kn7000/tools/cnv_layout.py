@@ -84,6 +84,7 @@ regions = [  # name, start, end, what
     ("AW_STRDAT", L["AW_STRDAT"], L["AW_STRDAT"] + 4096, "strings, from AWSTRDAT.AW"),
     ("CNV_VARS", L["CNV_VARS"], L["CNV_VARS"] + 0x400, "the entry's and the part loader's variables"),
     ("FW_VARS", L["FW_VARS"], L["FW_VARS"] + 0x100, "what fwfind.s found, and its scratch"),
+    ("AW_PATHS", L["AW_PATHS"], L["AW_PATHS"] + L["AW_PATHS_LEN"], "the game's folder, from the menu's launch block"),
     ("VM_POLY_BASE", L["VM_POLY_BASE"], L["VM_POLY_BASE"] + BLOCKS["VM_POLY_BASE"], "rasterizer scratch"),
     ("VM_INTERP_BASE", L["VM_INTERP_BASE"], L["VM_INTERP_BASE"] + BLOCKS["VM_INTERP_BASE"],
      "VM variables, threads, call stack"),
@@ -93,6 +94,7 @@ regions = [  # name, start, end, what
     ("HELP_BUF", L["HELP_BUF"], L["HELP_BUF"] + 64000, "help pages, stop screen, bitmap unpacking"),
     ("VIDEO2_AT", L["VIDEO2_AT"], L["PART_AREA"], "the shared polygons (0x11)"),
     ("PART_AREA", L["PART_AREA"], L["PART_END"], "the current part's files"),
+    ("LB_ADDR", C["LB_ADDR"], C["LB_ADDR"] + C["LB_LEN"], "the program menu's launch block (kn7cnv.inc): read, never ours"),
 ] + [(f"PAGE_BITMAP_{k}", L[f"PAGE_BITMAP_{k}"], L[f"PAGE_BITMAP_{k}"] + 64000, f"VM page {k}") for k in range(4)]
 lo, hi, mb, mbe = L["AW_LO"], L["AW_HI"], L["MAILBOX_PAGE"], L["MAILBOX_PAGE_END"]
 for name, a, b, _ in regions:
