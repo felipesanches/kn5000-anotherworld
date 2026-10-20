@@ -6,7 +6,7 @@
 #   probes/cnv/build_probe.sh probes/cnv/probe2_task.s ~/compartilhado/tmp/cnvprobe/probe2.img
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DISASM_REPO="${DISASM_REPO:-$HERE/../../../../kn7000_disassembly}"
+DISASM_REPO="${DISASM_REPO:-$HERE/../../../../technics-roms-disasm/kn7000}"
 FLOPPY_TOOLS="${FLOPPY_TOOLS:-$HERE/../../../../kn7000_mame/tools/floppy-images}"
 OUT="$2"; W="$(mktemp -d)"; trap 'rm -rf -- "${W:?}"' EXIT
 python3 "$DISASM_REPO/tools/xapasm.py" "$1" -o "$W/AW.CNV" -m "$W/AW.map"
