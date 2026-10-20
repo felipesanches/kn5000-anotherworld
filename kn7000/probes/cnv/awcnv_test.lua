@@ -196,7 +196,15 @@ local function menus_to_convert()     -- DISK MENU, STYLE CONVERT (left button 3
   press("CPR_SEG1", 0x04); wait(6)
   press("CPL_SEG0", 0x20); wait(8)
   phase = "game"
-  press("CPR_SEG6", 0x01)
+  -- OK, until the firmware loads the converter: with some IC23 contents (the owner's; a stamped
+  -- blank one on 941) the converter list is not ready for OK 8 s after STYLE CONVERT, and the press
+  -- is lost (the screen still shows the list). The load shows as the firmware's writes into the
+  -- converter area before the first call (the area tap's "loading").
+  for i = 1, 8 do
+    press("CPR_SEG6", 0x01)
+    if wait_until(function() return T.area_loading > 0 end, 6) then return end
+    log(string.format("OK press %d not taken at t=%.0f s; again", i, now()))
+  end
 end
 local function enter_code(code)       -- the code screen's letter grid with the keybed D-pad (gen_code_keys.py)
   local grid = { OK = { 0, 6 } }
