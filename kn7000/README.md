@@ -102,11 +102,11 @@ The vendor plug-in is not redistributed: the build adds our module to your own c
 
 ## Layout
 
-| path               | what it is                                                        |
-|--------------------|-------------------------------------------------------------------|
-| `src/platform.inc` | KN7000/SP7001 addresses and constants, with how each was found    |
-| `src/main.s`       | the platform layer: hook, task, load, the VM's platform hooks     |
-| `probes/`          | read-only MAME probes that established the facts above            |
+| path               | what it is                                                     |
+|--------------------|----------------------------------------------------------------|
+| `src/platform.inc` | KN7000/SP7001 addresses and constants, with how each was found |
+| `src/main.s`       | the platform layer: hook, task, load, the VM's platform hooks  |
+| `probes/`          | read-only MAME probes that established the facts above         |
 
 ## Credits
 

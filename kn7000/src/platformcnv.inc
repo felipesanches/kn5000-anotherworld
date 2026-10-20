@@ -8,7 +8,7 @@
 #
 # DISK MENU > STYLE CONVERT lists the floppy's *.CNV files, reads the chosen one whole to
 # 0x502B8000 (after zeroing 0x30000 bytes there) and calls its first byte with `calls (a0)` on the
-# firmware's main task (941 0x48479929, 893 0x4847976C). Each time it returns, the firmware reads a
+# firmware's main task (941 0x48479929, 893 0x48479766). Each time it returns, the firmware reads a
 # request from the mailbox at 0x5031BC00, serves it, writes 0xFF there and calls again. Request 5
 # shows the NUL-terminated text that follows it in the mailbox on title 0x4A (_TT_STYLCNVTXT); the
 # firmware then keeps calling (about 20 times a second), so answering 5 every time parks the UI on

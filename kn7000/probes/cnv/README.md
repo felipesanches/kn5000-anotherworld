@@ -1,10 +1,123 @@
-# The STYLE CONVERT build: probes
+# The STYLE CONVERT build: probes and acceptance tests
 
 Measurements behind [README-CNV.md](../../README-CNV.md), the Another World build that a stock
-KN7000 runs as a style converter (`AW.CNV`). All of them run on **program 941** in the published
-overlay MAME build (`kn7000-emulator/run.sh kn7000`), with a copy of the real KN7000's SD card
-and a floppy in the drive. They were run on 2026-10-18; the results below are from the committed
-files.
+KN7000 runs as a style converter (`AW.CNV`). They run in the published overlay MAME build
+(`kn7000-emulator`, binary md5 `ed41d01b...`, which models IC23 as 256 KB of NVRAM repeating
+through CS1 and has a POWER OFF input), with a copy of the real KN7000's SD card and a floppy in the
+drive. The acceptance tests (2026-10-20) come first; the probes that established the platform
+(2026-10-18, program 941, the earlier AW.CNV that kept its data in the `0x44000000` window) follow.
+
+## Acceptance tests (2026-10-20): program 893 and 941
+
+`run_cnv_tests.sh OUT CASE...` runs them, after `make floppy`; `OUT` is a scratch directory. Each
+prints `run_cnv_tests: <case> PASS|FAIL detail` and appends it to `OUT/summary.txt`.
+
+| file               | what it is                                                                               |
+|--------------------|------------------------------------------------------------------------------------------|
+| `run_cnv_tests.sh` | the runner: the cases below, each MAME run in its own directory with fresh cfg and NVRAM |
+| `awcnv_test.lua`   | the MAME side: the whole game session (or the control, or a plain boot) and every tap    |
+| `noop_cnv.s`       | the control converter: ends the conversion on its first call, touches only the mailbox   |
+| `ic23_file.py`     | a saved IC23's stored and computed header checksum (copied from kn7000_mame)             |
+| `ic23_diff.py`     | which regions of two IC23 images differ (copied from kn7000_mame)                        |
+| `awcnv_cksum.lua`  | the intro frame by frame, for the pixel comparison with the reference VM                 |
+
+The questions, and how each is answered:
+
+| case / check          | question                                                       | how                                                                                                                                                                                           |
+|-----------------------|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `guard`               | (a) does AW.CNV name any address in CS1 or the user pools?     | `tools/ic23_guard.py` must say "clean" for `src/cnv_main.s` and find the SP7001 build's references; `tools/cnv_layout.py` must accept the memory map                                          |
+| `blank-v13`, `-v16`   | a realistic empty baseline                                     | boot with no IC23 file, POWER OFF at 40 s: the firmware initialises IC23 and stamps it                                                                                                        |
+| `ic23` ... `session`  | (b) does a whole session work?                                 | `awcnv_test.lua` drives DISK MENU > STYLE CONVERT > OK, the splash, the intro, a key to skip it, the panel and keybed controls, HELP, two level codes, quitting, YES, quitting, NO; 16 checks |
+| `ic23` ... `ic23w`    | (c) does anything of the game write into CS1?                  | a write tap over all of CS1 (both views), per PC: none from the converter area `0x502B8000`-`0x502E7FFF`, none past IC23's first 256 KB                                                       |
+| `ic23` ... `same`     | (d) is IC23 exactly as it would have been without the game?    | the same baseline, a control run (the same menus, `noop_cnv.s` run as AW.CNV, NO) and the game run, both ending with POWER OFF: the saved IC23s must be byte-identical, checksum valid        |
+| `ic23` ... `accepted` | (d) does the next boot accept it?                              | each saved IC23 booted once more: the firmware's own verdict byte (893 `0x5006CC7C`, 941 `0x5006CC80`) must be 0, and the PANEL MEMORY store must come out as it went in (no factory reset)   |
+| `ic23` ... `pools`    | (e) are the user-memory pools untouched?                       | `0x50180000`-`0x50297FFF` dumped just before POWER OFF in both runs: identical; and a write tap: none from the game's code                                                                    |
+| `ic23` ... `area`     | (f) does the firmware write into the game's RAM while it runs? | a write tap over `0x502B8000`-`0x50379FFF` (and its `0x90` view) but the mailbox page: every write not from the game's code, classified by phase; "foreign" = during the game                 |
+
+The session's `resources` check compares, each time a part has become resident, every resource in
+`RES_TAB` with the reference unpack (`build/res/resource-0xNN.bin`, or the floppy file for a bitmap
+kept packed).
+
+Commands (`T` is a scratch directory; the owner's IC23 is private and used only from a copy):
+
+    T=~/compartilhado/tmp/aw-cnv-tests
+    probes/cnv/run_cnv_tests.sh $T guard blank-v13 blank-v16
+    probes/cnv/run_cnv_tests.sh $T ic23 v13 $T/blank-v13/ic23 blank
+    probes/cnv/run_cnv_tests.sh $T ic23 v16 $T/blank-v16/ic23 blank
+    head -c 262144 ~/compartilhado/technics_roms/roms/kn7000/real_dump_v1.3_b893/pass5-run1/R8400000.BIN > $T/owner-ic23.bin
+    probes/cnv/run_cnv_tests.sh $T ic23 v13 $T/owner-ic23.bin owner
+
+**Results (2026-10-20, AW.CNV `7aab745c...`, floppy `b7214529...`, overlay binary md5 `ed41d01b...`,
+harness at `8c6d0a5`):**
+
+| case                 | session  | ic23w | same                      | accepted          | pools               | area  |
+|----------------------|----------|-------|---------------------------|-------------------|---------------------|-------|
+| `ic23 v13 ... blank` | 16 of 16 | clean | identical, checksum valid | valid, store kept | identical, no write | clean |
+| `ic23 v13 ... owner` | 16 of 16 | clean | identical, checksum valid | valid, store kept | identical, no write | clean |
+| `ic23 v16 ... blank` | 16 of 16 | clean | identical, checksum valid | valid, store kept | identical, no write | clean |
+
+`guard`: "ic23_guard: src/cnv_main.s: clean; ic23_guard: src/main.s: 670 reference(s) into IC23 or
+the user pools; cnv_layout: ok". In all three sessions: no panel press lost, no failed file read,
+8 parts made resident with 46 resources compared to the reference unpack, 0 differing; the firmware
+search printed the `aw_find_fw.py` column of its build. The saved game IC23s' SHA-1 (prefix) equal
+the controls': `eb26c67b...` (893 blank), `14f82423...` (893 owner), `bc2305dd...` (941 blank).
+
+What each run printed is in `OUT/summary.txt` and `OUT/<bios>-<name>/session.txt`; the tap reports
+are `ic23.txt`, `pools.txt` and `awarea.txt` in each run's directory. In the game runs, the firmware's
+own IC23 writes are the boot's and a few from its library at `0x4C01F310`-`0x4C01F39C` (the OCTAVE and
+SUSTAIN settings); the game's RAM saw the firmware load AW.CNV and the floppy reads AW.CNV asked for,
+nothing else. The stack pointer seen while the game's code runs (the game task's, allocated by the
+kernel, and the main task's during converter calls) stays in `0x5038DD5C`-`0x503AD844`.
+
+**How the runs went wrong before they went right** (each fixed in its own commit, 2026-10-20):
+
+- the load guard refused the city's last bitmap: it measured a packed bitmap by its unpacked size;
+- a failed part list was retried on every call, and YES could not start a new game;
+- the firmware still acts on OCTAVE and SUSTAIN while the game runs (`awcnv_panelsettings.lua`): the
+  session now presses them in pairs that cancel and checks the settings end as they began;
+- with the session driven by `emu.register_periodic`, OK on STYLE TYPE SELECT was lost in every run
+  with the owner's IC23 and with a stamped one on 941; driven by the emulated frame and confirming
+  each press in the firmware's bitmap, no press was lost in those runs;
+- with the owner's IC23, OTHER PART & FR's release was lost while the main task was in a part's first
+  file read, the bitmap kept the button down and the emulated panel delivered nothing more (36
+  presses lost; the bitmap dump on each lost press showed CPC_SEG5 `0x01` stuck while the converter
+  kept being called). AW.CNV now starts a part's loads only once the panel is let go;
+- once, the intro's polygons failed to load and loaded on a rerun; a failed file is now retried.
+
+**The panel buttons while AW.CNV runs** (`awcnv_panelsettings.lua`, -bios v13, AW.CNV `61fb4601`,
+presses each button once while the game runs and lists the IC23 header bytes each press changed):
+
+| button (game control)             | header bytes changed                              |
+|-----------------------------------|---------------------------------------------------|
+| PART SELECT RIGHT 1 (RIGHT)       | none                                              |
+| PART SELECT LEFT (LEFT)           | none                                              |
+| R1/R2 OCTAVE + (UP)               | `0x6EA`: `0x40` -> `0x4C`                         |
+| R1/R2 OCTAVE - (DOWN)             | `0x6EA`: `0x4C` -> `0x40`                         |
+| SUSTAIN (FIRE)                    | `0xCE`: `0x25` -> `0x2D`                          |
+| SUSTAIN again                     | written with the next panel event, back to `0x25` |
+| PART SELECT RIGHT 2, DISPLAY HOLD | none                                              |
+
+(In the session, where SUSTAIN comes before any PART SELECT, it changes `0x03A` instead: the sustain
+of whichever part is selected.)
+
+Commands for these two:
+
+    K=$PWD; E=../../kn7000-emulator; R=$T/panelset; mkdir -p $R/nv/kn7000_4 && cp $T/blank-v13/ic23 $R/nv/kn7000_4/
+    cp $E/sdcard_from_real_kn7000.img $R/sd.img; chmod u+w $R/sd.img
+    (cd $E && ./kn7000 kn7000 -bios v13 -rompath ./roms -skip_gameinfo -window -nothrottle \
+      -harddisk $R/sd.img -flop $K/build/another_floppy.img -nvram_directory $R/nv \
+      -autoboot_script $K/probes/cnv/awcnv_panelsettings.lua)
+    # the intro frame by frame (pages.bin is 167 MB; delete it afterwards)
+    (cd $E && AWCK_BIN=$T/pages.bin AWCK_IDX=$T/pages.idx ./kn7000 kn7000 -bios v13 \
+      -rompath ./roms -skip_gameinfo -window -nothrottle -harddisk $R/sd.img \
+      -flop $K/build/another_floppy.img -nvram_directory $R/nv2 -autoboot_script $K/probes/cnv/awcnv_cksum.lua)
+    python3 -I probes/cksum_pages.py $T/pages.bin $T/pages.idx $T/cnv_checksums.log
+    python3 -I probes/compare_frames.py $T/cnv_checksums.log \
+      ~/compartilhado/research-scratch/kn7000-aw-reference/ref_checksums.log
+
+The intro on 893 with the final floppy (`b7214529...`): "captured 2613 frames (last tick 2612); part
+loads 3, load errors 0, guard 0", and `compare_frames.py`: 2612 of 2612 frames identical to the
+reference.
 
 ## What the platform does with a converter
 
@@ -50,15 +163,21 @@ instead.
 `T` is any scratch directory. The converters' SHA-1s are probe1 `94df8164…`, probe2 `4c88cbcb…`
 and probe3 `d471e36e…`.
 
-**The `0x44000000` window on a real instrument.** The kn7000_disassembly notes identify it as
-the KN7000's **256 KB battery-backed backup SRAM** (IC23, mirrored at `0x84000000`). It holds the
-panel settings and the 104 PANEL MEMORY records, and `BackupSramTest` fixes its size exactly. The
-MAME driver maps 16 MB of plain RAM there as a placeholder. The game keeps its data at
-`0x44100000`–`0x44600000` and above, which works in MAME. On a real KN7000 that RAM is not there,
-and if the decoding is partial, writes would land on the stored settings. See README-CNV.md,
-Limits.
+**The `0x44000000` window on a real instrument** is chip select CS1, which is IC23 alone: the
+KN7000's **256 KB battery-backed SRAM** (also at `0x84000000`, uncached), holding the panel settings
+and the 104 PANEL MEMORY records. It has address pins A1-A17 only, so it **repeats every 256 KB through
+the whole window**; the owner's unit confirmed it on 2026-10-20 (SURVEY2 dump: 7 of 7 copies equal).
+`ram44.cmd` above measured MAME's 16 MB placeholder RAM, so "nothing above `0x4403FFFF`" says what
+the firmware addresses, not that the rest is free: on an instrument every address there is the panel
+memories. The 2026-10-18 AW.CNV kept its data at `0x44050000`-`0x4480CFFF`; the current one names
+no address in CS1 at all (README-CNV.md, "Memory"), which `tools/ic23_guard.py` checks at every
+build and the acceptance tests above measure.
 
-## Firmware addresses for 941
+## Firmware addresses for 941 (2026-10-18)
+
+AW.CNV no longer carries these: it finds them, and every other build's, by search
+(`src/fwfind.s`, `tools/aw_find_fw.py`; table in README-CNV.md). The values found for 941 equal the
+ones below.
 
 - **RAM.** The ring headers, switch bitmaps and millisecond counter come from the probes above.
 - **Task services.** The 941 entry stubs are paired with 942's exports by the kernel routine each
@@ -75,7 +194,11 @@ Limits.
 - **File routines.** `open` in the current folder `0x48531AC5`, `fmmread` `0x48532463` and
   `fmmclose` `0x485323BC` are in kn7000_disassembly's symbol files.
 
-## Does the game run right?
+## Does the game run right? (2026-10-18, the earlier AW.CNV, program 941)
+
+These ran the earlier AW.CNV, which loaded the whole game into the `0x44000000` window at start.
+`awcnv_resdump.lua`, `resverify.py` and `awcnv_session.lua` read that layout; they are superseded by
+`awcnv_test.lua` and are in git history (`97a9cd9`). `awcnv_cksum.lua` follows the current layout.
 
 | probe                                                            | question                                                                           | result                                                                                                                                                                                                                                 |
 |------------------------------------------------------------------|------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

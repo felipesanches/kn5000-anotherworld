@@ -17,12 +17,13 @@ enter every part, and each part's opening has been checked against the reference
 | verified    | `probes/awresverify.lua` + `.py`: **146/146 resources byte-exact in RAM** at the tabled addresses, no overlaps                                                                                                                                                                                                                                                                              |
 | by type     | 103 sounds (699,868 B), 3 music modules (33,344 B), 12 screen bitmaps (384,000 B), 9 palettes, 9 bytecode, 9 video1, 1 shared video2                                                                                                                                                                                                                                                        |
 
-The `0x44` window is mapped as 16 MB by the MAME driver; the game now uses it up to `0x444A1000`
+The `0x44` window is mapped as 16 MB by the MAME driver; the SP7001 build uses it up to `0x444A1000`
 (~4.6 MB: pages, VM state, resources, font and strings; plus the debug trace buffer at
-`0x44800000`). On a real instrument this window is most likely only the 256 KB battery-backed
-backup SRAM (IC23, the panel memories): kn7000_disassembly's `BackupSramTest` fixes that size, and
-941's firmware writes exactly its first 256 KB (`probes/cnv/README.md`). A real-hardware build
-must keep the game out of it; see README-CNV.md, Limits (2026-10-18).
+`0x44800000`). **On a real instrument this window is IC23**, the 256 KB battery-backed SRAM with
+the panel memories, repeating every 256 KB through the whole chip select (confirmed on the owner's
+unit, 2026-10-20). So the SP7001 build is MAME-only (README.md), and the STYLE CONVERT build
+(2026-10-20) keeps everything in the converter's work RAM and loads each part's files when the part
+starts, as the original engine does (README-CNV.md, "Memory" and "Parts on demand").
 
 ## 2. The VM side
 
@@ -117,10 +118,11 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    the LCD about 33 times a second (`probes/awfbwrites.lua`), more often than the VM shows frames,
    and its inner loop is 11 instructions per pixel (~700k per blit, from the code) -- blitting only when the shown page changes would
    free a lot of CPU.
-6. **Real hardware.** Confirm the `0x44` window's size (the game needs ~4.6 MB of it) and the SD
-   load time on the instrument.
+6. **Real hardware.** The `0x44` window is IC23 (above); the real-hardware build is AW.CNV, which
+   stays out of it. Still to measure on the instrument: the floppy load time per part.
 
-**Kept for later, only if it is needed — load on demand.** If the real `0x44` window is smaller
+**Done for the STYLE CONVERT build (2026-10-20, README-CNV.md): load on demand.** The SP7001 build
+still loads everything at boot, for the reason below. The original plan: if the real `0x44` window is smaller
 than ~4.6 MB (or the 10.6 s startup becomes a problem), load each part's resources when the part
 starts, as the original engine does, instead of everything at boot: the largest part, the city,
 references 502,227 bytes of resources (code, polygons, palette, video2, its sounds and bitmaps).
