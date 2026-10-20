@@ -1,20 +1,21 @@
 -- (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>; GPL v3+
 --
--- awcnv_cksum.lua -- the STYLE CONVERT (.CNV) build's per-frame front pages, for the same
--- pixel-exact comparison against rustyworld as ../awcksum.lua (which starts the SP7001 build).
+-- awcnv_cksum.lua -- the KN7APP.BIN build's per-frame front pages, for the same pixel-exact
+-- comparison against rustyworld as ../awcksum.lua (which starts the SP7001 build).
 --
 -- Starts the game the way a player does on a stock KN7000 (any program build: -bios v13 is the
--- owner's 893, v16 is 941): DISK MENU, STYLE CONVERT, OK on AW.CNV (the floppy in the drive from
--- boot). Then, exactly like awcksum.lua, a write tap on FRAME_NO captures the displayed page
+-- owner's 893, v16 is 941): DISK MENU, STYLE CONVERT, OK on KN7LOAD.CNV (the owner's loader floppy
+-- in the drive from boot, KN7APP.BIN and the game's files in the root of the SD card). Then, exactly like awcksum.lua, a write tap on FRAME_NO captures the displayed page
 -- (CUR_PAGE_2) at every VM tick into AWCK_BIN, with "tick frontaddr" lines in AWCK_IDX;
 -- probes/cksum_pages.py and probes/compare_frames.py turn them into the comparison. The splash is
--- skipped (NO_SPLASH) as the reference logs start at the intro: the firmware zeroes the converter
--- area when it loads AW.CNV, so NO_SPLASH is written once the converter has run (CV_STATE >= 2),
+-- skipped (NO_SPLASH) as the reference logs start at the intro: the loader zeroes the application
+-- area when it loads KN7APP.BIN, so NO_SPLASH is written once the game has run (CV_STATE >= 2),
 -- well before the game task's GameReset reads it (2.5 s after the task starts). Each part's files
--- are loaded from the floppy at the switch, so this also checks the per-part loading.
+-- are loaded from the SD card at the switch, so this also checks the per-part loading.
 --
---   kn7000 kn7000 -bios v13 -rompath ROMS -flop build/another_floppy.img -harddisk SD.img \
+--   kn7000 kn7000 -bios v13 -rompath ROMS -flop kn7load_floppy.img -harddisk SD.img \
 --     -autoboot_script probes/cnv/awcnv_cksum.lua -window -nothrottle
+-- (SD.img: a copy of the real KN7000's card with build/sdcard/ added to its root, as make kn7run does)
 -- env: AWCK_BIN, AWCK_IDX, AWCK_MAX (last tick, default 2612)
 -- Addresses: src/platformcnv.inc, src/vm.inc, src/cnv_main.s.
 local M = manager.machine
@@ -26,7 +27,7 @@ end
 local STEPS = {                     -- {time, port, mask, what}
   { 30, "CPR_SEG1", 0x04, "DISK MENU" },
   { 36, "CPL_SEG0", 0x20, "STYLE CONVERT" },
-  { 44, "CPR_SEG6", 0x01, "OK (AW.CNV)" },
+  { 44, "CPR_SEG6", 0x01, "OK (KN7LOAD.CNV)" },
 }
 local CV = 0x502C0000
 local CUR_PAGE_2, FRAME_NO, NO_SPLASH = 0x502C2000 + 0x100C, 0x502C4000 + 0x7C, 0x502C4000 + 0x58

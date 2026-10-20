@@ -1,16 +1,17 @@
 -- (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>; GPL v3+
 --
--- awcnv_panelsettings.lua -- which panel buttons change the instrument's live settings while AW.CNV
--- parks the firmware? (probes/cnv/README.md)
+-- awcnv_panelsettings.lua -- which panel buttons change the instrument's live settings while the game
+-- parks the firmware? (probes/cnv/README.md; measured with AW.CNV, the floppy-only predecessor; the
+-- acceptance session's "settings" check measures the same through the loader)
 --
 -- Question: the acceptance session found one byte of IC23's header (the live panel settings,
 -- 0x84000000-0x840007A3) changed by the game's panel controls (header offset 0xCE, bit 0x08), so the
 -- POWER OFF that followed saved it. Which button does it, and which buttons are free of that? Runs
--- AW.CNV (DISK MENU > STYLE CONVERT > OK, pressed again until the converter loads), waits for the
+-- the game (DISK MENU > STYLE CONVERT > OK, pressed again until the converter loads), waits for the
 -- game, then presses each button below once (0.4 s, then 2 s), and prints the header bytes each
 -- press changed: "PRESS <name>: n bytes  off:old->new ...". Nothing is saved: it exits without
 -- POWER OFF.
---   kn7000 kn7000 -bios v13 -flop build/another_floppy.img -harddisk SD.img -nvram_directory NV \
+--   kn7000 kn7000 -bios v13 -flop kn7load_floppy.img -harddisk SD.img -nvram_directory NV \
 --     -autoboot_script probes/cnv/awcnv_panelsettings.lua -window -nothrottle
 local M = manager.machine
 local sp = M.devices[":maincpu"].spaces["program"]
