@@ -243,6 +243,52 @@ load errors 0, guard 0", and `compare_frames.py`: 2612 of 2612 frames identical 
 gave "captured 2613 frames (last tick 2612); part loads 3, load errors 0, guard 0", and 2612 of 2612
 frames identical.
 
+## Sound (2026-10-20): the game as a MIDI source on the firmware's receive ring
+
+`src/audio.s` (README-CNV.md, "Sound") writes MIDI into the MIDI IN 1 receive ring as the RX ISR does.
+These answer whether the firmware takes it, and whether the intro still runs with the music's sync
+marks. All on program 893 (`-bios v13`) through the owner's loader floppy, each one MAME run with
+`-wavwrite` (the commands below; `$F` a scratch directory holding a card copy with `build/sdcard/`
+added, the loader floppy image and, for the last, the SMF; never `/tmp`).
+
+| file                  | question                                                                                                                         |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `awcnv_midiprog.lua`  | before audio.s: are bytes written into the ring consumed and played? do program change and bank select work on PART 4 and 10?    |
+| `midiprog_spectra.py` | its reading: flatness, peaks, level and C4's harmonics per segment                                                               |
+| `awcnv_sound.lua`     | the sound build's intro with no input: messages sent / dropped, ring rd vs wr, rows, PLAY_SOUNDs, var 0xF4, the toggle, the quit |
+| `wavrms.py`           | level (dBFS) and dominant frequency per window of a recording                                                                    |
+| `awcnv_noteoff.lua`   | are the game's note-offs honoured as MIDI IN's are? the same notes through the ring and through the port                         |
+| `gen_noteoff_mid.py`  | the SMF for awcnv_noteoff.lua's MIDI IN half (`-midiin1`)                                                                        |
+| `noteoff_levels.py`   | its reading: each note's level from note-on to 2.5 s after its note-off                                                          |
+
+What they showed:
+
+| probe                | KN7APP.BIN    | result                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|----------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `awcnv_midiprog.lua` | `e3ee3a40...` | every byte consumed; program 80 alone and with bank 121/0 make PART 4 a square wave (C4's even harmonics 49-58 dB down), program 48 sawtooth-like strings, program 0 piano; channel 10 is a drum part as it is and after bank 120/0 (a 57 Hz thump on key 36, 216 Hz on 38)                                                                                                                                                        |
+| `awcnv_sound.lua`    | `15f5c57e...` | 1,704 messages, 0 dropped, rd = wr at every sample; 951 rows; the 24 marks of module 0x07 in order into var 0xF4; the intro stops the music at mark 49 and reaches the lake by itself (tick about 2,660); 211 PLAY_SOUNDs; silent before the game, -27 to -49 dBFS in the intro; nothing sent while RIGHT 2 had the sound off; the quit's all notes off / all sound off / reset all controllers on channels 4-7 and 10-14 consumed |
+| `awcnv_noteoff.lua`  | `97fbd9e6...` | ring and MIDI IN port alike: GM 80 falls about 40 dB within 1 s of its note-off (C4 132 -> 89 dB, G4 128 -> 91), GM 0 rings on either way (E4 92 -> 90, A4 110 -> 108): the overlay's tone generator, not the path                                                                                                                                                                                                                 |
+
+In MAME notes of some voice classes ring on after their note-off whatever sends them (kn7000_mame
+`notes/tg-envelope-implementation-plan.md`: the overlay releases them only on a keybed key-up), so the
+recordings cannot show that every note ends; the unit can.
+
+    K=$PWD; E=../../kn7000-emulator; F=~/compartilhado/tmp/aw-sound/feas      # from kn7000/
+    cp $E/sdcard_from_real_kn7000.img $F/sd.img; chmod u+w $F/sd.img
+    python3 -I ../../technics-roms-disasm/kn7000/tools/sd_addfile.py $F/sd.img \
+      $(cd build/sdcard && for f in *; do printf '%s build/sdcard/%s ' "$f" "$f"; done)
+    cp ../../technics-roms-disasm/kn7000/tools/cnv_romdump/releases/2026-10-19/floppy/kn7load_floppy.img $F/floppy.img
+    cd $E && AWS_OUT=$F/sound.log DISPLAY=:0 ./kn7000 kn7000 -bios v13 -rompath ./roms -pluginspath ./plugins \
+      -skip_gameinfo -window -nothrottle -harddisk $F/sd.img -flop $F/floppy.img -nvram_directory $F/nv \
+      -cfg_directory $F/cfg -wavwrite $F/sound.wav -autoboot_script $K/probes/cnv/awcnv_sound.lua
+    python3 $K/probes/cnv/wavrms.py $F/sound.wav 60 246 1.0
+    # awcnv_noteoff.lua: the same, with AWN_OUT, a fresh card copy, the SMF and its reading:
+    python3 $K/probes/cnv/gen_noteoff_mid.py $F/noteoff.mid      # then add -midiin1 $F/noteoff.mid
+    python3 $K/probes/cnv/noteoff_levels.py $F/noteoff.wav
+
+The recordings are of the game's own music: regenerate them, never commit them. The card copy is
+121 MB: delete it afterwards.
+
 ## Speed (2026-10-20): where a frame's time goes
 
 On the owner's KN7000 the game ran, but its frame rate was very low. MAME gives every memory access the
