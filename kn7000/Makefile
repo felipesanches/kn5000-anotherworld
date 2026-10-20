@@ -1,11 +1,15 @@
 # Another World for the KN7000. Two builds:
-#   make cnv / make floppy   AW.CNV, the STYLE CONVERT build for a stock KN7000 (README-CNV.md):
-#                            the one meant for a real instrument; stays out of IC23 and the user pools.
+#   make sdcard              build/sdcard/: KN7APP.BIN and the game's files, everything for the SD card's
+#                            root folder (README-CNV.md). The build for a real instrument: an application
+#                            of the loader KN7LOAD.CNV, which the instrument runs from the owner's existing
+#                            floppy through DISK MENU > STYLE CONVERT; stays out of IC23, the user pools
+#                            and the loader.
 #   make MAME_ONLY=1 sp7001  BASEEXT.XAP, the SP7001 ride-along build (README.md): MAME ONLY. It keeps
 #                            the game in the 0x44000000 window, which on a real KN7000 is IC23 (the
 #                            battery-backed panel memories); the build refuses to run without MAME_ONLY=1.
-# Needs the KN7000 toolchain (technics-roms-disasm/kn7000: assembler + XAP/SD tools) beside this repo,
-# and for the SP7001 build its extracted vendor BASEEXT.XAP.
+# (The floppy-only AW.CNV route is retired: README-CNV.md, "History".)
+# Needs the KN7000 toolchain (technics-roms-disasm/kn7000: assembler + XAP/SD tools, and the loader's
+# tools/cnv_romdump) beside this repo, and for the SP7001 build its extracted vendor BASEEXT.XAP.
 
 DISASM_REPO ?= ../../technics-roms-disasm/kn7000
 PYTHON      ?= python3
@@ -29,7 +33,7 @@ RES_OUT     := build/res
 FONT_DIR    ?= ../../custom-kn5000-roms/anotherworld/src/hardcoded_data
 SD_ADDFILE  := $(PYTHON) $(DISASM_REPO)/tools/sd_addfile.py
 
-all: floppy
+all: sdcard
 
 sp7001: build/BASEEXT.XAP
 
@@ -79,50 +83,70 @@ test: card
 	  -snapshot_directory build -str 50 -window -nothrottle
 	@echo "---- build/awrun.log ----"; cat build/awrun.log
 
-# ---- the STYLE CONVERT build: a stock KN7000 (any program build), no SP7001 -- README-CNV.md ----
-# AW.CNV is loaded by DISK MENU > STYLE CONVERT and runs the same VM. The floppy holds it and the game
-# files it loads part by part (AWRxx.AW: each resource the game draws or runs, as MEMLIST.BIN finds it
-# in BANKxx; the font and the strings), on a blank disk the KN7000 itself formatted (FLOPPY_TOOLS:
-# kn7000_mame tools/floppy-images).
-FLOPPY_TOOLS ?= ../../kn7000_mame/tools/floppy-images
-# The published overlay build (program 941 is its default KN7000 BIOS; -bios v13 is program 893).
+# ---- the KN7APP.BIN build: a stock KN7000 (any program build), no SP7001 -- README-CNV.md ----
+# DISK MENU > STYLE CONVERT runs KN7LOAD.CNV from the owner's floppy; the loader reads KN7APP.BIN from the SD
+# card's root folder and calls it on every converter call. KN7APP.BIN runs the same VM and reads the game's
+# files part by part from the card's root (AWRxx.AW: each resource the game draws or runs, as MEMLIST.BIN finds it
+# in BANKxx; the font and the strings).
+LOADER_DIR  ?= $(DISASM_REPO)/tools/cnv_romdump
+# The loader on the owner's write-protected floppy, unchanged since its release: these exact files.
+LOADER_CNV    ?= $(LOADER_DIR)/releases/2026-10-19/floppy/KN7LOAD.CNV
+LOADER_FLOPPY ?= $(LOADER_DIR)/releases/2026-10-19/floppy/kn7load_floppy.img
+LOADER_SHA1   := 6b81f382fd29b9bc5a025854af0e20a194e68bec
+FLOPPY_SHA1   := b7a67de602694fd2257d59ce4509ca154b0b3064
+# The published overlay build (program 941 is its default KN7000 BIOS; -bios v13 is program 893, the owner's).
 MAME941     ?= ../../kn7000-emulator/run.sh
 SD941       ?= ../../kn7000-emulator/sdcard_from_real_kn7000.img
-CNV_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s
-BIOS        ?= v16
+APP_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s
+BIOS        ?= v13
 
-cnv: build/AW.CNV
+app: build/KN7APP.BIN
+sdcard: build/sdcard/KN7APP.BIN
 
 $(RES_OUT)/awpart.inc: tools/aw_extract.py tools/aw_partinfo.py src/platformcnv.inc $(AW_DATA)/MEMLIST.BIN
 	@mkdir -p $(RES_OUT)
 	$(PYTHON) -I tools/aw_extract.py $(AW_DATA) $(RES_OUT) --parts $@ src/platformcnv.inc $(FONT_DIR)
 
-# Before AW.CNV is written, three checks must pass (each stops the build otherwise):
+# Is the loader the owner's? (its SHA-1 and its floppy image's, as released on 2026-10-19)
+build/loader.ok: $(LOADER_CNV) $(LOADER_FLOPPY)
+	@mkdir -p build
+	echo "$(LOADER_SHA1)  $(LOADER_CNV)" | sha1sum -c --quiet
+	echo "$(FLOPPY_SHA1)  $(LOADER_FLOPPY)" | sha1sum -c --quiet
+	@touch $@
+
+# Before KN7APP.BIN is written, three checks must pass (each stops the build otherwise):
 #   tools/leafcheck.py   a routine entered with `call X, 0, 0` must not call anything before it makes
 #                        a frame (the nested call overwrites its return address; that hung the first
 #                        unpacker);
-#   tools/ic23_guard.py  no address the build names may lie in CS1 (IC23) or the user pools: "clean";
+#   tools/ic23_guard.py  no address the build names may lie in CS1 (IC23) or the user pools, and none in
+#                        the loader's resident area 0x502B8000-0x502B9FFF but loads from its service
+#                        table (--loader): "clean";
 #   tools/cnv_layout.py  the memory map (src/platformcnv.inc) stays in the converter's RAM, off the
-#                        mailbox page, without overlaps, and the image fits below the font.
-build/AW.CNV: $(CNV_SRC) src/platformcnv.inc src/vm.inc $(RES_OUT)/awpart.inc $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py tools/ic23_guard.py tools/cnv_layout.py
+#                        mailbox page and the loader's resident area (kn7cnv.inc, and the loader's own
+#                        image), without overlaps; the image starts at APP_BASE with its header and fits
+#                        below the font.
+# Then the loader's mkapp.py fills in the header's size and CRC-32, which the loader checks.
+build/KN7APP.BIN: $(APP_SRC) src/platformcnv.inc src/vm.inc $(RES_OUT)/awpart.inc $(LOADER_DIR)/kn7cnv.inc $(LOADER_DIR)/mkapp.py $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py tools/ic23_guard.py tools/cnv_layout.py build/loader.ok
 	@mkdir -p build
-	$(PYTHON) -I tools/leafcheck.py $(CNV_SRC)
-	$(PYTHON) -I tools/ic23_guard.py $(DISASM_REPO)/tools src/cnv_main.s -I src -I $(RES_OUT)
-	$(XAPASM) src/cnv_main.s -I src -I $(RES_OUT) -o build/AW.CNV.tmp -m build/AW.map
-	$(PYTHON) -I tools/cnv_layout.py src/platformcnv.inc src/vm.inc build/AW.map build/AW.CNV.tmp
-	mv -f build/AW.CNV.tmp $@
+	$(PYTHON) -I tools/leafcheck.py $(APP_SRC)
+	$(PYTHON) -I tools/ic23_guard.py $(DISASM_REPO)/tools src/cnv_main.s -I src -I $(RES_OUT) -I $(LOADER_DIR) --loader $(LOADER_DIR)/kn7cnv.inc
+	$(XAPASM) src/cnv_main.s -I src -I $(RES_OUT) -I $(LOADER_DIR) -o build/kn7app.bin -m build/kn7app.map
+	$(PYTHON) -I tools/cnv_layout.py $(LOADER_DIR)/kn7cnv.inc src/platformcnv.inc src/vm.inc build/kn7app.map build/kn7app.bin $(LOADER_CNV)
+	$(PYTHON) -I $(LOADER_DIR)/mkapp.py build/kn7app.bin $@.tmp
+	mv -f $@.tmp $@
 
-floppy: build/another_floppy.img
+# Everything for the SD card's root folder, and nothing else: build/sdcard/ (list: build/sdcard.txt).
+build/sdcard/KN7APP.BIN: build/KN7APP.BIN tools/make_sdcard.py $(RES_OUT)/awpart.inc
+	$(PYTHON) -I tools/make_sdcard.py build/sdcard build/KN7APP.BIN $(RES_OUT)
 
-build/another_floppy.img: build/AW.CNV tools/make_cnv_floppy.py $(RES_OUT)/awpart.inc
-	$(PYTHON) -I tools/make_cnv_floppy.py $@ build/AW.CNV $(RES_OUT) $(FLOPPY_TOOLS)
-	@sha1sum build/AW.CNV $@
-
-# Boot the stock KN7000 with the floppy in the drive; then DISK MENU, STYLE CONVERT, OK.
-# BIOS=v13 runs program 893 (the owner's), v16 (the default) program 941.
-cnvrun: build/another_floppy.img
-	cp $(SD941) build/sd941.img && chmod u+w build/sd941.img
-	$(MAME941) kn7000 -bios $(BIOS) -window -flop $(abspath build/another_floppy.img) -harddisk $(abspath build/sd941.img)
+# Boot the stock KN7000 with the owner's loader floppy and a copy of the real KN7000's SD card with
+# build/sdcard/ added to its root; then DISK MENU, STYLE CONVERT, OK. BIOS=v13 (the default) runs program
+# 893 (the owner's), v16 program 941.
+kn7run: build/sdcard/KN7APP.BIN build/loader.ok
+	cp $(SD941) build/kn7run_sd.img && chmod u+w build/kn7run_sd.img
+	$(SD_ADDFILE) build/kn7run_sd.img $$(cd build/sdcard && for f in *; do printf '%s build/sdcard/%s ' "$$f" "$$f"; done) > /dev/null
+	cp $(LOADER_FLOPPY) build/kn7run_floppy.img && chmod u+w build/kn7run_floppy.img
+	$(MAME941) kn7000 -bios $(BIOS) -window -flop $(abspath build/kn7run_floppy.img) -harddisk $(abspath build/kn7run_sd.img)
 
 # Does the run-time firmware search find everything in every program build we have? (tools/aw_find_fw.py)
 fwfind:
@@ -131,4 +155,4 @@ fwfind:
 clean:
 	rm -rf -- build
 
-.PHONY: all sp7001 card run test clean cnv floppy cnvrun fwfind
+.PHONY: all sp7001 card run test clean app sdcard kn7run fwfind

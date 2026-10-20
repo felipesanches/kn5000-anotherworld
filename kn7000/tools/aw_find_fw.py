@@ -2,21 +2,17 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# aw_find_fw.py -- does AW.CNV's run-time firmware search (src/fwfind.s) find the right routines and
-# RAM addresses in every KN7000 program build we have?
+# aw_find_fw.py -- does the game's run-time firmware search (src/fwfind.s) find the right routines
+# and RAM addresses in every KN7000 program build we have?
 #
-# AW.CNV carries no firmware address: on its first call it looks for what it needs in the program
-# flash (0x48400000-0x487FFFFF) and in the kernel library the boot copies to RAM at 0x4C000000, the
-# way the ROM dumper's loader does (technics-roms-disasm kn7000/tools/cnv_romdump, which ran on the
-# owner's program 893). This script runs the SAME searches, with the same acceptance rules, over the
+# KN7APP.BIN carries no firmware address: on its first calls it looks for what it needs in the
+# program flash (0x48400000-0x487FFFFF) and in the kernel library the boot copies to RAM at
+# 0x4C000000, the way its loader KN7LOAD.CNV does (technics-roms-disasm kn7000/tools/cnv_romdump,
+# which ran on the owner's program 893). The SD file routines are not searched here: the loader finds
+# them and hands them over in its service table (its own find_fw.py runs that search over every
+# build). This script runs the SAME searches as fwfind.s, with the same acceptance rules, over the
 # program images, and prints what each build gives. Rules (fwfind.s implements exactly these):
 #
-#   open      OpenHere (open a file in the current drive + folder, as STYLE CONVERT's own load does):
-#             a masked code signature, exactly one hit; its last call must enter fmmopen (found below)
-#             after fmmopen's 5-byte prologue
-#   fmm       the dumper's FindFileSig: the drive switch (one hit), fmmopen within 4 KB after it, and
-#             fmmclose / fmmread among the dispatchers there whose dispatch table is fmmopen's + 12 /
-#             + 0x3C and whose drive byte is the switch's (one hit each)
 #   cre/sta   firmware call sites "mov N, d0; mov X, a0; call cre_tsk; mov N, d0; clr d1; call sta_tsk"
 #             (both targets in the library 0x4C000000-0x4C03FFFF): at least two, all naming the same two
 #             routines, each starting with a kernel entry stub ("add -4, sp; mov d1, (0, sp)")
@@ -25,8 +21,8 @@
 #   dly       the routine the firmware yields with (adds d0 to the millisecond counter and rotates the
 #             ready queue until then): a masked signature in the library RAM, one hit, its three
 #             counter operands equal
-#   ms        the kernel's 1 kHz tick handler (the dumper's signature): one hit, its two counter
-#             operands equal, and equal to dly's counter
+#   ms        the kernel's 1 kHz tick handler (the loader's signature): one hit, its two counter
+#             operands equal, and equal to dly's counter (and, at run time, to the loader's SV_MSCOUNT)
 #   panel     the panel decoder's two "mov CPR, a0 ... mov CPL, a0" sites: one hit each, the same
 #             two bitmaps, CPL = CPR + 0x30, in work RAM
 #   rings     the library's per-port MIDI ring wrappers: one hit; MIDI IN 1 receive and MIDI OUT 1
@@ -65,15 +61,6 @@ def sig(text):
 
 # The signatures fwfind.s carries (same bytes, same masks).
 SIG = {
-    "open": sig("cf 30 fa fe 64 ff 47 b0 93 3e 22 10 98 fc dd X cd ?? ?? 00 00 98 fc dd X cd ?? ?? 00 00"
-                " 98 9d cd ?? ?? 00 00 5d b0 98 cd ?? ?? 30 24 df 30 a4"),
-    "ext": sig("81 15 a5 03 c2 08 fc 82 X de 00 00 00 fc 82 X de 00 00 fc a8 X de 00 00"),
-    "fmmopen": sig("cf 30 f8 fe e4 97 fc de X 3d 21 10 85 f4 db f0 42 49 f0 51 45 44 d9 fc a8 X 3d 54 21 10"
-                   " f3 a1 9d f0 f2 df 30 24"),
-    "close": sig("f8 fe ec fc dd X 3c 20 08 85 f4 db f0 41 45 f0 50 41 44 d9 fc a8 X 3c 54 20 08 f3 80"
-                 " f0 f0 df 00 14"),
-    "rw": sig("cf a0 f8 fe e4 82 fc de X 3d 21 10 85 f4 db f0 42 49 f0 51 45 44 d9 fc a8 X 3d 54 21 10"
-              " f3 91 88 f0 f1 df a0 24"),
     "cresta": sig("fc dc X dd X 00 00 80 ?? 04 dd X 00 00"),
     "exd": sig("fc 82 X dd X 00 00 df"),
     "dly": sig("cf a0 f8 fe f0 fc a6 X e2 fc a4 X a2 c7 ?? 00 81 cd ?? ?? 00 00 fc a4 X a2 c5 ?? 00 df a0 18"),
@@ -139,33 +126,6 @@ def search(mem):
     """fwfind.s, step by step. Returns {name: value} and a list of failures."""
     r, fail = {}, []
     FL, FH = BASE, BASE + 0x3FFF00            # the program flash, as fwfind.s scans it
-    # --- the fmm layer (the dumper's FindFileSig) ---
-    ext = mem.find("ext", FL, FH)
-    if len(ext) == 1:
-        e = ext[0]
-        drive = mem.u32(e + 8)
-        op = mem.find("fmmopen", e, e + 0x1000)
-        if len(op) == 1 and mem.u32(op[0] + 28) == drive and mem.u32(e + 18) == drive == mem.u32(e + 27):
-            topen = mem.u32(op[0] + 8)
-            r["fmmopen"] = op[0]
-
-            def disp(name, toff, dist, doff):
-                ok = [h for h in mem.find(name, e, e + 0x1000)
-                      if mem.u32(h + toff) == topen + dist and mem.u32(h + doff) == drive]
-                return ok[0] if len(ok) == 1 else None
-            r["fmmclose"], r["fmmread"] = disp("close", 5, 12, 25), disp("rw", 8, 0x3C, 28)
-    for k in ("fmmopen", "fmmclose", "fmmread"):
-        if not r.get(k):
-            fail.append(k)
-    # --- OpenHere, tied to fmmopen ---
-    oh = mem.find("open", FL, FH)
-    if len(oh) == 1:
-        call = oh[0] + 46
-        tgt = (call + mem.s16(call + 1)) & 0xFFFFFFFF
-        if r.get("fmmopen") and tgt == r["fmmopen"] + 5:
-            r["open"] = oh[0]
-    if not r.get("open"):
-        fail.append("open")
     # --- cre_tsk / sta_tsk from the firmware's own call sites ---
     pairs, sites = set(), 0
     for h in mem.find("cresta", FL, FH):
@@ -233,7 +193,7 @@ def load(roms, even, odd):
 
 # What the existing builds used, measured in MAME (README-CNV.md, platform941.inc, platform.inc).
 KNOWN = {
-    "941 (v1.6)": dict(open=0x48531AC5, fmmread=0x48532463, fmmclose=0x485323BC, cre_tsk=0x4C03D0C8,
+    "941 (v1.6)": dict(cre_tsk=0x4C03D0C8,
                        sta_tsk=0x4C03D8AB, dly_tsk=0x4C03DD6F, exd_tsk=0x4C03D5A1, kernel_ms=0x500D3C58,
                        panel_cpr=0x5006BE50, panel_cpl=0x5006BE80, midiin1_rxq=0x5001F050,
                        midiout1_txq=0x5001F864),
@@ -241,12 +201,12 @@ KNOWN = {
                          kernel_ms=0x500D3C68, panel_cpr=0x5006BE60, panel_cpl=0x5006BE90,
                          midiin1_rxq=0x5001F060, midiout1_txq=0x5001F874),
 }
-KEYS = ["open", "fmmread", "fmmclose", "cre_tsk", "sta_tsk", "dly_tsk", "exd_tsk", "kernel_ms",
+KEYS = ["cre_tsk", "sta_tsk", "dly_tsk", "exd_tsk", "kernel_ms",
         "panel_cpr", "panel_cpl", "midiin1_rxq", "midiout1_txq"]
 
 
 def main():
-    ap = argparse.ArgumentParser(description="AW.CNV run-time firmware search, over every program build")
+    ap = argparse.ArgumentParser(description="KN7APP.BIN's run-time firmware search, over every program build")
     ap.add_argument("--roms", default=os.path.expanduser("~/compartilhado/kn7000-emulator/roms/kn7000"))
     ap.add_argument("--real-lib893")
     a = ap.parse_args()
