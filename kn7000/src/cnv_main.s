@@ -58,7 +58,6 @@
 .equ BK_D1,        CNV_VARS + 0x90
 .equ BK_D2,        CNV_VARS + 0x94
 .equ CV_ERRLOG,    CNV_VARS + 0x100 # u32 per failed file, the first 32: (kind << 24) | (id << 8)
-.equ CV_TEXT,      CNV_VARS + 0x200 # the failure text being built
 .equ FAIL_CALLS,   200              # about 10 s of calls: end a failed run when EXIT cannot be read
 
 # =================================================================================
@@ -354,9 +353,13 @@ ep_wait:
 ep_ret:
     ret     [d2,d3,a2,a3], 0x30
 ep_fail:
-    mov     GUARD_FILE, d0
+    mov     (GUARD_WHAT), d0        # GuardRange refused the destination: keep that reason
+    cmp     0, d0
+    bne     ep_stop
+    mov     GUARD_FILE, d0          # otherwise the file itself: missing, short or not intact
     mov     (LD_BAD_ID), d1
     call    GuardTrip, 0, 0
+ep_stop:
     call    StopGame, 0, 0          # does not return
 
 # BitmapData(d0 = resource id) -> a0 = the bitmap's 32,000 bytes of planes, or 0. A packed bitmap
@@ -489,8 +492,11 @@ LoadStep:
 lst_go:
     movhu   (LR_ID, a2), d0
     mov     d0, (LD_BAD_ID)         # (named if it fails)
-    mov     (LR_DEST, a2), a0       # the destination, as long as the bigger of packed and unpacked,
-    mov     (LR_READ, a2), d0       # must lie in the game's RAM, clear of the mailbox page
+    mov     (LR_DEST, a2), a0       # the destination must lie in the game's RAM, clear of the
+    mov     (LR_READ, a2), d0       # mailbox page: as long as the file, or as the unpacked
+    movbu   (LR_FLAGS, a2), d1      # resource when it is unpacked there (a bitmap kept packed
+    btst    LR_INPLACE, d1          # takes only its packed bytes)
+    beq     lst_len
     mov     (LR_SIZE, a2), d1
     cmp     d0, d1
     bls     lst_len
