@@ -32,6 +32,7 @@ gt_loop:
 StopGame:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    call    AudioStopAll, 0, 0      # no note left sounding (audio.s)
     mov     HELP_BUF, a0            # a black page of its own
     mov     PAGE_SIZE / 4, d1
     clr     d0

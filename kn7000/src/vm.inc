@@ -220,7 +220,10 @@
 # while the keybed part transmits on MIDI OUT (the default).
 .equ QH_START,        0x00           # u32: first byte of the ring buffer
 .equ QH_LAST,         0x04           # u32: last byte of the ring buffer
+.equ QH_RD,           0x08           # u32: next byte the consumer reads (the firmware's; never ours)
 .equ QH_WR,           0x0C           # u32: next byte the producer writes
+.equ QH_FREE,         0x10           # u16: bytes the producer may still write (the RX ISR's enqueue,
+                                     #   lib 0x4C024CBC on 941, refuses a byte at 0 and decrements it)
 .equ NOTES_MIDI,      VM_MISC_BASE + 0x1000     # note tracker for MIDI IN 1
 .equ NOTES_KBD,       VM_MISC_BASE + 0x1200     # note tracker for the keybed (the MIDI OUT 1 stream)
 .equ NS_HDR,          0x00           # u32: ring header address

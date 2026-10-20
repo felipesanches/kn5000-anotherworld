@@ -399,4 +399,5 @@ aw_mode:
 .include "interp.s"
 .include "help.s"
 .include "perf_stub.s"              # no speed measurement in this build (perf.s is KN7APP.BIN's)
+.include "audio_stub.s"             # no sound in this build (audio.s is KN7APP.BIN's)
 .include "awres_tab.s"              # generated: ResAddr, ResSize, ResType

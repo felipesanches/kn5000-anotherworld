@@ -379,15 +379,33 @@ st_done:
 # =================================================================================
 # DLY_TSK(d0 = ms): every yield of the VM and the help screen comes through here (display.s,
 # interp.s, help.s call DLY_TSK). If the entry has asked us to quit, end the task here, between
-# frames; otherwise it is the firmware's yield.
+# frames; otherwise it is the firmware's yield, in slices of at most YIELD_SLICE ms with the sound's
+# poll before each and after the last (audio.s AudioPoll: the music's rows keep their time while
+# the game task waits). The firmware's yield keeps d2.
 DLY_TSK:
     mov     (CV_QUIT_REQ), d1
     cmp     0, d1
     bne     dq_quit
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     d0, d2                  # d2 = ms still to yield
+dq_slice:
+    call    AudioPoll, 0, 0
+    mov     d2, d0
+    cmp     YIELD_SLICE, d0
+    bls     dq_yield
+    mov     YIELD_SLICE, d0
+dq_yield:
+    sub     d0, d2
     mov     (FW_DLY), a0
-    jmp     (a0)                    # tail call: it returns to our caller
+    calls   (a0)
+    cmp     0, d2
+    bgt     dq_slice
+    call    AudioPoll, 0, 0
+    ret     [d2,d3,a2,a3], 0x20
 dq_quit:
     add     -0x10, sp               # (a frame: it never returns)
+    call    AudioEnd, 0, 0          # all notes off, all sound off: nothing hangs after the game
     call    PerfWindowEnd, 0, 0     # the figures so far, into the game's (AWPERF.TXT)
     mov     1, d1
     mov     d1, (CV_TASK_DONE)
@@ -1155,5 +1173,6 @@ msg_fw_n:
 .include "interp.s"
 .include "help.s"
 .include "perf.s"
+.include "audio.s"                  # sound effects and music: MIDI into the firmware's receive ring
 .include "awpart_tab.s"             # generated: PartLists, GlobalList, ResPacked, ResType, file names
 cnv_image_end:                      # tools/cnv_layout.py: must lie below IMAGE_END_MAX

@@ -36,6 +36,9 @@
 .equ FREAD,           0x48585E50    # n    fread_api(a0 = buf, a1 = FILE, d0 = size, d1 = count)
 .equ FCLOSE,          0x48585E65    #      fclose_api(a0 = FILE)
 
+# ---- MIDI IN as game input: every channel (this build makes no sound; cf. platformcnv.inc) ----
+.equ MIDI_IN_CHANNELS, 0xFFFF
+
 # ---- task ----------------------------------------------------------------------
 # micro-ITRON is priority-preemptive: a task below the firmware's priority 3 is never
 # scheduled while the firmware's (always-ready) tasks exist, so we MUST run at 3 and

@@ -77,6 +77,11 @@
 .equ AW_FONT,         0x502D8000    # anotherworld_chargen.rom, 768 bytes
 .equ AW_STRIDX,       0x502D8300    # str_index.rom, 2048 bytes
 .equ AW_STRDAT,       0x502D8B00    # str_data.rom, 4096 bytes, to 0x502D9AFF
+.equ AUDIO_VARS,      0x502DA000    # audio.s: the MIDI producer, the music player, the note slots, 0x200 bytes
+.equ SND_TAB,         0x502DA200    # AWSND.AW: each sound's program, note and length (tools/aw_sound_map.py)
+.equ SND_TAB_MAX,     0x400
+.equ MUSIC_BUF,       0x502DB000    # the current part's music module (0x07 intro, 0x8A final), unpacked in
+.equ MUSIC_MAX,       0x4000        #   place (aw_extract.py --parts puts it in the part's list), to 0x502DEFFF
 .equ VIDEO2_AT,       0x502E8000    # the shared polygons (resource 0x11, 25,108 bytes), loaded once
 .equ PART_AREA,       0x502EE400    # the current part's palette, bytecode, polygons, bitmaps
 .equ PART_END,        0x5031B000    #   (largest part, the city: 164,407 bytes; aw_extract.py --parts)
@@ -88,6 +93,12 @@
 .equ REPORT_BUF,      0x50370000    # 8 KB: the text of AWPERF.TXT, written to the SD card at quit (cnv_main.s)
 .equ REPORT_MAX,      0x2000
 .equ PAGE_SIZE,       AW_W*AW_H
+
+# ---- MIDI IN as game input ----------------------------------------------------------
+# The game's own sound goes into the MIDI IN 1 receive ring on channels 4-16 (audio.s), so the note
+# trackers count only channels 1-3 there (interp.s NotesAnyHeld): play the game over MIDI IN on 1-3.
+.equ MIDI_IN_CHANNELS, 0x0007
+.equ YIELD_SLICE,     4             # cnv_main.s DLY_TSK yields in slices of at most this many ms (audio.s)
 
 # ---- task ------------------------------------------------------------------------
 # Every firmware task runs at priority 3 and micro-ITRON does not time-slice, so ours runs at 3

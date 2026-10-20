@@ -199,6 +199,8 @@ InitForPart:
     cmp     PART_LAST, d0
     bgt     ifp_ret
     mov     d0, d2
+    call    AudioStopAll, 0, 0      # nothing sounds across a part switch (rawgl restartAt), and the
+    mov     d2, d0                  # module player must not read MUSIC_BUF while the next part loads
     call    EnsurePart, 0, 0        # d0 = partId; returns once its resources are resident
     mov     d2, d0
     movhu   d0, (CURRENT_PART_ID)
@@ -281,6 +283,7 @@ GameReset:
     mov     PREV_UD_BITS, a0
     movhu   d0, (a0)
     call    NotesInit, 0, 0         # start tracking keybed + MIDI notes afresh
+    call    AudioInit, 0, 0         # sound on, nothing playing (audio.s)
     call    VideoStart, 0, 0
     # zero 256 vars (512 bytes)
     mov     VM_VARIABLES, a2
@@ -1029,6 +1032,7 @@ NotesAnyHeld:
     clr     d0
 nah_loop:
     movhu   (a0), d2
+    and     MIDI_IN_CHANNELS, d2    # MIDI IN: the player's channels only (audio.s plays on 4-16 there)
     or      d2, d0
     movhu   (a1), d2
     or      d2, d0
@@ -1045,6 +1049,7 @@ nah_loop:
 NextThread:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    call    AudioPoll, 0, 0         # the music's rows and the notes' ends, between threads (audio.s)
     movbu   (CURRENT_THREAD), d2    # d2 = current thread index
 nt_loop:
     inc     d2
@@ -1798,14 +1803,17 @@ shr_done:
     call    WriteVar, 0, 0
     bra     ei_end
 
-# ---- 0x18 PLAY_SOUND: not supported; skip 5 bytes -----------------------------
+# ---- 0x18 PLAY_SOUND: resource u16, frequency index, volume, channel (the platform's AudioSound:
+# a note on the KN7000's tone generator in the KN7APP.BIN build, audio.s; nothing in the SP7001 one)
 OpPlaySound:
+    mov     a2, a0
+    call    AudioSound, 0, 0
     add     5, a2
     bra     ei_end
 
 # ---- 0x19 LOAD: resource load / part switch -----------------------------------
-# Every resource is already resident (LoadGameData), so: resourceId 0 (stop sound and
-# music) = no-op; a part id (0x3E80..) = deferred part switch request; a bitmap resource
+# Every resource is already resident (LoadGameData), so: resourceId 0 = stop sound and
+# music (AudioStopAll); a part id (0x3E80..) = deferred part switch request; a bitmap resource
 # is drawn into page 0 now, as the original engine's copyBitmapPtr; any other resource
 # (sound, music, ...) needs nothing.
 OpLoad:
@@ -1815,7 +1823,7 @@ OpLoad:
     asl     8, d0
     or      d1, d0                  # d0 = resourceId
     cmp     0, d0
-    beq     ei_end
+    beq     ol_stop
     cmp     RES_COUNT, d0
     bge     ol_part
     mov     ResType, a0
@@ -1825,14 +1833,20 @@ OpLoad:
     bne     ei_end
     call    LoadBitmap, 0, 0        # d0 = resource id
     bra     ei_end
+ol_stop:
+    call    AudioStopAll, 0, 0
+    bra     ei_end
 ol_part:
     cmp     PART_FIRST, d0
     blt     ei_end
     movhu   d0, (REQ_NEXT_PART)     # applied at the end of the frame (NextThread)
     bra     ei_end
 
-# ---- 0x1A PLAY_MUSIC: not supported; skip 5 bytes -----------------------------
+# ---- 0x1A PLAY_MUSIC: resource u16, delay u16, order u8 (the platform's AudioMusic: the module
+# player of audio.s in the KN7APP.BIN build, which also writes the intro's sync mark var 0xF4)
 OpPlayMusic:
+    mov     a2, a0
+    call    AudioMusic, 0, 0
     add     5, a2
     bra     ei_end
 

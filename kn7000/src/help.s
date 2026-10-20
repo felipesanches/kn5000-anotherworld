@@ -15,6 +15,7 @@ HelpScreen:
     mov     PH_PAUSE, d0            # not part of any frame (perf.s)
     call    PerfPhase, 0, 0
     mov     d0, d3                  # the phase to go back to
+    call    AudioPause, 0, 0        # silence; the music waits (audio.s)
     mov     palette, a0             # save the game's palette, install the help colours
     mov     HELP_PAL_SAVE, a1
     call    hs_copy_pal, 0, 0
@@ -110,6 +111,7 @@ hs_exit:                            # wait until every control is released
     mov     d0, (PF_STATE)
     mov     d3, d0
     call    PerfPhase, 0, 0
+    call    AudioResume, 0, 0
     ret     [d2,d3,a2,a3], 0x20
 
 # hs_copy_pal(a0 = from, a1 = to): copy a 16-entry RGB565 palette (32 bytes). Leaf.
@@ -298,6 +300,10 @@ help_page0:
     .long   hs_exit_lbl
     .word   80, 160, 1, 0
     .long   hs_exit_btn
+    .word   8, 172, 3, 0
+    .long   hs_sound
+    .word   80, 172, 1, 0
+    .long   hs_sound_btn
     .word   128, 184, 1, 0
     .long   hs_page_1
     .word   0xFFFF, 0               # end of page (4 bytes, so the next page stays aligned)
@@ -416,6 +422,8 @@ hs_page:         .asciz "PAGE"
 hs_page_btn:     .asciz "PAGE UP / PAGE DOWN"
 hs_exit_lbl:     .asciz "EXIT"
 hs_exit_btn:     .asciz "EXIT, or any game control"
+hs_sound:        .asciz "SOUND"
+hs_sound_btn:    .asciz "PART SEL RIGHT 2: on / off"
 hs_page_1:       .asciz "Page 1/4"
 hs_page_2:       .asciz "Page 2/4"
 hs_page_3:       .asciz "Page 3/4"
