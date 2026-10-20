@@ -94,6 +94,51 @@ Load times per part are in README-CNV.md, "How it was checked"; the loader route
 What each run printed is in `OUT/summary.txt` and `OUT/<bios>-<name>/session.txt`; the tap reports
 are `ic23.txt`, `pools.txt`, `awarea.txt` and `loader.txt` in each run's directory.
 
+### Through the program menu (2026-10-20, branch `launcher-folders`)
+
+The same tests with the game in `AW\` of the program menu's card (technics-roms-disasm
+`kn7000/tools/kn7menu`, `make card` there: the menu as the root's `KN7APP.BIN`, this game in `AW\`,
+the ROM dumper's passes 5 to 9 in their folders). `run_menu_route.sh` is `run_cnv_tests.sh` with that
+card (copied into the image by kn7menu's `fatimg.py`) and `awmenu_test.lua` is `awcnv_test.lua` with
+the menu in front: the session picks "Another World" in the menu's list and presses RUN, and after
+"Continue Next?" YES (which now brings the menu back) does so again. The control run is the same card
+with `noop_app.s` as the root's `KN7APP.BIN`. The taps count the menu's and the trampoline's code as
+the converter's, and allow a firmware write into the converter RAM while the menu runs only as a sector
+read the menu asked for, into its destination.
+
+| file                  | what it is                                                                                           |
+|-----------------------|------------------------------------------------------------------------------------------------------|
+| `run_menu_route.sh`   | the runner: `blank-v13`, `ic23 BIOS BASE NAME` as in `run_cnv_tests.sh`, through the menu            |
+| `awmenu_test.lua`     | the session through the menu: `menu`, `launch`, the 16 checks, `menu-again`, `menu-again-run`, ...  |
+
+    T=~/compartilhado/tmp/aw-menu-tests     # EMU=a copy of kn7000-emulator; CARDTREE=kn7menu's build/card
+    make -C ../../technics-roms-disasm/kn7000/tools/kn7menu card
+    probes/cnv/run_menu_route.sh $T blank-v13
+    probes/cnv/run_menu_route.sh $T ic23 v13 $T/blank-v13/ic23 blank
+    head -c 262144 ~/compartilhado/technics_roms/roms/kn7000/real_dump_v1.3_b893/pass5-run1/R8400000.BIN > $T/owner-ic23.bin
+    probes/cnv/run_menu_route.sh $T ic23 v13 $T/owner-ic23.bin owner
+    rm -f -- $T/owner-ic23.bin
+
+**Results (2026-10-20, branch `launcher-folders`: the game `KN7APP.BIN` `b80b0205...` in `AW\`, the menu
+`0566fba3...`, the loader floppy `b7a67de6...`, overlay binary md5 `5dfebca3...`, `-bios v13`):**
+
+| case                       | session  | ic23w | same                      | accepted          | pools               | area  | loader |
+|----------------------------|----------|-------|---------------------------|-------------------|---------------------|-------|--------|
+| `ic23 v13 ... blank`, menu | 20 of 20 | clean | identical, checksum valid | valid, store kept | identical, no write | clean | clean  |
+| `ic23 v13 ... owner`, menu | 20 of 20 | clean | identical, checksum valid | valid, store kept | identical, no write | clean | clean  |
+| `ic23 v13 ... blank`, root | 16 of 16 | clean | identical, checksum valid | valid, store kept | identical, no write | clean | clean  |
+
+The last row is `run_cnv_tests.sh` as it is, on this branch's build in the card's root, without the menu:
+the game still runs as before when the loader starts it directly. Through the menu the session's 20
+checks are the 16, plus the menu listing the six programs of its card, the launch (the launch block's
+folder `AW`, prefix `AW\`, the game's `AW_PREFIX` `AW\`), and the same two after "Continue Next?" YES
+brought the menu back. The saved IC23s equal the controls' and the ones every earlier route gave
+(SHA-1 prefixes `eb26c67b...` blank, `14f82423...` owner); the pools `dde3dd9c...`. Every file the game
+read came from `AW\` (474,104 bytes of SD reads into the record's destination, as from the root);
+the area tap also counts the menu's sector reads (541,696 bytes, each inside the destination it asked
+for) and the trampoline's writes (94,338), and no foreign write. The owner's IC23 copy and every image
+derived from it were deleted after the run.
+
 ### Before the loader: AW.CNV from its own floppy (2026-10-20, retired)
 
 The same tests ran first on `AW.CNV`, the game as a style converter of its own on a floppy with its

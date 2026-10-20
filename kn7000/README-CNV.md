@@ -40,7 +40,7 @@ writes exactly these 44 files there and nothing else (their sizes and SHA-1s: `b
 
 | file(s)                              | bytes   | what                                                                        |
 |--------------------------------------|---------|-----------------------------------------------------------------------------|
-| `KN7APP.BIN`                         | 15,260  | the game: application header, platform layer, firmware search, VM, unpacker |
+| `KN7APP.BIN`                         | 15,416  | the game: application header, platform layer, firmware search, VM, unpacker |
 | `AWFONT.AW`                          | 768     | the 8x8 font (the KN5000 port's)                                            |
 | `AWSTRIDX.AW`, `AWSTRDAT.AW`         | 6,144   | the string tables (the KN5000 port's)                                       |
 | `AWR11.AW` ... `AWR91.AW` (40 files) | 563,528 | each resource the game draws or runs, as `MEMLIST.BIN` finds it in `BANKxx` |
@@ -54,32 +54,44 @@ All 44 names, as `ls build/sdcard` gives them:
     AWR29.AW     AWR2A.AW     AWR2B.AW     AWR43.AW     AWR44.AW     AWR45.AW     AWR46.AW     AWR47.AW
     AWR48.AW     AWR49.AW     AWR53.AW     AWR7D.AW     AWR7E.AW     AWR7F.AW     AWR90.AW     AWR91.AW
 
-585,700 bytes in all (`build/sdcard.txt`), well within the 126.5 MB free on the owner's card.
+585,856 bytes in all (`build/sdcard.txt`), well within the 126.5 MB free on the owner's card.
 Each `AWRxx.AW` holds the exact bytes the original MS-DOS release's `MEMLIST.BIN` points at in its
 `BANKxx` file, ByteKiller-packed or stored, for every palette, bytecode, polygon set and bitmap (the
 sounds and music modules are left out: the port has no audio). They are made from your own copy of
 the game by `make sdcard` (`tools/aw_extract.py --parts`), and the part tables inside `KN7APP.BIN`
 are generated from the same `MEMLIST.BIN`, so the card must carry the files the same build wrote.
 `KN7APP.BIN`'s SHA-1 for the build in this repository and the MS-DOS release in `../../MSDOS/`:
-`b952c2aa839f249fb670390832eb936934e3e78f` (`build/sdcard.txt` lists it with the rest).
+`b80b0205f2e6e52dcc876528115ff31680b090b7` with the launch-folder support (branch `launcher-folders`;
+`b952c2aa839f249fb670390832eb936934e3e78f` before it, the binary the results below were taken with;
+`build/sdcard.txt` lists it with the rest).
 
-**The card's `KN7APP.BIN` today is the ROM dumper's.** Copying the game's over it replaces it, so
-copy the card's present `KN7APP.BIN` to the computer first (for instance as `KN7APP-dumper.BIN`). To
-run the dumper again, copy that one (or any release's, technics-roms-disasm
-`kn7000/tools/cnv_romdump/releases/`) back to the card's root as `KN7APP.BIN`; the game's other 43
-files can stay. Only one application is on the card at a time, since the loader always loads
-`C:\KN7APP.BIN`.
+**With the program menu (2026-10-20): the game in a folder of its own, `AW\`.** The card's root
+`KN7APP.BIN` can be the program menu (technics-roms-disasm `kn7000/tools/kn7menu`), which lists the
+programs in the card's folders and starts the one picked as the loader would have. Its `make card`
+puts this game in `AW\` (all 44 files of `build/sdcard/`, with a `MANIFEST.TXT` and an `ICON.BMP`)
+beside the ROM dumper's passes 5 to 9, each in its folder, so nothing has to be swapped on the card any
+more: copy the whole of kn7menu's `build/card/` to the card's root once. "Continue Next?" YES then
+brings the menu back instead of a new game.
 
-**Why the root folder, not a folder of its own.** The loader empties the SD card's current folder
-around every call, so names are looked up in `C:\`, and the root is where the loader itself reads
-`KN7APP.BIN` on the owner's unit. The game opens and reads its files with the same routines, in the
-same folder and in the same 16 KB pieces (the loader read pass 8's 16,640-byte `KN7APP.BIN` that way,
-a 16 KB piece and a short one): the one way of reading the card that has already run on that
-instrument. A folder would need either a path in every name (`AW\AWR11.AW`) or the
-firmware's `sdfmpath`: neither has run on the owner's unit (only the dumper's full build, which never
-ran there, uses a folder), and `sdfmpath` is a service the loader may not find on another firmware.
-The cost is 43 more entries in the root directory, which holds 512; all of them are `AW*.AW`, so
-they are easy to pick out and clash with no file of the dumper's (`*.BIN`, `DUMPLIST.TXT`).
+The game reads its files from the folder it was started from. The menu leaves a launch block at
+`0x502E7F00` (the loader's contract, `kn7cnv.inc` `LB_*`) with the folder's 8.3 name; on its first call
+the game copies the block's prefix, `AW\`, into `AW_PREFIX` (`cnv_main.s` `LaunchFolder`), and opens
+every file as that prefix and its name (`AppPath`: `AW\AWR11.AW`), through the loader's `SV_OPEN` as
+before. The loader zeroes the whole application area, the block included, before it loads anything,
+so **the game still runs from the root without the menu**: the prefix stays empty and the names are the
+old ones (below). Opening a file in a folder is the one thing this adds: the firmware's FAT library
+walks the path, as it does for its own SD screens; from a converter that has run only in MAME so far
+(probes/cnv/README.md, "Through the program menu").
+
+**Without the menu: the root.** `KN7APP.BIN` and the game's files in the card's root, as before. The
+card's root `KN7APP.BIN` is then the game; copy the one there first if it is something else. Only one
+application is in the root at a time, since the loader always loads `C:\KN7APP.BIN`.
+
+**Why the root was the first choice.** The loader empties the SD card's current folder around every
+call, so names are looked up in `C:\`, and the root is where the loader itself reads `KN7APP.BIN` on the
+owner's unit: the one way of reading the card that had already run on that instrument. The menu's
+launch block now gives the game its folder without the optional `sdfmpath` service: a prefix in the
+name needs nothing the loader may not have found.
 
 ## Building
 
@@ -269,17 +281,19 @@ map, laid out around the loader's contract `kn7cnv.inc` (which the game includes
 | `0x502B9C00`-`0x502B9C7F` | LV_STR: the loader's line buffer                                                      |
 | `0x502B9D00`-`0x502B9DFF` | LOADER_VARS: the loader's variables and the saved SD folder                           |
 | `0x502B9E00`-`0x502B9E6B` | SVC: the loader's service table (the game reads it)                                   |
-| `0x502BA000`-`0x502BDFFF` | KN7APP.BIN: header, code and tables (15,260 bytes, to 0x502BDB9C)                     |
+| `0x502BA000`-`0x502BDFFF` | KN7APP.BIN: header, code and tables (15,416 bytes, to 0x502BDC38)                     |
 | `0x502BE000`-`0x502BE2FF` | AW_FONT: the 8x8 font, from AWFONT.AW                                                 |
 | `0x502BE300`-`0x502BEAFF` | AW_STRIDX: string index, from AWSTRIDX.AW                                             |
 | `0x502BEB00`-`0x502BFAFF` | AW_STRDAT: strings, from AWSTRDAT.AW                                                  |
 | `0x502C0000`-`0x502C03FF` | CNV_VARS: the entry's and the part loader's variables                                 |
 | `0x502C0400`-`0x502C04FF` | FW_VARS: what fwfind.s found, and its scratch                                         |
+| `0x502C0800`-`0x502C083F` | AW_PATHS: the game's folder, from the menu's launch block                             |
 | `0x502C1000`-`0x502C11FF` | VM_POLY_BASE: rasterizer scratch                                                      |
 | `0x502C2000`-`0x502C30FF` | VM_INTERP_BASE: VM variables, threads, call stack                                     |
 | `0x502C4000`-`0x502C53FF` | VM_MISC_BASE: input, help, guard, note trackers                                       |
 | `0x502C6000`-`0x502C6247` | RES_TAB: where each resource is now                                                   |
 | `0x502C8000`-`0x502D79FF` | HELP_BUF: help pages, stop screen, bitmap unpacking                                   |
+| `0x502E7F00`-`0x502E7FFF` | LB_ADDR: the program menu's launch block (kn7cnv.inc): read, never ours               |
 | `0x502E8000`-`0x502EE3FF` | VIDEO2_AT: the shared polygons (0x11)                                                 |
 | `0x502EE400`-`0x5031AFFF` | PART_AREA: the current part's files                                                   |
 | `0x5031B000`-`0x5031BFFF` | the firmware's mailbox page (0x5031BC00..): never written by the game but the request |
