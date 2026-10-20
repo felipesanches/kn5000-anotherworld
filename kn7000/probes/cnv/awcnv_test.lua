@@ -189,7 +189,27 @@ end
 -- ---- the session, as a coroutine resumed every frame ----------------------------------------------
 local function wait(s) local t = now() + s; while now() < t do coroutine.yield() end end
 local function wait_until(cond, s) local t = now() + s; while now() < t do if cond() then return true end; coroutine.yield() end; return cond() end
-local function press(tag, mask, hold) local f = field(tag, mask); f:set_value(1); wait(hold or 0.4); f:set_value(0) end
+-- A panel press, confirmed in the firmware's own switch bitmap (AWT_PANEL = PANEL_CPR of the BIOS:
+-- 893 0x5006BE4C, 941 0x5006BE50; CPL/CPC segments at +0x30): the emulated panel sometimes loses a
+-- press (probes/cnv/README.md), so one the firmware never saw is released and tried again.
+local PANEL = tonumber(os.getenv("AWT_PANEL") or "")
+local LOST = 0
+-- press_while(tag, mask, cond, s): hold the button until cond() (or s seconds); -> cond().
+local function press_while(tag, mask, cond, s)
+  local f = field(tag, mask)
+  local seg = tonumber(tag:match("SEG(%d+)"))
+  local byte = PANEL and (PANEL + seg + (tag:sub(1, 3) == "CPR" and 0 or 0x30))
+  for try = 1, 6 do
+    f:set_value(1)
+    local seen = not byte or wait_until(function() return (sp:read_u8(byte) & mask) ~= 0 end, 1.0)
+    if seen then local r = wait_until(cond, s); f:set_value(0); return r end
+    f:set_value(0); LOST = LOST + 1
+    log(string.format("press %s %02X not seen by the firmware at t=%.1f s (try %d); again", tag, mask, now(), try))
+    wait(1.5)
+  end
+  return false
+end
+local function press(tag, mask, hold) press_while(tag, mask, function() return false end, hold or 0.4) end
 local function key(n, hold) local f = keyfield(n); f:set_value(1); wait(hold or 0.3); f:set_value(0) end
 local function menus_to_convert()     -- DISK MENU, STYLE CONVERT (left button 3), OK (right button 4)
   wait_until(function() return now() > 30 end, 60)
@@ -277,9 +297,8 @@ local function game()
                        { "UP", "CPR_SEG6", 0x02, 0xE5, -1 }, { "DOWN", "CPR_SEG7", 0x02, 0xE5, 1 },
                        { "RIGHT", "CPR_SEG1", 0x02, 0xFC, 1 }, { "LEFT", "CPR_SEG2", 0x01, 0xFC, -1 } }) do
     local hb = header()
-    local f = field(b[2], b[3]); f:set_value(1)
-    local ok = wait_until(function() return var(b[4]) == b[5] end, 1.5)
-    f:set_value(0); wait(2)
+    local ok = press_while(b[2], b[3], function() return var(b[4]) == b[5] end, 1.5)
+    wait(2)
     got[#got + 1] = b[1] .. (ok and "" or "(no)")
     local d = diff(hb, header())
     if d ~= "" then fx[#fx + 1] = b[1] .. "->" .. d end
@@ -354,7 +373,7 @@ local function finish()
   f:write(sp:read_range(0x50180000, 0x50297FFF, 8)); f:close()
   if VALID then log(string.format("IC23 at this boot: the firmware's verdict byte %02X (0 = valid)", sp:read_u8(VALID))) end
   report()
-  log(string.format("%d checks, %d failed (t=%.0f s)", #results, fails, now()))
+  log(string.format("%d checks, %d failed (t=%.0f s); panel presses the emulated panel lost and the harness repeated: %d", #results, fails, now(), LOST))
   if POWER then
     log("POWER OFF")
     for _, fl in pairs(M.ioport.ports[":POWER"].fields) do fl:set_value(1) end
@@ -368,7 +387,7 @@ local co = coroutine.create(function()
   finish()
   while true do coroutine.yield() end
 end)
-AWT_TICK = emu.register_periodic(function()
+AWT_TICK = emu.add_machine_frame_notifier(function()   -- every emulated frame: timing independent of the host
   if RES_DIR and phase == "game" then  -- a part has just become resident: check its files
     local cur = sp:read_u32(LD_CUR)
     if cur ~= 0 and cur ~= RES.last then check_resources() end

@@ -39,6 +39,7 @@ FLOPPY_TOOLS="${FLOPPY_TOOLS:-$KN/../../kn7000_mame/tools/floppy-images}"
 OUT="$(mkdir -p "$1" && cd "$1" && pwd)"; shift
 nvdir() { case "$1" in v13) echo kn7000_4 ;; v16) echo kn7000 ;; *) echo "unknown bios $1" >&2; exit 2 ;; esac; }
 valid() { case "$1" in v13) echo 0x5006CC7C ;; v16) echo 0x5006CC80 ;; esac; }  # BackupSramChecksumVerify's byte
+panel() { case "$1" in v13) echo 0x5006BE4C ;; v16) echo 0x5006BE50 ;; esac; }  # PANEL_CPR (tools/aw_find_fw.py)
 say() { echo "run_cnv_tests: $*" | tee -a "$OUT/summary.txt"; }
 
 # mame RUNDIR BIOS MODE FLOPPY [POWER]: one boot, fresh cfg, a writable copy of the real KN7000's SD card,
@@ -48,7 +49,7 @@ mame() {
   mkdir -p "$R/snap"
   cp "$EMU/sdcard_from_real_kn7000.img" "$R/sd.img"; chmod u+w "$R/sd.img"
   cp "$F" "$R/floppy.img"
-  ( cd "$EMU" && AWT_MODE="$M" AWT_OUT="$R" AWT_RES="$KN/build/res" AWT_VALID="$(valid "$B")" AWT_POWER="$([ "$P" = 1 ] && echo 1)" \
+  ( cd "$EMU" && AWT_MODE="$M" AWT_OUT="$R" AWT_RES="$KN/build/res" AWT_VALID="$(valid "$B")" AWT_PANEL="$(panel "$B")" AWT_POWER="$([ "$P" = 1 ] && echo 1)" \
     DISPLAY="${DISPLAY:-:0}" timeout 3600 ./kn7000 kn7000 -bios "$B" -rompath ./roms -pluginspath ./plugins \
     -skip_gameinfo -window -nothrottle -harddisk "$R/sd.img" -flop "$R/floppy.img" -nvram_directory "$R/nv" \
     -cfg_directory "$R/cfg" -snapshot_directory "$R/snap" -autoboot_script "$HERE/awcnv_test.lua" ) > "$R/run.log" 2>&1
