@@ -22,7 +22,8 @@
 --   menus    EXIT closes the firmware's message, "Continue Next?" appears; the VM stays stopped
 --   again    YES starts a new game (a new task, the splash part loaded again)
 --   leave    quitting again and answering NO leaves STYLE CONVERT
---   guard    the run-time guard never refused anything and no load failed
+--   guard    the run-time guard never refused anything and no part list failed; a file read that
+--            failed and worked at a later attempt (cnv_main.s FILE_TRIES) is listed, not failed
 --   resources each time a part's files are resident, every resource in RES_TAB equals the reference
 --            unpack (AWT_RES = build/res: resource-0xNN.bin from tools/aw_extract.py), or, for a bitmap
 --            kept packed, its floppy file floppy/AWRxx.AW
@@ -204,7 +205,12 @@ local function press_while(tag, mask, cond, s)
     local seen = not byte or wait_until(function() return (sp:read_u8(byte) & mask) ~= 0 end, 1.0)
     if seen then local r = wait_until(cond, s); f:set_value(0); return r end
     f:set_value(0); LOST = LOST + 1
-    log(string.format("press %s %02X not seen by the firmware at t=%.1f s (try %d); again", tag, mask, now(), try))
+    local bm = ""
+    for i = 0, 15 do bm = bm .. string.format("%02X", sp:read_u8(PANEL + i)) end
+    bm = bm .. "|"
+    for i = 0, 15 do bm = bm .. string.format("%02X", sp:read_u8(PANEL + 0x30 + i)) end
+    log(string.format("press %s %02X not seen by the firmware at t=%.1f s (try %d; bitmaps CPR|CPL %s; converter calls %d); again",
+      tag, mask, now(), try, bm, sp:read_u32(CV_CALLS)))
     wait(1.5)
   end
   return false
@@ -348,9 +354,12 @@ local function game()
   phase = "after"
   local calls = sp:read_u32(CV_CALLS); wait(6)
   result("leave", ok and sp:read_u32(CV_CALLS) == calls, "second quit, NO; the converter is not called any more (snapshot: main screen)")
-  result("guard", sp:read_u32(GUARD_COUNT) == 0 and sp:read_u32(LD_ERRORS) == 0 and sp:read_u32(LD_FAILED) == 0,
-    string.format("guard refusals %d (last %d at %08X), load errors %d, part lists loaded %d",
-      sp:read_u32(GUARD_COUNT), sp:read_u32(GUARD_WHAT), sp:read_u32(GUARD_ADDR), sp:read_u32(LD_ERRORS), sp:read_u32(LD_LISTS)))
+  local elog = {}
+  for i = 0, math.min(sp:read_u32(LD_ERRORS), 8) - 1 do elog[#elog + 1] = string.format("%08X", sp:read_u32(CV + 0x100 + 4 * i)) end
+  result("guard", sp:read_u32(GUARD_COUNT) == 0 and sp:read_u32(LD_FAILED) == 0,
+    string.format("guard refusals %d (last %d at %08X); no list failed: %s; part lists loaded %d; failed file attempts %d (kind<<24|id<<8|try: %s), files loaded only at a later attempt %d",
+      sp:read_u32(GUARD_COUNT), sp:read_u32(GUARD_WHAT), sp:read_u32(GUARD_ADDR), tostring(sp:read_u32(LD_FAILED) == 0),
+      sp:read_u32(LD_LISTS), sp:read_u32(LD_ERRORS), table.concat(elog, " "), sp:read_u32(CV + 0x7C)))
   if RES_DIR then
     result("resources", RES.bad == 0 and RES.loads >= 6, string.format("%d parts made resident, %d resident resources compared, %d differ %s",
       RES.loads, RES.checked, RES.bad, table.concat(RES.badlist, " ")))
