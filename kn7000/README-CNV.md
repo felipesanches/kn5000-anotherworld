@@ -285,6 +285,11 @@ player runs and writes its sync marks into var 0xF4 as before, so the intro keep
 
 ### The DSP mode (iteration 2, 2026-10-21): the game's own samples
 
+**On the instrument (2026-10-21, Felipe's report, `KN7APP.BIN` `a2fbbaa6...`, program 893):** the sounds play
+perfectly, with REVERB on and with REVERB off (on is a little louder); the game's level is close to a piano note's;
+nothing garbled or stuck; no "NO DSP" shown; reverb and chorus both came back after quitting. The bank's first
+load felt slow (26 s in MAME; not timed on the unit).
+
 The KN7000's tone generators play only their wave ROMs, so sound of the game's own has to come from the effects
 DSP (IC306, an ADSP-21065L with 1M words of SDRAM), which the firmware host-boots and keeps running its own
 effects kernel. Iteration 1, DSPTONE (technics-roms-disasm `kn7000/tools/dsptone`), put a program of ours into
