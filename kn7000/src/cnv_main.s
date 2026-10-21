@@ -14,11 +14,16 @@
 #   * the first FW_STEPS calls find the firmware's routines and RAM (fwfind.s), and check the
 #     loader's service table, whose SD file routines the game reads its files with;
 #   * the next ones read the font, the strings and the shared polygons from the SD card, one file
-#     per call (GlobalList), then start the game task (display.s GameTask runs the VM);
+#     per call (GlobalList);
+#   * then, when the firmware's DSP routines were found, the effects DSP gets its sample mixer and the
+#     game's sample bank (dsp.s: DspPrepare, then BankStep, BANK_MS of work per call; skipped when the
+#     bank is still in the DSP's SDRAM from an earlier run since power-on); then the game task starts
+#     (display.s GameTask runs the VM), with the sound on the DSP, or on the tone generator (audio.s);
 #   * from then on, whenever the game task asks for a part (EnsurePart, at a part switch), each call
 #     reads one of that part's files and unpacks it in place (LoadStep), until the part is resident.
 # Holding EXIT for QUIT_HOLD_MS asks the game task to end itself at its next yield (DLY_TSK below);
-# the following call answers 0xFE, which hands the instrument back: the firmware shows a message
+# the following call puts the effects DSP's slots back (dsp.s DspQuit) and answers 0xFE, which hands the
+# instrument back: the firmware shows a message
 # (EXIT), then "Continue Next?". YES makes the loader read KN7APP.BIN afresh (zeroing APP_BASE..
 # CNV_END first) and call it, which starts a new game from the firmware search on; NO leaves.
 #
@@ -31,6 +36,7 @@
 .include "platformcnv.inc"
 .include "vm.inc"
 .include "awpart.inc"               # generated: RES_COUNT, PART_LISTS, LR_* (tools/aw_extract.py --parts)
+.include "dsp.inc"                  # dsp.s's equates (DV_*, MODE_*), and the mixer's addresses (dsp_equ.inc)
 .mnbase APP_BASE                    # where KN7LOAD.CNV loads KN7APP.BIN
 .equ ResAddr,      RES_TAB          # interp.s ResPtr: the table the part loader fills
 
@@ -48,7 +54,7 @@ AppName:                            # AH_NAME: 32 bytes, NUL-padded
     .space  AppHeader + 0x40 - .
 
 # ---- our variables (CNV_VARS, zeroed by the loader with the whole application area on each load) ----
-.equ CV_STATE,     CNV_VARS + 0x00  # 0 first call, 1 searching, 2 global files, 3 running, 4 failed
+.equ CV_STATE,     CNV_VARS + 0x00  # 0 first call, 1 searching, 2 global files, 3 running, 4 failed, 5 the DSP
 .equ CV_QUIT_REQ,  CNV_VARS + 0x04  # set by the entry when EXIT has been held long enough
 .equ CV_TASK_DONE, CNV_VARS + 0x08  # set when no game task runs (ended, or never started)
 .equ CV_EXIT_T0,   CNV_VARS + 0x0C  # the ms counter when EXIT went down (0 = up)
@@ -106,6 +112,8 @@ CnvEntry:
     beq     ce_global
     cmp     3, d0
     beq     ce_run
+    cmp     5, d0
+    beq     ce_dsp
     bra     ce_failed
 
 ce_first:                           # a fresh load: everything here is zero
@@ -142,6 +150,36 @@ ce_global:                          # one global file per call, then the game ta
     cmp     1, d0
     bne     ce_global_fail
     call    ListEnd, 0, 0
+    mov     1, d0                   # no game task yet: EXIT can end it at once
+    mov     d0, (CV_TASK_DONE)
+    mov     (DV_FOUND), d0          # the effects DSP next, when its routines were found
+    cmp     DFB_ALL, d0
+    bne     ce_start
+    mov     5, d0
+    mov     d0, (CV_STATE)
+    bra     ce_poll_exit
+ce_dsp:                             # the DSP's mixer and the sample bank (dsp.s), then the game task
+    mov     (CV_QUIT_REQ), d0
+    cmp     0, d0
+    bne     ce_poll_exit
+    mov     (DV_STATE), d0
+    cmp     DS_NONE, d0
+    bne     ce_dsp_bank
+    call    DspPrepare, 0, 0        # d0 = 0: hooked (and the bank there already, DS_READY)
+    cmp     0, d0
+    bne     ce_start                # failed: the tone generator plays the sound
+    mov     (DV_STATE), d0
+    cmp     DS_READY, d0
+    beq     ce_start
+    bra     ce_poll_exit
+ce_dsp_bank:
+    call    BankStep, 0, 0          # d0 = 0 more to come, 1 done, 2 failed (the slots are back)
+    cmp     0, d0
+    beq     ce_poll_exit
+ce_start:
+    call    DspInitMode, 0, 0       # the sound mode: the DSP when it is hooked, else the tone generator
+    clr     d0
+    mov     d0, (CV_TASK_DONE)
     mov     3, d0
     mov     d0, (CV_STATE)
     call    StartTask, 0, 0
@@ -171,6 +209,7 @@ ce_run:
     mov     d0, (CV_EXIT_T0)
     mov     d0, (LD_FAILED)
     mov     d0, (CV_REPORT)
+    call    DspInitMode, 0, 0
     call    StartTask, 0, 0
 ce_load:                            # a part the game task waits for: one of its files per call
     mov     (LD_REC), d0
@@ -278,6 +317,7 @@ ce_answer:
     mov     (CV_TASK_DONE), d0
     cmp     0, d0
     beq     ce_park                 # wait for the game task to leave first
+    call    DspQuit, 0, 0           # the effects DSP's slots as the firmware had them, read back (once)
     mov     (CV_REPORT), d0         # the speed report, once, before the end (perf.s ReportBuild)
     cmp     0, d0
     bne     ce_end
@@ -320,6 +360,9 @@ AnswerText:
     cmp     4, d0
     beq     at_fail
     mov     msg_load, a1
+    cmp     5, d0
+    bne     at_ret
+    mov     msg_snd, a1
     rets
 at_play:
     mov     msg_play, a1
@@ -1159,6 +1202,8 @@ msg_play:
     .asciz  "HOLD EXIT TO QUIT"
 msg_load:
     .asciz  "LOADING ANOTHER WORLD"
+msg_snd:
+    .asciz  "LOADING ANOTHER WORLD: SOUNDS"
 msg_file:
     .asciz  "AW: A GAME FILE IS MISSING OR BAD"
 msg_task:
@@ -1173,6 +1218,7 @@ msg_fw_n:
 .include "interp.s"
 .include "help.s"
 .include "perf.s"
-.include "audio.s"                  # sound effects and music: MIDI into the firmware's receive ring
+.include "audio.s"                  # sound effects and music: the effects DSP, or MIDI into the receive ring
+.include "dsp.s"                    # the effects DSP: its sample mixer, the bank, the voices
 .include "awpart_tab.s"             # generated: PartLists, GlobalList, ResPacked, ResType, file names
 cnv_image_end:                      # tools/cnv_layout.py: must lie below IMAGE_END_MAX

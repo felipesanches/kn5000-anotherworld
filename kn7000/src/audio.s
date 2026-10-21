@@ -1,9 +1,19 @@
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>
 # Licensed under the terms of the GNU General Public License v3 or later
 #
-# audio.s -- Another World's sound effects and music on the KN7000's own tone generator (KN7APP.BIN
-# build only; main.s, the SP7001 build, takes audio_stub.s). No sample is output: the game becomes a
-# MIDI source, and the firmware plays the notes by its normal path.
+# audio.s -- Another World's sound effects and music on the KN7000 (KN7APP.BIN build only; main.s, the
+# SP7001 build, takes audio_stub.s), in one of three modes, which PART SELECT RIGHT 2 cycles through
+# (DV_MODE, dsp.s; the help screen's first page shows it):
+#   DSP   the game's own samples, played by the effects DSP: dsp.s and the mixer of tools/dsp_mixer.py
+#         (8 voices: PLAY_SOUND's four channels on voices 0-3, the music's four on 4-7, as rawgl's mixer
+#         and module player keep them apart). The default when dsp.s has loaded the mixer and the bank.
+#   TG    the KN7000's own tone generator over MIDI, as below: the first iteration (2026-10-20), the one
+#         Felipe's KN7000 played properly; the default when the DSP cannot be used.
+#   OFF   silence.
+# The module player and its sync marks (var 0xF4) run the same in every mode.
+#
+# THE TONE GENERATOR MODE. No sample is output: the game becomes a MIDI source, and the firmware plays the
+# notes by its normal path.
 #
 # HOW: as if the bytes came in on MIDI IN 1. The firmware's MIDI 1 receive ISR (941 0x484B1E86)
 # reads each byte from the serial port and enqueues it into a byte ring in work RAM (lib 0x4C0249C5
@@ -37,9 +47,11 @@
 # every yield (cnv_main.s DLY_TSK): it plays the rows that are due (the kernel's 1 ms counter) and
 # ends the notes whose time is up. A part switch and LOAD 0 stop everything, as rawgl's restartAt and
 # stopAll do; the help screen silences and freezes the music; quitting sends all notes off and all
-# sound off on every channel the game uses. PART SELECT RIGHT 2 turns the sound off and on.
+# sound off on every channel the game uses (and, in the DSP mode, every voice is stopped). PART SELECT
+# RIGHT 2 cycles the mode: DSP -> TG -> OFF -> DSP (OFF -> TG when the DSP cannot be used). Leaving the DSP
+# mode puts the firmware's effects back in the DSP's slots (dsp.s DspUnhook); taking it hooks them again.
 
-.equ AU_ENABLED,   AUDIO_VARS + 0x00    # u32: 1 = send MIDI (PART SELECT RIGHT 2 toggles)
+.equ AU_ENABLED,   AUDIO_VARS + 0x00    # u32: 1 = send MIDI (the TG mode; PART SELECT RIGHT 2 cycles)
 .equ AU_PAUSED,    AUDIO_VARS + 0x04    # u32: 1 = the help screen is up: the music is frozen
 .equ AU_BTN,       AUDIO_VARS + 0x08    # u32: the toggle button as it was at the last poll
 .equ AU_MOD,       AUDIO_VARS + 0x0C    # u32: the module playing (0 = none)
@@ -74,6 +86,9 @@
 .equ AU_BTN_OFS,   2                    # PART SELECT RIGHT 2 (CPR_SEG2 SW1; probes/cnv/README.md)
 .equ AU_BTN_BIT,   0x02
 .equ AU_MARK_VAR,  0xF4                 # the music's sync mark (rawgl VAR_MUSIC_SYNC)
+.equ AU_MUS_VOICE, 4                    # DSP mode: the music's channel c plays on voice 4 + c
+.equ AU_MUS_K,     5319481              # DSP mode: a period's step per 44.1 kHz frame is K / period, 16.16
+                                        #   (rawgl: Hz = 7159092 / (2 period); K = 3579546 x 65536 / 44100)
 
 # ================================================================================
 # MidiMsg(d0 = status | data1 << 8 | data2 << 16): one channel message (program change and channel
@@ -245,6 +260,8 @@ AllOff:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
     mov     d0, d3
+    call    DspStopAll, 0, 0        # the DSP's voices (sent only while its slots are ours: dsp.s)
+    call    DspFlush, 0, 0
     mov     (AU_READY), d0          # nothing set up yet: nothing to end
     cmp     0, d0
     beq     ao_ret
@@ -335,8 +352,14 @@ ai_slot:
     add     -1, d1
     bne     ai_slot
     mov     1, d0
-    mov     d0, (AU_ENABLED)
     mov     d0, (AU_READY)
+    clr     d0                      # MIDI only in the tone generator's mode
+    mov     (DV_MODE), d1
+    cmp     MODE_TG, d1
+    bne     ai_midi
+    mov     1, d0
+ai_midi:
+    mov     d0, (AU_ENABLED)
     mov     (FWV_PANEL), a0         # the toggle as it is now: a button held at the start is no press
     movbu   (AU_BTN_OFS, a0), d0
     and     AU_BTN_BIT, d0
@@ -387,6 +410,14 @@ AudioResume:
 AudioSound:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
+    mov     (DV_MODE), d0
+    cmp     MODE_OFF, d0
+    beq     as_ret
+    cmp     MODE_DSP, d0
+    bne     as_tg
+    call    AudioSoundDsp, 0, 0     # a0 = the operands
+    bra     as_ret
+as_tg:
     movbu   (4, a0), d2
     and     3, d2
     add     AU_SLOT_SFX, d2         # d2 = slot
@@ -568,6 +599,7 @@ MusicPeriod:
 MusicStop:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    call    DspMusicStop, 0, 0      # the DSP's music voices (4-7)
     clr     d0
     mov     d0, (AU_MOD)
     clr     d2
@@ -657,6 +689,9 @@ me_notmark:
     bne     me_notstop
     mov     d2, d0
     call    SlotOff, 0, 0
+    mov     d2, d0                  # the DSP's voice too
+    add     AU_MUS_VOICE, d0
+    call    DspVoiceStop, 0, 0
     bra     me_ret
 me_notstop:
     lsr     12, d0                  # instrument 1..15 (0: none)
@@ -674,6 +709,7 @@ me_notstop:
     beq     me_ret
     cmp     RES_COUNT, d0
     bcc     me_ret
+    mov     d0, (0x1C, sp)          # (the DSP mode plays the resource itself)
     asl     2, d0
     mov     SndTab, a3
     add     d0, a3                  # a3 = its SndTab entry
@@ -702,6 +738,30 @@ me_not5:
     bge     me_vol
     clr     d0
 me_vol:
+    mov     (DV_MODE), d1
+    cmp     MODE_DSP, d1
+    bne     me_tg
+    mov     d0, (0x14, sp)          # the DSP mode: d0 = volume, d3 = period
+    mov     d2, d0
+    add     AU_MUS_VOICE, d0
+    mov     d0, (0x18, sp)          # the voice
+    cmp     0, d3
+    bne     me_dsp_note
+    mov     (0x14, sp), d1          # no note: the voice goes on at this volume (rawgl setChannelVolume)
+    call    DspVoiceVol, 0, 0
+    bra     me_ret
+me_dsp_note:
+    clr     d1                      # step = K / period
+    mov     d1, mdr
+    mov     AU_MUS_K, d0
+    divu    d3, d0
+    mov     d0, a0
+    mov     (0x14, sp), a1          # volume
+    mov     (0x1C, sp), d1          # resource
+    mov     (0x18, sp), d0          # voice
+    call    DspVoiceStart, 0, 0
+    bra     me_ret
+me_tg:
     cmp     0, d3
     beq     me_ret                  # no note: a volume change, nothing to send
     cmp     0, d0
@@ -801,18 +861,7 @@ AudioPoll:
     beq     ap_time
     cmp     0, d1
     bne     ap_time                 # still held
-    mov     (AU_ENABLED), d0        # pressed: sound off / on
-    cmp     0, d0
-    beq     ap_on
-    mov     1, d0
-    call    AllOff, 0, 0            # (sent while still enabled)
-    clr     d0
-    mov     d0, (AU_ENABLED)
-    bra     ap_time
-ap_on:
-    mov     1, d0
-    mov     d0, (AU_ENABLED)
-    call    AudioSetup, 0, 0
+    call    AudioNextMode, 0, 0     # pressed: the next sound mode
 ap_time:
     mov     (FWV_KERNEL_MS), a0
     mov     (a0), d2                # d2 = now
@@ -859,8 +908,106 @@ ap_slot_next:
     inc     d3
     cmp     AU_NSLOTS, d3
     bne     ap_slot
+    call    DspFlush, 0, 0          # the DSP's voices: what this poll and the VM asked for
+    call    DspWatch, 0, 0          # the firmware has left without us? (dsp.s): then silence
+    cmp     0, d0
+    beq     apl_ret
+    mov     1, d0
+    call    AllOff, 0, 0
+    clr     d0
+    mov     d0, (AU_ENABLED)
+    mov     MODE_OFF, d0
+    mov     d0, (DV_MODE)
 apl_ret:
     ret     [d2,d3,a2,a3], 0x20
+
+# AudioNextMode: PART SELECT RIGHT 2 was pressed: DSP -> TG -> OFF -> DSP, or OFF -> TG when the DSP cannot
+# be used (it never got ready, or it was given up: dsp.s DV_READY).
+AudioNextMode:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     (DV_MODE), d0
+    cmp     MODE_DSP, d0
+    beq     anm_dsp
+    cmp     MODE_TG, d0
+    beq     anm_tg
+    mov     (DV_READY), d0          # OFF -> the DSP, its slots hooked again
+    cmp     0, d0
+    beq     anm_to_tg
+    call    DspHook, 0, 0
+    cmp     0, d0
+    bne     anm_to_tg
+    mov     MODE_DSP, d0
+    mov     d0, (DV_MODE)
+    bra     anm_ret
+anm_dsp:                            # DSP -> TG: the voices stopped, the firmware's effects back
+    call    DspStopAll, 0, 0
+    call    DspFlush, 0, 0
+    call    DspUnhook, 0, 0
+anm_to_tg:
+    mov     MODE_TG, d0
+    mov     d0, (DV_MODE)
+    mov     1, d0
+    mov     d0, (AU_ENABLED)
+    call    AudioSetup, 0, 0
+    bra     anm_ret
+anm_tg:                             # TG -> OFF
+    mov     1, d0
+    call    AllOff, 0, 0            # (sent while still enabled)
+    clr     d0
+    mov     d0, (AU_ENABLED)
+    mov     MODE_OFF, d0
+    mov     d0, (DV_MODE)
+anm_ret:
+    ret     [d2,d3,a2,a3], 0x20
+
+# AudioSoundDsp(a0 = PLAY_SOUND's operands: resource u16 BE, frequency index, volume, channel): the DSP mode's
+# PLAY_SOUND, as rawgl's snd_playSound: volume 0 stops the channel; else the sound from its start, on voice
+# = channel, at freqTable[frequency] Hz (au_freq: a step of Hz x 65536 / 44100 per frame) and volume 0..63.
+AudioSoundDsp:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    movbu   (4, a0), d2
+    and     3, d2                   # d2 = voice: the channel
+    movbu   (3, a0), d3             # d3 = volume
+    cmp     0, d3
+    beq     asd_stop
+    cmp     63, d3
+    bls     asd_freq
+    mov     63, d3
+asd_freq:
+    movbu   (2, a0), d0
+    cmp     39, d0
+    bls     asd_rate
+    mov     39, d0
+asd_rate:
+    asl     1, d0
+    mov     au_freq, a1
+    add     d0, a1
+    movhu   (a1), d0                # Hz
+    asl     16, d0
+    clr     d1
+    mov     d1, mdr
+    mov     44100, d1
+    divu    d1, d0
+    mov     d0, (0x14, sp)          # the step, 16.16
+    movbu   (a0), d1
+    asl     8, d1
+    movbu   (1, a0), d0
+    or      d0, d1                  # d1 = resource
+    mov     d2, d0
+    mov     (0x14, sp), a0
+    mov     d3, a1
+    call    DspVoiceStart, 0, 0
+    mov     (AU_SOUNDS), d0
+    inc     d0
+    mov     d0, (AU_SOUNDS)
+    bra     asd_ret
+asd_stop:
+    mov     d2, d0
+    call    DspVoiceStop, 0, 0
+asd_ret:
+    ret     [d2,d3,a2,a3], 0x30
 
 # ---- tables -------------------------------------------------------------------------------------
 au_channels:    # every MIDI channel the game sends on (0-based): 4-7, 10, 11-14

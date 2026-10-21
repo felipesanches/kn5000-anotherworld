@@ -59,19 +59,7 @@
 # vm.s GuardPage) refuses a computed one outside [AW_LO, AW_HI) or on the mailbox page.
 .equ AW_LO,           APP_BASE      # every byte the game writes is in [AW_LO, AW_HI) ...
 .equ AW_HI,           0x5037A000    # ... (0x5037A000 on holds boot data) minus the mailbox page
-.equ IMAGE_END_MAX,   0x502C0000    # KN7APP.BIN itself (header, code, tables) must end before this
-.equ CNV_VARS,        0x502C0000    # the application's entry and part loader's variables (cnv_main.s)
-.equ FW_VARS,         0x502C0400    # what fwfind.s found (below), then its scratch from +0x40
-.equ AW_PATHS,        0x502C0800    # the game's folder and the name being opened (cnv_main.s AppPath):
-.equ AW_PREFIX,       AW_PATHS      #   16 bytes: "AW\" from the program menu's launch block, "" in the root
-.equ AW_PATHBUF,      AW_PATHS+0x10 #   32 bytes: AW_PREFIX and a file name
-.equ AW_PATHNAME,     AW_PATHS+0x30 #   the name AppPath was given
-.equ AW_PATHS_LEN,    0x40
-.equ VM_POLY_BASE,    0x502C1000    # vm.inc: rasterizer scratch, 0x200 bytes
-.equ VM_INTERP_BASE,  0x502C2000    # vm.inc: the interpreter, 0x1100 bytes
-.equ VM_MISC_BASE,    0x502C4000    # vm.inc: the rest, 0x1400 bytes
-.equ RES_TAB,         0x502C6000    # u32 per resource id: where it is resident now (0 = not)
-.equ VM_PERF_BASE,    0x502C7000    # vm.inc: the speed measurement and the blit's tables, 0x1000 bytes
+.equ IMAGE_END_MAX,   0x502C8000    # KN7APP.BIN itself (header, code, tables) must end before this
 .equ HELP_BUF,        0x502C8000    # 64,000 bytes: help pages, the stop screen, and the buffer a
 .equ BITMAP_BUF,      HELP_BUF      #   packed bitmap is unpacked into before LoadBitmap draws it
 .equ AW_FONT,         0x502D8000    # anotherworld_chargen.rom, 768 bytes
@@ -80,11 +68,30 @@
 .equ AUDIO_VARS,      0x502DA000    # audio.s: the MIDI producer, the music player, the note slots, 0x200 bytes
 .equ SND_TAB,         0x502DA200    # AWSND.AW: each sound's program, note and length (tools/aw_sound_map.py)
 .equ SND_TAB_MAX,     0x400
+.equ DSP_HOST,        0x502DA600    # dsp.s: the effects DSP's routines, state, command records, readback, 0x400 bytes
 .equ MUSIC_BUF,       0x502DB000    # the current part's music module (0x07 intro, 0x8A final), unpacked in
 .equ MUSIC_MAX,       0x4000        #   place (aw_extract.py --parts puts it in the part's list), to 0x502DEFFF
+# The variables, 0x502DF000-0x502E6FFF. Until the DSP build (2026-10-21) they were 0x1F000 lower, at
+# 0x502C0000-0x502C7FFF, right after the image; they moved up as one block, with the same layout, to give the
+# image 32 KB more (probes/cnv/*.lua follow the new addresses).
+.equ CNV_VARS,        0x502DF000    # the application's entry and part loader's variables (cnv_main.s)
+.equ FW_VARS,         0x502DF400    # what fwfind.s found (below), then its scratch from +0x40
+.equ AW_PATHS,        0x502DF800    # the game's folder and the name being opened (cnv_main.s AppPath):
+.equ AW_PREFIX,       AW_PATHS      #   16 bytes: "AW\" from the program menu's launch block, "" in the root
+.equ AW_PATHBUF,      AW_PATHS+0x10 #   32 bytes: AW_PREFIX and a file name
+.equ AW_PATHNAME,     AW_PATHS+0x30 #   the name AppPath was given
+.equ AW_PATHS_LEN,    0x40
+.equ VM_POLY_BASE,    0x502E0000    # vm.inc: rasterizer scratch, 0x200 bytes
+.equ VM_INTERP_BASE,  0x502E1000    # vm.inc: the interpreter, 0x1100 bytes
+.equ VM_MISC_BASE,    0x502E3000    # vm.inc: the rest, 0x1400 bytes
+.equ RES_TAB,         0x502E5000    # u32 per resource id: where it is resident now (0 = not)
+.equ VM_PERF_BASE,    0x502E6000    # vm.inc: the speed measurement and the blit's tables, 0x1000 bytes
+.equ DSP_BANKTAB,     0x502E7000    # AWBANK.AW: where each sound of the DSP's sample bank goes (aw_extract.py)
+.equ DSP_BANKTAB_MAX, 0xF00         #   to 0x502E7EFF, below the program menu's launch block (LB_ADDR)
 .equ VIDEO2_AT,       0x502E8000    # the shared polygons (resource 0x11, 25,108 bytes), loaded once
-.equ PART_AREA,       0x502EE400    # the current part's palette, bytecode, polygons, bitmaps
-.equ PART_END,        0x5031B000    #   (largest part, the city: 164,407 bytes; aw_extract.py --parts)
+.equ PART_AREA,       0x502EE400    # the current part's palette, bytecode, polygons, bitmaps (and, before the
+.equ PART_END,        0x5031B000    #   first part, dsp.s's staging of each sound of the bank) (largest part,
+                                    #   the city: 164,407 bytes; aw_extract.py --parts)
 .equ PAGE_BITMAP_0,   0x50320000    # four 320x200 pages, one per 0x10000 (interp.s GetPagePtr)
 .equ PAGE_BITMAP_1,   0x50330000
 .equ PAGE_BITMAP_2,   0x50340000
@@ -115,7 +122,7 @@
 .equ QUIT_HOLD_MS,    1500          # hold EXIT this long to leave the game
 
 # ---- what fwfind.s finds (FwStep), in FW_VARS ----------------------------------------
-.equ FW_STEPS,        6
+.equ FW_STEPS,        8             # 0-5 must find what they look for; 6-7 (the effects DSP) may not
 # FW_OPEN .. FW_CLOSE and FW_SETEXT, FW_RESETEXT are the SD file routines the loader found and put in
 # its service table (SV_OPEN, SV_READ, SV_CLOSE, SV_SETEXT, SV_RESETEXT), copied by step 2 after it
 # has checked the table: either the SD backends themselves (FOUND_TABLES; the drive switch is then the

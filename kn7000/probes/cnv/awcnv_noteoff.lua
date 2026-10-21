@@ -16,7 +16,7 @@ local sp = M.devices[":maincpu"].spaces["program"]
 local log = io.open(os.getenv("AWN_OUT") or "awcnv_noteoff.log", "w")
 local function P(...) local s = string.format(...); print(s); log:write(s, "\n"); log:flush() end
 local RING = tonumber(os.getenv("AWN_RING") or "0x5001F020")
-local CV, AU = 0x502C0000, 0x502DA000
+local CV, AU = 0x502DF000, 0x502DA000
 local function press(tag, mask, v)
   local p = M.ioport.ports[":cpanel:" .. tag] or M.ioport.ports[":" .. tag]
   for _, f in pairs(p.fields) do if f.mask == mask then f:set_value(v) end end

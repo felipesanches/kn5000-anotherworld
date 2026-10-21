@@ -29,8 +29,8 @@ local STEPS = {                     -- {time, port, mask, what}
   { 36, "CPL_SEG0", 0x20, "STYLE CONVERT" },
   { 44, "CPR_SEG6", 0x01, "OK (KN7LOAD.CNV)" },
 }
-local CV = 0x502C0000
-local CUR_PAGE_2, FRAME_NO, NO_SPLASH = 0x502C2000 + 0x100C, 0x502C4000 + 0x7C, 0x502C4000 + 0x58
+local CV = 0x502DF000
+local CUR_PAGE_2, FRAME_NO, NO_SPLASH = 0x502E1000 + 0x100C, 0x502E3000 + 0x7C, 0x502E3000 + 0x58
 local OUTBIN = os.getenv("AWCK_BIN") or "build/cnv_pages.bin"
 local OUTIDX = os.getenv("AWCK_IDX") or "build/cnv_pages.idx"
 local MAXTICK = tonumber(os.getenv("AWCK_MAX") or "2612")
@@ -55,7 +55,7 @@ AWCNV_TAP = sp:install_write_tap(FRAME_NO, FRAME_NO + 3, "awframe", function(off
     finish = true
     binf:close(); idxf:close()
     print(string.format("awcnv: captured %d frames (last tick %d); part loads %d, load errors %d, guard %d; exiting",
-      captured, tick, sp:read_u32(CV + 0x68), sp:read_u32(CV + 0x70), sp:read_u32(0x502C4000 + 0x218)))
+      captured, tick, sp:read_u32(CV + 0x68), sp:read_u32(CV + 0x70), sp:read_u32(0x502E3000 + 0x218)))
   end
 end)
 

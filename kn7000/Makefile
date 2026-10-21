@@ -97,15 +97,24 @@ FLOPPY_SHA1   := b7a67de602694fd2257d59ce4509ca154b0b3064
 # The published overlay build (program 941 is its default KN7000 BIOS; -bios v13 is program 893, the owner's).
 MAME941     ?= ../../kn7000-emulator/run.sh
 SD941       ?= ../../kn7000-emulator/sdcard_from_real_kn7000.img
-APP_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s src/perf.s src/audio.s
+APP_SRC     := src/cnv_main.s src/fwfind.s src/display.s src/vm.s src/interp.s src/help.s src/perf.s src/audio.s src/dsp.s
+# MAME's disassembler, which checks every word of the effects DSP's mixer (tools/dsp_mixer.py --check): the
+# build stops when it is not there (make UNIDASM=/path/to/unidasm).
+UNIDASM     ?= $(HOME)/compartilhado/mame-sony-video/unidasm
 BIOS        ?= v13
 
 app: build/KN7APP.BIN
 sdcard: build/sdcard/KN7APP.BIN
 
-$(RES_OUT)/awpart.inc: tools/aw_extract.py tools/aw_partinfo.py tools/aw_sound_map.py src/platformcnv.inc $(AW_DATA)/MEMLIST.BIN
+$(RES_OUT)/awpart.inc: tools/aw_extract.py tools/aw_partinfo.py tools/aw_sound_map.py tools/dsp_mixer.py src/platformcnv.inc $(AW_DATA)/MEMLIST.BIN
 	@mkdir -p $(RES_OUT)
 	$(PYTHON) -I tools/aw_extract.py $(AW_DATA) $(RES_OUT) --parts $@ src/platformcnv.inc $(FONT_DIR)
+
+# The effects DSP's sample mixer (tools/dsp_mixer.py): its words, each checked against MAME's SHARC disassembler,
+# and the addresses src/dsp.s needs.
+$(RES_OUT)/dsp_equ.inc $(RES_OUT)/dsp_data.inc: tools/dsp_mixer.py tools/sharc_enc.py
+	@mkdir -p $(RES_OUT)
+	$(PYTHON) -I tools/dsp_mixer.py $(RES_OUT) --check $(UNIDASM) --listing $(RES_OUT)/dsp.lst
 
 # Is the loader the owner's? (its SHA-1 and its floppy image's, as released on 2026-10-19)
 build/loader.ok: $(LOADER_CNV) $(LOADER_FLOPPY)
@@ -126,7 +135,7 @@ build/loader.ok: $(LOADER_CNV) $(LOADER_FLOPPY)
 #                        image), without overlaps; the image starts at APP_BASE with its header and fits
 #                        below the font.
 # Then the loader's mkapp.py fills in the header's size and CRC-32, which the loader checks.
-build/KN7APP.BIN: $(APP_SRC) src/platformcnv.inc src/vm.inc $(RES_OUT)/awpart.inc $(LOADER_DIR)/kn7cnv.inc $(LOADER_DIR)/mkapp.py $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py tools/ic23_guard.py tools/cnv_layout.py build/loader.ok
+build/KN7APP.BIN: $(APP_SRC) src/platformcnv.inc src/vm.inc $(RES_OUT)/awpart.inc $(RES_OUT)/dsp_equ.inc $(RES_OUT)/dsp_data.inc $(LOADER_DIR)/kn7cnv.inc $(LOADER_DIR)/mkapp.py $(DISASM_REPO)/tools/xapasm.py tools/leafcheck.py tools/ic23_guard.py tools/cnv_layout.py build/loader.ok
 	@mkdir -p build
 	$(PYTHON) -I tools/leafcheck.py $(APP_SRC)
 	$(PYTHON) -I tools/ic23_guard.py $(DISASM_REPO)/tools src/cnv_main.s -I src -I $(RES_OUT) -I $(LOADER_DIR) --loader $(LOADER_DIR)/kn7cnv.inc

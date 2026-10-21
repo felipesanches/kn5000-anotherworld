@@ -30,6 +30,8 @@
 #             stub that is neither cre_tsk nor sta_tsk                           -> FW_EXD
 #   5 rings   the library's per-port MIDI ring wrappers: one hit, both headers in work RAM, MIDI IN 1
 #             below MIDI OUT 1                                                   -> FWV_MIDIIN1, FWV_MIDIOUT1
+#   6, 7 dsp  the effects DSP's host-port routines, one signature a step (dsp.s DspFindStep, DSPTONE's
+#             search): the game goes on without the DSP when they are not all found -> DV_FOUND, DV_D*
 # Calling convention as the rest of the port; every routine that calls makes a frame first.
 
 .equ FL_LO,         0x48400000      # the program flash, as the dumper scans it
@@ -60,7 +62,17 @@ FwStep:
     beq     fw_exit
     cmp     5, d0
     beq     fw_rings
+    cmp     6, d0
+    beq     fw_dsp
+    cmp     7, d0
+    beq     fw_dsp
     bra     fw_no
+
+# ---- 6, 7: the effects DSP's host-port routines (dsp.s DspFindStep): never fails -----------------
+fw_dsp:
+    add     -6, d0
+    call    DspFindStep, 0, 0
+    bra     fw_ret
 
 # ---- 0: the panel switch bitmaps ----------------------------------------------------------------
 fw_panel:
@@ -468,22 +480,29 @@ cs_done:
 
 # FindSig(a0 = signature, d0 = start, d1 = end) -> d0 = first address in [start, end) where it
 # matches, or 0. Elements are 16-bit: 0x00nn = byte nn, 0x0100 = any byte, 0xFFFF = end; the first
-# is a byte. (loader.s)
+# is a byte. (loader.s; the scan for the first byte is DSPTONE's, technics-roms-disasm
+# kn7000/tools/dsptone/dsptone.s FindSig: five instructions a byte, all in registers, the loop on a
+# 4-byte boundary. On MAME's MN103002A timing, calibrated against the owner's unit (ROM dumper pass 9),
+# DSPTONE's scan of the whole flash took 0.88 s that way and 4.85 s with the loop at an odd address;
+# the rest of the signature is compared only where the first byte matches.)
 FindSig:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
     mov     a0, a2
     movhu   (a2), d3
     mov     d0, a3
-    mov     d1, (0x14, sp)
+    mov     d1, a1
+    .align  4, 0xCB                 # nops: the loop starts on a fetch word (the scan's speed depends on it)
 fs_loop:
-    mov     (0x14, sp), d0
-    cmp     d0, a3
+    cmp     a1, a3
     bcc     fs_none
     movbu   (a3), d2
+    inc     a3
     cmp     d3, d2
-    bne     fs_next
+    bne     fs_loop
+    mov     a1, (0x14, sp)          # a first byte at a3 - 1: the rest
     mov     a2, a0
+    add     2, a0
     mov     a3, a1
 fs_cmp:
     movhu   (a0), d2
@@ -494,16 +513,17 @@ fs_cmp:
     bne     fs_any
     movbu   (a1), d1
     cmp     d2, d1
-    bne     fs_next
+    bne     fs_miss
 fs_any:
     add     2, a0
     inc     a1
     bra     fs_cmp
-fs_next:
-    inc     a3
+fs_miss:
+    mov     (0x14, sp), a1
     bra     fs_loop
 fs_hit:
     mov     a3, d0
+    add     -1, d0
     bra     fs_ret
 fs_none:
     clr     d0

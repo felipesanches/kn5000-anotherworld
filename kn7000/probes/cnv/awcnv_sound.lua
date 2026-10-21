@@ -17,7 +17,7 @@ local sp = M.devices[":maincpu"].spaces["program"]
 local log = io.open(os.getenv("AWS_OUT") or "awcnv_sound.log", "w")
 local function P(...) local s = string.format(...); print(s); log:write(s, "\n"); log:flush() end
 local RING = tonumber(os.getenv("AWS_RING") or "0x5001F020")
-local CV, VARS, MISC = 0x502C0000, 0x502C2000, 0x502C4000
+local CV, VARS, MISC = 0x502DF000, 0x502E1000, 0x502E3000
 local PART, FRAME_NO, NO_SPLASH = VARS + 0x102A, MISC + 0x7C, MISC + 0x58
 local AU = 0x502DA000      -- platformcnv.inc AUDIO_VARS; audio.s AU_* offsets
 local function press(tag, mask, v)

@@ -84,19 +84,19 @@ local OUT = os.getenv("AWT_OUT") or "."
 local VALID = tonumber(os.getenv("AWT_VALID") or "")
 local POWER = (os.getenv("AWT_POWER") or "") ~= ""
 -- addresses (src/platformcnv.inc, src/vm.inc, src/cnv_main.s; the loader's kn7cnv.inc and loader.s)
-local CV, FW, INTERP, MISC = 0x502C0000, 0x502C0400, 0x502C2000, 0x502C4000
+local CV, FW, INTERP, MISC = 0x502DF000, 0x502DF400, 0x502E1000, 0x502E3000
 local CV_STATE, CV_QUIT, CV_DONE, CV_CALLS, CV_FAIL, CV_TASK = CV, CV + 4, CV + 8, CV + 0x10, CV + 0x14, CV + 0x1C
 local LD_CUR, LD_FAILED, LD_IN_READ, LD_MS, LD_LISTS, LD_ERRORS = CV + 0x44, CV + 0x58, CV + 0x5C, CV + 0x64, CV + 0x68, CV + 0x70
 local PART, FRAME_NO, HELP_PAGE = INTERP + 0x102A, MISC + 0x7C, MISC + 0x5C
 local GUARD_WHAT, GUARD_ADDR, GUARD_COUNT = MISC + 0x210, MISC + 0x214, MISC + 0x218
-local CODE_LO, CODE_HI = 0x502BA000, 0x502C0000      -- MENU ROUTE: the game's image, or the menu's (to IMAGE_MAX)
+local CODE_LO, CODE_HI = 0x502BA000, 0x502C8000      -- MENU ROUTE: the game's image, or the menu's (to IMAGE_MAX)
 local TR_LO, TR_HI = 0x50360000, 0x5036A000          -- MENU ROUTE: the trampoline's region (kn7menu menu.inc T_BASE..T_END)
 local MENU_NAME = "KN7000 PROGRAM MENU 1.0"
 local MV = 0x502C0000                                -- the menu's variables (menu.inc M_VARS); V_STATE +0, ST_MENU 4
 local V_NPROG, V_SEL, V_INREAD, V_RDDST, V_RDLEN = MV + 0x34, MV + 0x40, MV + 0x74, MV + 0x78, MV + 0x7C
 local ORDER, PR_NAME, PR_DIR = 0x502C3800, 0x40, 0x20
 local LB = 0x502E7F00                                -- kn7cnv.inc LB_ADDR
-local AW_PREFIX = 0x502C0800                         -- platformcnv.inc AW_PATHS
+local AW_PREFIX = 0x502DF800                         -- platformcnv.inc AW_PATHS
 local CNV_LO, CNV_HI = 0x502B8000, 0x502E8000        -- the converter area the firmware zeroes
 local APP_BASE = 0x502BA000                          -- the loader's application area: APP_BASE..CNV_HI
 local LOADER_LO, LOADER_HI, LOADER_CODE_HI = 0x502B8000, 0x502BA000, 0x502B9C00  -- resident; its image
@@ -106,7 +106,7 @@ local LD_REC = CV + 0x4C                             -- the record being loaded:
 local AW_LO, AW_HI, MB_LO, MB_HI = 0x502BA000, 0x5037A000, 0x5031B000, 0x5031C000
 
 local RES_DIR = os.getenv("AWT_RES")
-local RES_TAB = 0x502C6000
+local RES_TAB = 0x502E5000
 local results, fails = {}, 0
 local function now() return M.time:as_double() end
 local function log(s) print("awmenu_test: " .. s) end

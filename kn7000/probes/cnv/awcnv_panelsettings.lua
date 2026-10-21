@@ -15,7 +15,7 @@
 --     -autoboot_script probes/cnv/awcnv_panelsettings.lua -window -nothrottle
 local M = manager.machine
 local sp = M.devices[":maincpu"].spaces["program"]
-local CV, MISC = 0x502C0000, 0x502C4000
+local CV, MISC = 0x502DF000, 0x502E3000
 local BUTTONS = {   -- name, port, mask: the game's five, twice each, then candidates for a free fire
   { "PART SELECT RIGHT 1 (game RIGHT)", "CPR_SEG1", 0x02 }, { "PART SELECT LEFT (game LEFT)", "CPR_SEG2", 0x01 },
   { "R1/R2 OCTAVE + (game UP)", "CPR_SEG6", 0x02 }, { "R1/R2 OCTAVE - (game DOWN)", "CPR_SEG7", 0x02 },

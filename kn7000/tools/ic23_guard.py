@@ -16,6 +16,10 @@
 #     power-off (technics-roms-disasm kn7000/notes/work-ram-map.md; 893's boot starts zeroing at the
 #     same 0x50298000, research-scratch aw-memory-plan/prefill893.lua).
 #
+#   * the effects DSP's host port, 0x98000000 (the index latch) and 0x9C000000 (the data port): src/dsp.s
+#     reaches the DSP only through the firmware's own routines, which keep its lock, its per-frame handshake
+#     and its "DSP dead" guard (as DSPTONE's guard.py, technics-roms-disasm kn7000/tools/dsptone);
+#
 # and, with --loader KN7CNV.INC (the loader's contract, technics-roms-disasm kn7000/tools/cnv_romdump),
 #   * the loader's resident area [CNV_BASE, APP_BASE) = 0x502B8000-0x502B9FFF (and its view at
 #     0x902B8000): KN7LOAD.CNV's code, line buffer, variables and service table, which stay in RAM
@@ -45,7 +49,9 @@ import sys
 FORBIDDEN = [(0x44000000, 0x48000000, "CS1: IC23, the backup SRAM (panel memories)"),
              (0x84000000, 0x88000000, "CS1 uncached view: IC23"),
              (0x50180000, 0x50298000, "user-memory pool (kept across power-off)"),
-             (0x90180000, 0x90298000, "user-memory pool, uncached view")]
+             (0x90180000, 0x90298000, "user-memory pool, uncached view"),
+             (0x98000000, 0x98000004, "the effects DSP's host port (index): only through the firmware's routines"),
+             (0x9C000000, 0x9C000004, "the effects DSP's host port (data): only through the firmware's routines")]
 
 
 LOADER = "the loader's resident area (KN7LOAD.CNV: code, variables, service table)"

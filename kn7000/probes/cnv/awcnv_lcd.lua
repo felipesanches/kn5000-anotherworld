@@ -24,8 +24,8 @@ local OUT = os.getenv("AWL_OUT") or "."
 local PAL = tonumber(os.getenv("AWL_PAL") or "")
 local MAXTICK = tonumber(os.getenv("AWL_MAX") or "3600")
 local SNAPS = os.getenv("AWL_SNAPS") or "100"
-local CV = 0x502C0000
-local CUR_PAGE_2, FRAME_NO, NO_SPLASH, PART = 0x502C2000 + 0x100C, 0x502C4000 + 0x7C, 0x502C4000 + 0x58, 0x502C2000 + 0x102A
+local CV = 0x502DF000
+local CUR_PAGE_2, FRAME_NO, NO_SPLASH, PART = 0x502E1000 + 0x100C, 0x502E3000 + 0x7C, 0x502E3000 + 0x58, 0x502E1000 + 0x102A
 local FB, W, H, X0, Y0 = 0x9CE00000, 640, 240, 160, 20
 local function press(tag, mask, v)
   local p = M.ioport.ports[":cpanel:" .. tag] or M.ioport.ports[":" .. tag]
@@ -47,9 +47,9 @@ local fwst, fwpc = 0, {}
 local cpu = M.devices[":maincpu"]
 AWL_FW = sp:install_write_tap(FB, FB + W * H * 2 - 1, "awl_fw", function(offset, data, mask)
   local p = cpu.state["PC"].value
-  if p < 0x502BA000 or p >= 0x502C0000 then fwst = fwst + 1; fwpc[p] = true end
+  if p < 0x502BA000 or p >= 0x502C8000 then fwst = fwst + 1; fwpc[p] = true end
 end)
-local PERF = 0x502C7000
+local PERF = 0x502E6000
 local parts = {}
 local function check(tick)
   local pal = {}

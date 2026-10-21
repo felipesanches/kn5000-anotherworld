@@ -18,9 +18,9 @@ local M = manager.machine
 local cpu = M.devices[":maincpu"]
 local sp = cpu.spaces["program"]
 local OUT = os.getenv("AWL_OUT") or "."
-local CV = 0x502C0000
-local FRAME_NO, NO_SPLASH = 0x502C4000 + 0x7C, 0x502C4000 + 0x58
-local CODE_LO, CODE_HI = 0x502BA000, 0x502C0000
+local CV = 0x502DF000
+local FRAME_NO, NO_SPLASH = 0x502E3000 + 0x7C, 0x502E3000 + 0x58
+local CODE_LO, CODE_HI = 0x502BA000, 0x502C8000
 local FB, FB_END = 0x9CE00000, 0x9CE00000 + 640 * 240 * 2
 local function now() return M.time:as_double() end
 local function field(tag, mask)

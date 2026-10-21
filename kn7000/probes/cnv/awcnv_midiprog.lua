@@ -28,7 +28,7 @@ local function press(tag, mask, v)
 end
 local STEPS = { { 30, "CPR_SEG1", 0x04, "DISK MENU" }, { 36, "CPL_SEG0", 0x20, "STYLE CONVERT" },
                 { 44, "CPR_SEG6", 0x01, "OK (KN7LOAD.CNV)" } }
-local CV = 0x502C0000
+local CV = 0x502DF000
 local function put(b)
   local st, last, wr, free = sp:read_u32(RING), sp:read_u32(RING + 4), sp:read_u32(RING + 12), sp:read_u16(RING + 16)
   if free == 0 then P("ring full"); return end

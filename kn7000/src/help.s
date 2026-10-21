@@ -184,6 +184,7 @@ hd_clear:
     mov     d0, (4, sp)
     mov     HELP_BUF, a0
     mov     a0, (CUR_PAGE_1)
+    call    DspModeText, 0, 0       # the sound mode's line (page 1)
     mov     (HELP_PAGE_NO), d0
     cmp     3, d0                   # the speed page: its text, now
     bne     hd_page
@@ -304,7 +305,9 @@ help_page0:
     .long   hs_sound
     .word   80, 172, 1, 0
     .long   hs_sound_btn
-    .word   128, 184, 1, 0
+    .word   8, 184, 2, 0
+    .long   DV_MODETXT              # "NOW: DSP SAMPLES" ...: dsp.s DspModeText, before every page
+    .word   256, 184, 1, 0
     .long   hs_page_1
     .word   0xFFFF, 0               # end of page (4 bytes, so the next page stays aligned)
 
@@ -423,7 +426,7 @@ hs_page_btn:     .asciz "PAGE UP / PAGE DOWN"
 hs_exit_lbl:     .asciz "EXIT"
 hs_exit_btn:     .asciz "EXIT, or any game control"
 hs_sound:        .asciz "SOUND"
-hs_sound_btn:    .asciz "PART SEL RIGHT 2: on / off"
+hs_sound_btn:    .asciz "PART SEL RIGHT 2: DSP/TG/OFF"
 hs_page_1:       .asciz "Page 1/4"
 hs_page_2:       .asciz "Page 2/4"
 hs_page_3:       .asciz "Page 3/4"

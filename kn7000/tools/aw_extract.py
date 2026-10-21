@@ -254,18 +254,79 @@ def unpack_in_place(packed, size):
     return bytes(buf[:size])
 
 
+def sound_bank(T, ents, raw, L):
+    """The sample bank the effects DSP plays (src/dsp.s, tools/dsp_mixer.py; README-CNV.md "Sound"): every sound
+    resource some part's bytecode plays (PLAY_SOUND), loads (LOAD) or uses as a music instrument (the modules its
+    bytecode plays or loads), as its own card file AWRxx.AW (the bytes MEMLIST.BIN points at, packed or stored),
+    and the table AWBANK.AW that says where each one goes in the DSP's SDRAM. The game sends the whole bank once
+    (it stays in SDRAM until the power goes off; the bank's id, a CRC-32 of the table and the samples, tells a later
+    run that it is there).
+
+    A sound resource: u16 BE len, u16 BE loop length (in words), 4 bytes, then the 8-bit signed samples: len*2
+    played once, then loop*2 repeated (rawgl Mixer playSoundRaw, SfxPlayer handlePattern). In SDRAM: four samples a
+    32-bit word, the first in the low byte, each sound from a word that is a whole number of copy steps
+    (dsp_mixer.COPY_STEP words) past the bank's first, so the copy never runs into the next sound.
+
+    AWBANK.AW (little-endian): "AWBK", u32 entries (one per resource id), u32 the bank's id, u32 words in all;
+    then per resource id 20 bytes: u32 the DSP address of its first word (0: not in the bank), u32 samples in all
+    (len*2 + loop*2), u32 samples in the loop (0: none), u32 bytes of its card file, u32 its unpacked size with
+    bit 31 set for a music instrument (rawgl prepareInstruments zeroes an instrument's first four samples)."""
+    import aw_partinfo
+    import dsp_mixer
+    sounds, insts = set(), set()
+    for pid, name, pal, cod, v1, v2id in aw_partinfo.PARTS:
+        code = raw(cod) if T[cod]["packed"] == T[cod]["size"] else unpack(raw(cod), T[cod]["size"])
+        _, snd, mus, lds, _, _ = aw_partinfo.decode(code)
+        sounds |= {i for i in snd | lds if 0 < i < len(ents) and T[i]["type"] == 0}
+        for m in {i for i in mus | lds if 0 < i < len(ents) and T[i]["type"] == 1}:
+            mod = raw(m) if T[m]["packed"] == T[m]["size"] else unpack(raw(m), T[m]["size"])
+            for k in range(15):
+                r = struct.unpack(">H", mod[2 + 4 * k:4 + 4 * k])[0]
+                if 0 < r < len(ents) and T[r]["type"] == 0:
+                    insts.add(r)
+    ids = sorted(i for i in sounds | insts if T[i]["size"] >= 8)
+    step = dsp_mixer.COPY_STEP
+    at, tab, files, crc = 0, {}, {}, 0
+    for i in ids:
+        e = T[i]
+        data = raw(i) if e["packed"] == e["size"] else unpack(raw(i), e["size"])
+        ln, lp = struct.unpack(">HH", data[:4])
+        end, loop = 2 * (ln + lp), 2 * lp
+        if not 0 < end <= len(data) - 8:
+            raise SystemExit(f"aw_extract: sound 0x{i:02X}: header says {end} samples, the resource holds {len(data) - 8}")
+        if len(raw(i)) >= 0x10000 or e["size"] >= 0x10000:      # src/dsp.s BankRead's staging space
+            raise SystemExit(f"aw_extract: sound 0x{i:02X} is too large for the bank's staging space")
+        words = (end + 4 * step - 1) // (4 * step) * step
+        tab[i] = (dsp_mixer.BANK + at, end, loop, len(raw(i)), e["size"] | (0x80000000 if i in insts else 0))
+        crc = zlib.crc32(struct.pack("<IIII", i, dsp_mixer.BANK + at, end, loop), crc)
+        crc = zlib.crc32(data[8:8 + end], crc)
+        files[f"AWR{i:02X}.AW"] = raw(i)
+        at += words
+    if at > dsp_mixer.BANK_MAX:
+        raise SystemExit(f"aw_extract: the sample bank needs {at} words of SDRAM; {dsp_mixer.BANK_MAX} are set aside")
+    out = b"AWBK" + struct.pack("<III", len(ents), crc, at)
+    for i in range(len(ents)):
+        out += struct.pack("<IIIII", *tab.get(i, (0, 0, 0, 0, 0)))
+    if len(out) > L["DSP_BANKTAB_MAX"]:
+        raise SystemExit(f"aw_extract: AWBANK.AW is {len(out)} bytes; DSP_BANKTAB holds {L['DSP_BANKTAB_MAX']}")
+    print(f"aw_extract: the DSP's sample bank: {len(ids)} sounds ({len(insts)} music instruments), "
+          f"{sum(t[1] for t in tab.values()):,} samples in {at:,} SDRAM words, id {crc:08X}", file=sys.stderr)
+    return out, files
+
+
 def write_parts(path, src, ents, layout_inc, fonts):
     """The KN7APP.BIN build's per-part loading (cnv_main.s EnsurePart / LoadStep): awpart.inc and
     awpart_tab.s beside PATH, and the game files for the SD card in <dir>/sdfiles/ (sdfiles.lst).
 
     The card carries every resource the game draws or runs as its own file AWRxx.AW (xx = the id),
-    holding the exact bytes MEMLIST.BIN points at in BANKxx: ByteKiller-packed or stored. The sounds
-    are left out (the KN7000's tone generator plays them as MIDI notes, src/audio.s, from the table
-    tools/aw_sound_map.py makes). At a part switch the application reads the part's palette, bytecode
+    holding the exact bytes MEMLIST.BIN points at in BANKxx: ByteKiller-packed or stored. The sounds the
+    game plays are there too, for the effects DSP's sample bank (sound_bank: AWBANK.AW and the sound files,
+    read once at the start, src/dsp.s); for the tone generator's MIDI notes, src/audio.s, the table
+    tools/aw_sound_map.py makes (AWSND.AW). At a part switch the application reads the part's palette, bytecode
     and polygons and unpacks each in place, reads the bitmaps its bytecode LOADs (aw_partinfo.decode:
     LOAD takes an immediate id, so the linear sweep finds them all), which stay packed until LOAD draws
     one, and the music module its bytecode plays (0x07 in the intro, 0x8A in the final part), unpacked
-    in place into MUSIC_BUF. The shared polygons (0x11), the font and the strings are
+    in place into MUSIC_BUF. The shared polygons (0x11), the font, the strings, AWSND.AW and AWBANK.AW are
     loaded once, at the start.
 
     Record (20 bytes): u32 name, u32 destination, u32 bytes to read, u32 unpacked size, u16 resource
@@ -332,6 +393,10 @@ def write_parts(path, src, ents, layout_inc, fonts):
         raise SystemExit(f"aw_extract: the sound table is {len(snd)} bytes; SND_TAB holds {L['SND_TAB_MAX']}")
     files["AWSND.AW"] = snd
     glob.append(dict(name="AWSND.AW", dest="SND_TAB", read=len(snd), size=len(snd), id=0xFFFF, flags=0))
+    bank, bank_files = sound_bank(T, ents, raw, L)  # the effects DSP's sample bank (src/dsp.s)
+    files.update(bank_files)
+    files["AWBANK.AW"] = bank
+    glob.append(dict(name="AWBANK.AW", dest="DSP_BANKTAB", read=len(bank), size=len(bank), id=0xFFFF, flags=0))
     v2 = T[0x11]
     if (max(v2["packed"], v2["size"]) + 3) & ~3 > area - L["VIDEO2_AT"]:
         raise SystemExit("aw_extract: the shared polygons do not fit before PART_AREA")

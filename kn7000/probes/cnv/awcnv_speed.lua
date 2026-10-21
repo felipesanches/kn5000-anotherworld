@@ -16,9 +16,9 @@ local M = manager.machine
 local sp = M.devices[":maincpu"].spaces["program"]
 local AT = tonumber(os.getenv("AWS_AT") or "300")
 local HOLD = tonumber(os.getenv("AWS_HOLD") or "12")
-local CV = 0x502C0000
-local PART, FRAME_NO = 0x502C2000 + 0x102A, 0x502C4000 + 0x7C
-local PERF = 0x502C7000
+local CV = 0x502DF000
+local PART, FRAME_NO = 0x502E1000 + 0x102A, 0x502E3000 + 0x7C
+local PERF = 0x502E6000
 local PF_MODE, PF_SHOW, PF_BENCH, PF_REGS = PERF + 0x80, PERF + 0xC0, PERF + 0x100, PERF + 0x140
 local function now() return M.time:as_double() end
 local function field(tag, mask)

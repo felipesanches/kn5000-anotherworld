@@ -11,7 +11,7 @@
 --   lcd_r                        loads from it
 --   page_r / page_w              loads / stores in the four VM pages and what follows them (the blit's
 --                                shadow): 0x50320000-0x5036FFFF
---   data_r / data_w              loads / stores in the rest of the game's RAM 0x502C0000-0x5031AFFF (VM
+--   data_r / data_w              loads / stores in the rest of the game's RAM 0x502C8000-0x5031AFFF (VM
 --                                state, help buffer, the part's bytecode and polygons)
 -- and, from any other PC, fw_lcd_w: the firmware's (or the loader's) stores into the LCD frame, with the
 -- PCs and the rectangle they covered (perf_fw.txt). Also per tick: the emulated time it took (dt_ms) and
@@ -26,9 +26,9 @@ local sp = cpu.spaces["program"]
 local OUT = os.getenv("AWP_OUT") or "."
 local FROM = tonumber(os.getenv("AWP_FROM") or "1")
 local MAXTICK = tonumber(os.getenv("AWP_MAX") or "400")
-local CV = 0x502C0000
-local FRAME_NO, NO_SPLASH = 0x502C4000 + 0x7C, 0x502C4000 + 0x58
-local CODE_LO, CODE_HI = 0x502BA000, 0x502C0000
+local CV = 0x502DF000
+local FRAME_NO, NO_SPLASH = 0x502E3000 + 0x7C, 0x502E3000 + 0x58
+local CODE_LO, CODE_HI = 0x502BA000, 0x502C8000
 local FB, FB_END = 0x9CE00000, 0x9CE00000 + 640 * 240 * 2
 local function press(tag, mask, v)
   local p = M.ioport.ports[":cpanel:" .. tag] or M.ioport.ports[":" .. tag]
@@ -78,10 +78,10 @@ AWP_TAPS = {
   sp:install_write_tap(0x50320000, 0x5036FFFF, "awp_pagew", function(offset, data, mask)
     if on and game() then C.page_w = C.page_w + 1 end
   end),
-  sp:install_read_tap(0x502C0000, 0x5031AFFF, "awp_datar", function(offset, data, mask)
+  sp:install_read_tap(0x502C8000, 0x5031AFFF, "awp_datar", function(offset, data, mask)
     if on and game() then C.data_r = C.data_r + 1 end
   end),
-  sp:install_write_tap(0x502C0000, 0x5031AFFF, "awp_dataw", function(offset, data, mask)
+  sp:install_write_tap(0x502C8000, 0x5031AFFF, "awp_dataw", function(offset, data, mask)
     if on and game() then C.data_w = C.data_w + 1 end
   end),
 }
