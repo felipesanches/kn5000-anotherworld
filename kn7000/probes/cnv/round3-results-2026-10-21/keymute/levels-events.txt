@@ -1,0 +1,15 @@
+   33.02 keys window before 32.117 33.017
+   36.02 keys window before_midi 35.117 36.017
+   39.52 keys window cc11_ch1_0 38.617 39.517
+   42.52 keys window cc11_ch1_0_midi 41.617 42.517
+   46.02 keys window cc11_ch1_0_back 45.117 46.017
+   49.02 keys window cc11_ch1_0_back_midi 48.117 49.017
+   52.52 keys window cc11_ch123_0 51.617 52.517
+   55.52 keys window cc11_ch123_0_midi 54.617 55.517
+   59.02 keys window cc11_ch123_0_back 58.117 59.017
+   62.02 keys window cc11_ch123_0_back_midi 61.117 62.017
+   65.52 keys window cc7_ch1_0 64.617 65.517
+   68.52 keys window cc7_ch1_0_midi 67.617 68.517
+   72.02 keys window cc7_ch1_0_back 71.117 72.017
+   75.02 keys window cc7_ch1_0_back_midi 74.117 75.017
+   77.02 end

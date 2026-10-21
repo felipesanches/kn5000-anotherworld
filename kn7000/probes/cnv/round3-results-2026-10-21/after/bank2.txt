@@ -1,0 +1,16 @@
+kn7app_state dvstate=2 fail=0 hooked=3 mode=0 sent=2
+words_sent 0
+words_bank 171576
+total_s 0.433
+card_s 3.887
+unpack_s 0.000
+fw_s 0.257
+dsp_s 7.906
+hs 248702
+up 216554
+regw 12150
+rd4 15824
+rdo 4174
+calls 32
+files 14
+hs_s_at_44100 5.640

@@ -1,0 +1,14 @@
+keys window before    32.12-   33.02 s:   -47.1 dBFS, peak    644
+keys window before_midi    35.12-   36.02 s:   -49.1 dBFS, peak    560
+keys window cc11_ch1_0    38.62-   39.52 s:   -46.9 dBFS, peak    648
+keys window cc11_ch1_0_midi    41.62-   42.52 s:   -49.3 dBFS, peak    540
+keys window cc11_ch1_0_back    45.12-   46.02 s:   -47.0 dBFS, peak    647
+keys window cc11_ch1_0_back_midi    48.12-   49.02 s:   -49.0 dBFS, peak    560
+keys window cc11_ch123_0    51.62-   52.52 s:   -47.0 dBFS, peak    648
+keys window cc11_ch123_0_midi    54.62-   55.52 s:   -49.3 dBFS, peak    536
+keys window cc11_ch123_0_back    58.12-   59.02 s:   -46.9 dBFS, peak    648
+keys window cc11_ch123_0_back_midi    61.12-   62.02 s:   -49.0 dBFS, peak    562
+keys window cc7_ch1_0    64.62-   65.52 s:   -47.1 dBFS, peak    643
+keys window cc7_ch1_0_midi    67.62-   68.52 s:   -48.9 dBFS, peak    567
+keys window cc7_ch1_0_back    71.12-   72.02 s:   -48.2 dBFS, peak    596
+keys window cc7_ch1_0_back_midi    74.12-   75.02 s:   -49.1 dBFS, peak    561

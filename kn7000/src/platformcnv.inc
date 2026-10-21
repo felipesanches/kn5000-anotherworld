@@ -90,7 +90,7 @@
 .equ DSP_BANKTAB_MAX, 0xF00         #   to 0x502E7EFF, below the program menu's launch block (LB_ADDR)
 .equ VIDEO2_AT,       0x502E8000    # the shared polygons (resource 0x11, 25,108 bytes), loaded once
 .equ PART_AREA,       0x502EE400    # the current part's palette, bytecode, polygons, bitmaps (and, before the
-.equ PART_END,        0x5031B000    #   first part, dsp.s's staging of each sound of the bank) (largest part,
+.equ PART_END,        0x5031B000    #   first part, the sample bank's coded files, dsp.s BankRead) (largest part,
                                     #   the city: 164,407 bytes; aw_extract.py --parts)
 .equ PAGE_BITMAP_0,   0x50320000    # four 320x200 pages, one per 0x10000 (interp.s GetPagePtr)
 .equ PAGE_BITMAP_1,   0x50330000

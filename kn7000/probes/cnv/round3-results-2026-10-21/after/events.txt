@@ -1,0 +1,49 @@
+    0.00 installed (mode full)
+   30.02 boot: slots 06BE04008400 06BE04008D00, dead 0
+   57.43 menu: up, 1 programs, Another World at 0
+   59.47 RUN: "ANOTHER WORLD" at APP_BASE
+   78.67 bank: 11.62 s (card 3.89, unpacking 0.00, outside the converter 0.22, in the calls otherwise 7.51); 238656 handshakes (5.41 s at 44,100 a s): upload halves 215375, register halves 11944, MSGR4 polls 9250, other reads 2087; 29 calls, 14 files; sent 1 (171576 of 171576 words)
+   82.47 the intro starts; mode 0 hooked 3 slots 06BE04008140 06BE04008257
+   97.47 intro, 15 s in DSP mode: voices seen 3F, |mix| max 915072, dead 0
+  106.62 the lake (part 3E82): LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  107.12 A5# held: LR 0 UD -1 JUMP -1 POS 08 ACT 0 AMASK 08
+  107.62 A5# released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  108.12 B5 held: LR 0 UD -1 JUMP -1 POS 08 ACT 0 AMASK 08
+  108.62 B5 released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  109.12 A5 held: LR 0 UD 1 JUMP 1 POS 04 ACT 0 AMASK 04
+  109.62 A5 released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  110.15 panel R1/R2 OCTAVE + held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  111.18 panel R1/R2 OCTAVE + held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  112.22 panel R1/R2 OCTAVE - held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  113.25 panel R1/R2 OCTAVE - held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  114.28 panel PART SELECT LEFT held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  115.32 panel PART SELECT RIGHT 1 held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  116.35 panel PART SELECT RIGHT 1 held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  117.38 panel SUSTAIN held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  118.42 panel SUSTAIN held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  118.92 after the panel buttons: keybed sound want 0 sent 0, LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  122.58 game sound mode 2 (2 = off), MIDI sent 54
+  123.58 keys window on1 122.683 123.583 (A5 held; keybed sound want 0 sent 0; the firmware's expression, channel 1: 7F)
+  127.42 keys window off 126.517 127.417 (A5 held; keybed sound want 1 sent 1; the firmware's expression, channel 1: 00)
+  131.25 keys window on2 130.350 131.250 (A5 held; keybed sound want 0 sent 0; the firmware's expression, channel 1: 7F)
+  132.75 IC23 words that differ, before the keybed-sound toggles and after: 0 of 65536; MIDI drops 0
+  135.10 game sound mode 0 (0 = DSP), hooked 3
+  137.43 HELP: mode 0, lines "NOW: DSP SAMPLES" "KEYBED SOUND: ON" "SENT IN 11.4 S"
+  139.78 HELP, RIGHT 2 #1: still in help true, mode 1, hooked 0, line "NOW: TONE GENERATOR", slots 06BE04008400 06BE04008D00
+  142.12 HELP, RIGHT 2 #2: still in help true, mode 2, hooked 0, line "NOW: OFF", slots 06BE04008400 06BE04008D00
+  144.47 HELP, RIGHT 2 #3: still in help true, mode 0, hooked 3, line "NOW: DSP SAMPLES", slots 06BE04008140 06BE04008257
+  146.82 HELP, RIGHT 1 #1: keybed sound want 1 sent 1, line "KEYBED SOUND: OFF"
+  149.15 HELP, RIGHT 1 #2: keybed sound want 0 sent 0, line "KEYBED SOUND: ON"
+  152.85 HELP, page 3
+  156.18 HELP left: part 3E82, mode 0, hooked 3
+  157.53 before the quit: keybed sound want 1 sent 1
+  160.57 first quit: task done 1, DSP state 3, hooked 0, slots 06BE04008400 06BE04008D00, MSGR4-7 0 0 0 0
+  165.00 after the quit: keybed sound want 0 sent 0; the firmware's expression, channel 1: 7F
+  168.62 menu: up, 1 programs, Another World at 0
+  170.65 RUN: "ANOTHER WORLD" at APP_BASE
+  178.65 bank: 0.43 s (card 3.89, unpacking 0.00, outside the converter 0.26, in the calls otherwise 7.91); 248702 handshakes (5.64 s at 44,100 a s): upload halves 216554, register halves 12150, MSGR4 polls 15824, other reads 4174; 32 calls, 14 files; sent 2 (0 of 171576 words)
+  187.00 again, HELP: lines "NOW: DSP SAMPLES" "KEYBED SOUND: ON" "CHECKED IN 0.2 S"
+  193.38 again quit: task done 1, DSP state 3, hooked 0, slots 06BE04008400 06BE04008D00, MSGR4-7 0 0 0 0
+  204.25 left STYLE CONVERT; slots 06BE04008400 06BE04008D00; dead 0
+  205.25 keys window after 204.350 205.250 (C4 held; keybed sound want 0 sent 0; the firmware's expression, channel 1: 7F)
+  206.75 end

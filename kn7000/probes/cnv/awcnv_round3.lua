@@ -19,7 +19,11 @@
 --     must change each time while the help screen stays up (snapshots); PAGE DOWN twice: page 3, the URL
 --     (snapshot); EXIT;
 --   * RIGHT 1 (the keybed sound off), then EXIT held: the slots back as at boot, MSGR4-7 0, the keybed sound told
---     to come back (AU_KEYSENT 0); NO; a C4 on the main screen ("keys window after"): loud again.
+--     to come back (AU_KEYSENT 0); EXIT, "Continue Next?" YES, the menu, RUN: the bank found by its marker and
+--     checked by the DSP's checksum, not sent again (AWR_OUT/bank2.txt; DV_BK_SENT 2); HELP (snapshot: "CHECKED
+--     IN"); EXIT; EXIT held; EXIT; NO; a C4 on the main screen ("keys window after"): loud again.
+-- AWR_EXPR (893: 0x5000B36B): the firmware's expression byte for channel 1 (awcnv_keymute.lua), logged with the
+-- keybed sound's state: 0x7F with the sound on, 0 with it off.
 --
 -- The bank timing. Every access the firmware makes to the DSP's data port (0x9C000000) first waits for the DSP's
 -- per-frame handshake (G17ICR 0x3400015C written 1, then polled): one access a DSP frame, 22.68 us. The tap counts:
@@ -153,15 +157,17 @@ local function run_aw()
   E("RUN: %q at APP_BASE", cstr(0x502BA020, 32))
   return ok
 end
-local function bank()
+local EXPR = tonumber(os.getenv("AWR_EXPR") or "0x5000B36B")
+local function bank(file)
   wait_until(function() return sp:read_u32(CV_STATE) >= 2 end, 120)
   sp:write_u32(NO_SPLASH, 0x5EED0FF0)
   wait_until(function() return sp:read_u32(CV_STATE) == 5 end, 60)
+  for _, k in ipairs({ "card", "unpack", "fw", "dsp", "hs", "up", "regw", "rd4", "rdo", "calls", "files" }) do B[k] = 0 end
   B.on, B.t0, B.last, B.phase = true, now(), now(), "dsp"
   wait_until(function() return sp:read_u32(CV_STATE) == 3 end, 600)
   bswitch("dsp"); B.on = false
   local total = now() - B.t0
-  local f = assert(io.open(OUT .. "/bank.txt", "w"))
+  local f = assert(io.open(OUT .. "/" .. (file or "bank.txt"), "w"))
   local function kv(k, v) f:write(string.format("%s %s\n", k, tostring(v))) end
   kv("kn7app_state", string.format("dvstate=%d fail=%d hooked=%d mode=%d sent=%d", sp:read_u32(DV_STATE),
      sp:read_u32(DV_FAIL), sp:read_u32(DV_HOOKED), sp:read_u32(DV_MODE), sp:read_u32(DV_BK_SENT)))
@@ -207,8 +213,8 @@ local function window(label, name)
   local k = KEY[name]
   local t0 = now()
   k:set_value(1); wait(1.0); k:set_value(0)
-  E("keys window %s %.3f %.3f (%s held; keybed sound want %d sent %d)", label, t0 + 0.1, now(), name,
-    sp:read_u32(AU_KEYWANT), sp:read_u32(AU_KEYSENT))
+  E("keys window %s %.3f %.3f (%s held; keybed sound want %d sent %d; the firmware's expression, channel 1: %02X)",
+    label, t0 + 0.1, now(), name, sp:read_u32(AU_KEYWANT), sp:read_u32(AU_KEYSENT), sp:read_u8(EXPR))
   wait(1.5)
 end
 local function hold_panel(label, tag, mask)
@@ -284,7 +290,17 @@ local co = coroutine.create(function()
   press("CPR_SEG1", 0x02, 0.3); wait(1)
   E("before the quit: keybed sound want %d sent %d", sp:read_u32(AU_KEYWANT), sp:read_u32(AU_KEYSENT))
   quit("first")
-  E("after the quit: keybed sound want %d sent %d", sp:read_u32(AU_KEYWANT), sp:read_u32(AU_KEYSENT))
+  E("after the quit: keybed sound want %d sent %d; the firmware's expression, channel 1: %02X", sp:read_u32(AU_KEYWANT),
+    sp:read_u32(AU_KEYSENT), sp:read_u8(EXPR))
+  press("CPR_SEG7", 0x01)                               -- YES (right 3): the menu again, the game again
+  run_aw()
+  bank("bank2.txt")
+  wait(6)
+  press("CPC_SEG5", 0x02, 0.3); wait(2)
+  E("again, HELP: lines %q %q %q", cstr(DV_MODETXT, 48), cstr(DV_KEYSTXT, 24), cstr(DV_BANKTXT, 24))
+  M.video:snapshot()
+  press("CPC_SEG11", 0x80, 0.3); wait(3)
+  quit("again")
   press("CPR_SEG6", 0x01); wait(6)
   E("left STYLE CONVERT; slots %012X %012X; dead %d", slot(0x8080), slot(0x80A0), sp:read_u8(DEAD))
   window("after", "C4")

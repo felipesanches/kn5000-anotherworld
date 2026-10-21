@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>; GPL v3+
-"""round3_report.py OUT -- what run_round3.sh's session (awcnv_round3.lua) shows: the bank's timing (OUT/bank.txt),
+"""round3_report.py OUT -- what run_round3.sh's session (awcnv_round3.lua) shows: the bank's timing (OUT/bank.txt; the
+second start's, which finds the bank there, OUT/bank2.txt),
 and, in a full session, the level of the recording (OUT/run.wav) in each "keys window": the instrument's own sound
 of a held key with the keybed sound on (on1, on2), off (off), and after the quit (after). The game's own sound is
 OFF during on1/off/on2, and the game has left before "after"."""
@@ -12,9 +13,11 @@ import wave
 import numpy as np
 
 OUT = sys.argv[1]
-bank = os.path.join(OUT, "bank.txt")
-if os.path.exists(bank):
-    print(open(bank).read().rstrip())
+for name in ("bank.txt", "bank2.txt"):
+    bank = os.path.join(OUT, name)
+    if os.path.exists(bank):
+        print(f"# {name}")
+        print(open(bank).read().rstrip())
 wins = []
 for ln in open(os.path.join(OUT, "events.txt")):
     m = re.search(r"keys window (\S+) ([\d.]+) ([\d.]+)", ln)

@@ -1,0 +1,6 @@
+    0.00 installed (mode bank)
+   30.02 boot: slots 06BE04008400 06BE04008D00, dead 0
+   57.43 menu: up, 1 programs, Another World at 0
+   59.45 RUN: "ANOTHER WORLD" at APP_BASE
+   92.95 bank: 25.87 s (card 10.19, unpacking 1.74, outside the converter 1.68, in the calls otherwise 12.26); 359792 handshakes (8.16 s at 44,100 a s): upload halves 343892, register halves 10246, MSGR4 polls 4322, other reads 1332; 97 calls, 93 files; sent 1 (171576 of 171576 words)
+   92.95 end

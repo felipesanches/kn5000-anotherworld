@@ -248,6 +248,71 @@ load errors 0, guard 0", and `compare_frames.py`: 2612 of 2612 frames identical 
 gave "captured 2613 frames (last tick 2612); part loads 3, load errors 0, guard 0", and 2612 of 2612
 frames identical.
 
+## Round 3 (2026-10-21): the bank's speed, the keybed-only controls, the keybed-sound key, the help screen
+
+Felipe's requests after the DSP build ran on his unit (README-CNV.md): a faster sample bank, the right URL on the help
+screen, the sound mode selectable in HELP, B and B♭ as UP, no game control on the panel; and a panel key that mutes
+the instrument's own notes for the keys that steer the game. Light, as asked: the build's guards and two MAME
+sessions on the final build (the first on `59629a40...`, the build before the help screen's dot; the second on
+`7f8ed09a...`), plus one bank-only session on the build before (`a2fbbaa6...`).
+
+| file                         | what it is                                                                                                                     |
+|------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `run_round3.sh OUT [MODE]`   | the runner, as `run_dsp.sh` (the menu card, program 893); MODE `full` (default) or `bank`; `SDDIR=` an older build's `sdcard/` |
+| `awcnv_round3.lua`           | the session (its header says every step and what it reads); `bank`: the bank load alone, timed and taken apart                 |
+| `round3_report.py OUT`       | the bank timings (`bank.txt`, `bank2.txt`) and the recording's level in each "keys window"                                     |
+| `awcnv_keymute.lua`          | no game: which MIDI message mutes the keybed's notes, and how the firmware takes CC 11 (its header)                            |
+| `round3-results-2026-10-21/` | the runs' text files: `before/` (bank only, `a2fbbaa6...`), `after/` (`7f8ed09a...`), `keymute/`                               |
+
+    probes/cnv/run_round3.sh ~/compartilhado/tmp/aw-round3/run full      # from kn7000/; DISPLAY=:0; about 8 minutes
+    SDDIR=<an older build's sdcard/> probes/cnv/run_round3.sh ~/compartilhado/tmp/aw-round3/before bank
+
+**Where the bank's time went, and goes** (`bank.txt`; time from the DSP setup, state 5, to the game task, state 3;
+"card" is inside `BankRead` until the unpacker starts, "unpack" the ByteKiller unpacker, "fw" from our answer to the
+next converter call, "dsp" the rest of the calls; the handshakes are writes of 1 to G17ICR `0x3400015C`):
+
+| figure                        | before, `a2fbbaa6...` | after, `7f8ed09a...` |
+|-------------------------------|-----------------------|----------------------|
+| total                         | 25.87 s               | 11.62 s              |
+| card                          | 10.19 s (93 files)    | 3.89 s (14 files)    |
+| unpack                        | 1.74 s                | 0                    |
+| fw (between calls)            | 1.68 s (97 calls)     | 0.22 s (29 calls)    |
+| dsp (host port, our work)     | 12.26 s               | 7.51 s               |
+| handshakes                    | 359,792               | 238,656              |
+| ... upload halves             | 343,892               | 215,375              |
+| ... register halves           | 10,246                | 11,944               |
+| ... MSGR4 reads (polls)       | 4,322                 | 9,250                |
+| ... other reads               | 1,332                 | 2,087                |
+| handshakes at 22.68 us (unit) | 8.16 s                | 5.41 s               |
+
+MAME's handshakes took 34.1 and 31.5 us on average (the firmware's own code between two accesses often misses a
+frame there); on the unit pass 8 found 96.8 % of the firmware's accesses one frame apart. The second start (YES,
+the menu, RUN) found the bank by its marker and only had the DSP checksum it: 0.43 s (`bank2.txt`; its counters
+are the two starts' sums, the session did not reset them then; it does now).
+
+**What the full session showed** (`after/events.txt`, `after/report.txt`):
+
+| check             | result                                                                                                                          |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| bank              | all 171,576 words, the DSP's checksum equal to `AWBANK.AW`'s (DV_BK_SENT 1), slots hooked at `0x8140` / `0x8257`                |
+| DSP sound         | 15 s of the intro: voices 0-5 seen sounding, the mix up to 915,072, the dead flag 0                                             |
+| B♭5, B5 (UP)      | each held alone: var 0xE5 = -1, var 0xFD = 8; A5: +1 and 4                                                                      |
+| the panel         | R1/R2 OCTAVE + and - (twice each), PART SELECT LEFT, RIGHT 1 (twice), SUSTAIN (twice), each held: vars 0xFC, 0xE5, 0xFA, 0xFD 0 |
+| keybed sound      | RIGHT 1: the firmware's expression for channel 1 (`0x5000B36B`) 0x7F, 0x00, 0x7F; IC23 0 of 65,536 words changed; no MIDI drop  |
+| HELP, RIGHT 2     | three presses in HELP: TONE GENERATOR (slots back), OFF, DSP SAMPLES (hooked again); the help stayed up, the line redrawn       |
+| HELP, RIGHT 1     | two presses: "KEYBED SOUND: OFF", "ON"                                                                                          |
+| HELP lines        | "NOW: DSP SAMPLES", "KEYBED SOUND: ON", "SENT IN 11.4 S"; at the second start "CHECKED IN 0.2 S"                                |
+| page 3 (snapshot) | "github.com/felipesanches/" over "technics-anotherworld", the period a solid dot                                                |
+| quit              | muted before it; after it AU_KEYSENT 0 and the expression 0x7F; both slots as at boot, MSGR4-7 0; again after the second game   |
+
+**The keybed's sound in MAME cannot be heard to change.** The recording's level is the same in every window (-46.4
+to -47.0 dBFS, `report.txt`), muted or not, and the same for CC 7 = 0 and for notes sent as MIDI IN
+(`keymute/levels-report.txt`): the overlay's tone generator ignores the voice level word (class 0x3000) where the
+firmware puts expression. The firmware's side is plain: CC 11 = 0 on channel 1 sets `0x5000B36B` from 0x7F to 0
+and back (`keymute/ramdiff-events.txt`), and a keybed C4's tone-generator writes differ in one register only, the
+level word of its two voices, 0x0BE8 / 0x0BA4 at 127, 0x0000 at 0, the same again at 127 (`keymute/tg.txt`, one
+column per case; mask the voice number, bits 4-7 of the address, and drop the 0xFCxx polling). Felipe's ears decide.
+
 ## Sound on the effects DSP (2026-10-21): the game's own samples
 
 The DSP build (README-CNV.md, "Sound": `src/dsp.s`, `tools/dsp_mixer.py`) in one MAME session through the program

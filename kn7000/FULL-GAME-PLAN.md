@@ -114,7 +114,10 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    SP7001 build stays silent (`src/audio_stub.s`). **Second iteration done (2026-10-21, `src/dsp.s`,
    `tools/dsp_mixer.py`, README-CNV.md "Sound"):** the game's own samples, played by the effects DSP
    (an 8-voice mixer in two of its kernel's unit slots, the whole bank in its SDRAM), the default
-   when the DSP can be used; the MIDI sound is kept as a second mode (PART SELECT RIGHT 2: DSP, TG, off).
+   when the DSP can be used; the MIDI sound is kept as a second mode (PART SELECT RIGHT 2: DSP, TG, off). It played
+   perfectly on Felipe's KN7000. **Round 3 (2026-10-21):** the bank Rice-coded and decoded by the DSP, checked
+   by a DSP checksum (25.9 s -> 11.6 s in MAME, `tools/dsp_bank.py`); RIGHT 2 also in HELP; PART SELECT RIGHT 1
+   mutes the keybed's own notes (expression on channels 1-3); the game played on the keybed only.
 4. **Music** (modules 0x07 intro, 0x8A final; 0x89 preloaded by the lake, never played), the
    original's 4-channel module player, instruments taken from the sound resources. **First iteration
    done (same place):** the module player of rawgl (`SfxPlayer`) runs on the kernel's millisecond
