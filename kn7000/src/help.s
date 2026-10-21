@@ -3,7 +3,9 @@
 #
 # The help screens (HELP button), after the KN5000 port's HELP_SCREEN: the game pauses and four
 # pages show the controls, the fifteen level codes and the speed figures (perf.s PerfPageBuild). PAGE UP / PAGE DOWN turn the pages; EXIT,
-# HELP again, or any game control returns to the game once everything is released.
+# HELP again, or any keybed / MIDI key returns to the game once everything is released. PART SELECT RIGHT 2 (the
+# sound mode) and RIGHT 1 (the keybed's own sound) work here too (audio.s AudioPoll, from every HelpSleep), and the
+# first page shows the change at once.
 
 # ================================================================================
 # HelpScreen: called from ReadInput while HELP is held. The VM does not run meanwhile. The pages
@@ -45,6 +47,16 @@ hs_poll:
     call    HelpGameInput, 0, 0
     cmp     0, d0
     bne     hs_exit
+    call    HelpSoundState, 0, 0    # PART SELECT RIGHT 2 / RIGHT 1 pressed here (audio.s AudioPoll runs in
+    mov     (HELP_SNDSTATE), d1     # every HelpSleep): the first page's status lines again, at once
+    cmp     d1, d0
+    beq     hs_same
+    mov     d0, (HELP_SNDSTATE)
+    mov     (HELP_PAGE_NO), d0
+    cmp     0, d0
+    bne     hs_same
+    call    HelpDrawPage, 0, 0
+hs_same:
     mov     (FWV_PANEL), a0
     movbu   (BTN_PAGE_OFS, a0), d0
     and     BTN_PAGEUP_BIT, d0
@@ -162,7 +174,9 @@ hd_clear:
     mov     d0, (4, sp)
     mov     HELP_BUF, a0
     mov     a0, (CUR_PAGE_1)
-    call    DspModeText, 0, 0       # the sound mode's line (page 1)
+    call    HelpSoundState, 0, 0
+    mov     d0, (HELP_SNDSTATE)
+    call    DspModeText, 0, 0       # the status lines (page 1)
     mov     (HELP_PAGE_NO), d0
     cmp     3, d0                   # the speed page: its text, now
     bne     hd_page
@@ -222,70 +236,66 @@ help_palette:
 help_pages:
     .long   help_page0, help_page1, help_page2, PF_ITEMS
 
-help_page0:
+help_page0:                         # the status lines (DV_*TXT) are dsp.s DspModeText's, made before every page
     .word   108, 8, 2, 0
     .long   hs_title1
     .word   116, 20, 2, 0
     .long   hs_title2
-    .word   8, 40, 1, 0
+    .word   8, 36, 1, 0
     .long   hs_controls
-    .word   80, 40, 2, 0
+    .word   80, 36, 2, 0
     .long   hs_col_keys
-    .word   184, 40, 2, 0
-    .long   hs_col_panel
-    .word   8, 56, 3, 0
+    .word   8, 50, 3, 0
     .long   hs_up
-    .word   80, 56, 1, 0
+    .word   80, 50, 1, 0
     .long   hs_up_key
-    .word   184, 56, 1, 0
-    .long   hs_up_btn
-    .word   8, 68, 3, 0
+    .word   8, 61, 3, 0
     .long   hs_down
-    .word   80, 68, 1, 0
+    .word   80, 61, 1, 0
     .long   hs_down_key
-    .word   184, 68, 1, 0
-    .long   hs_down_btn
-    .word   8, 80, 3, 0
+    .word   8, 72, 3, 0
     .long   hs_left
-    .word   80, 80, 1, 0
+    .word   80, 72, 1, 0
     .long   hs_left_key
-    .word   184, 80, 1, 0
-    .long   hs_left_btn
-    .word   8, 92, 3, 0
+    .word   8, 83, 3, 0
     .long   hs_right
-    .word   80, 92, 1, 0
+    .word   80, 83, 1, 0
     .long   hs_right_key
-    .word   184, 92, 1, 0
-    .long   hs_right_btn
-    .word   8, 104, 3, 0
+    .word   8, 94, 3, 0
     .long   hs_action
-    .word   80, 104, 1, 0
+    .word   80, 94, 1, 0
     .long   hs_action_key
-    .word   184, 104, 1, 0
-    .long   hs_action_btn
-    .word   8, 124, 3, 0
+    .word   200, 50, 2, 0
+    .long   hs_bank_lbl
+    .word   200, 61, 1, 0
+    .long   DV_BANKTXT
+    .word   8, 110, 1, 0
+    .long   hs_col_panel
+    .word   8, 122, 3, 0
     .long   hs_codes
-    .word   80, 124, 1, 0
+    .word   80, 122, 1, 0
     .long   hs_codes_btn
-    .word   8, 136, 3, 0
+    .word   8, 132, 3, 0
     .long   hs_help
-    .word   80, 136, 1, 0
+    .word   80, 132, 1, 0
     .long   hs_help_btn
-    .word   8, 148, 3, 0
-    .long   hs_page
-    .word   80, 148, 1, 0
-    .long   hs_page_btn
-    .word   8, 160, 3, 0
+    .word   8, 142, 3, 0
     .long   hs_exit_lbl
-    .word   80, 160, 1, 0
+    .word   80, 142, 1, 0
     .long   hs_exit_btn
-    .word   8, 172, 3, 0
+    .word   8, 152, 3, 0
     .long   hs_sound
-    .word   80, 172, 1, 0
+    .word   80, 152, 1, 0
     .long   hs_sound_btn
-    .word   8, 184, 2, 0
-    .long   DV_MODETXT              # "NOW: DSP SAMPLES" ...: dsp.s DspModeText, before every page
-    .word   256, 184, 1, 0
+    .word   8, 162, 3, 0
+    .long   hs_keys_lbl
+    .word   80, 162, 1, 0
+    .long   hs_keys_btn
+    .word   8, 176, 2, 0
+    .long   DV_MODETXT
+    .word   8, 188, 2, 0
+    .long   DV_KEYSTXT
+    .word   256, 188, 1, 0
     .long   hs_page_1
     .word   0xFFFF, 0               # end of page (4 bytes, so the next page stays aligned)
 
@@ -378,33 +388,29 @@ help_page2:
 hs_title1:       .asciz "ANOTHER WORLD"
 hs_title2:       .asciz "KN7000 PORT"
 hs_controls:     .asciz "CONTROLS"
-hs_col_keys:     .asciz "KEYBED/MIDI"
-hs_col_panel:    .asciz "PANEL"
+hs_col_keys:     .asciz "KEYBED / MIDI 1-3"
+hs_col_panel:    .asciz "PANEL BUTTONS"
+hs_bank_lbl:     .asciz "SOUND BANK"
 hs_up:           .asciz "UP"
 hs_up_key:       .asciz "Bb5 or B5"
-hs_up_btn:       .asciz "R1/R2 OCTAVE +"
 hs_down:         .asciz "DOWN"
 hs_down_key:     .asciz "A5"
-hs_down_btn:     .asciz "R1/R2 OCTAVE -"
 hs_left:         .asciz "LEFT"
 hs_left_key:     .asciz "F5"
-hs_left_btn:     .asciz "PART SEL LEFT"
 hs_right:        .asciz "RIGHT"
 hs_right_key:    .asciz "C6"
-hs_right_btn:    .asciz "PART SEL RIGHT 1"
 hs_action:       .asciz "ACTION"
 hs_action_key:   .asciz "C4 or lower"
-hs_action_btn:   .asciz "SUSTAIN"
 hs_codes:        .asciz "CODES"
 hs_codes_btn:    .asciz "OTHER PART & FR: enter a code"
 hs_help:         .asciz "HELP"
-hs_help_btn:     .asciz "this screen"
-hs_page:         .asciz "PAGE"
-hs_page_btn:     .asciz "PAGE UP / PAGE DOWN"
+hs_help_btn:     .asciz "this screen; PAGE UP / DOWN"
 hs_exit_lbl:     .asciz "EXIT"
-hs_exit_btn:     .asciz "EXIT, or any game control"
+hs_exit_btn:     .asciz "EXIT, or any key"
 hs_sound:        .asciz "SOUND"
 hs_sound_btn:    .asciz "PART SEL RIGHT 2: DSP/TG/OFF"
+hs_keys_lbl:     .asciz "KEYS"
+hs_keys_btn:     .asciz "PART SEL RIGHT 1: their sound"
 hs_page_1:       .asciz "Page 1/4"
 hs_page_2:       .asciz "Page 2/4"
 hs_page_3:       .asciz "Page 3/4"

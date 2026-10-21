@@ -50,6 +50,17 @@
 # sound off on every channel the game uses (and, in the DSP mode, every voice is stopped). PART SELECT
 # RIGHT 2 cycles the mode: DSP -> TG -> OFF -> DSP (OFF -> TG when the DSP cannot be used). Leaving the DSP
 # mode puts the firmware's effects back in the DSP's slots (dsp.s DspUnhook); taking it hooks them again.
+#
+# THE KEYBED'S OWN SOUND (2026-10-21, Felipe: "a control panel key for toggling on/off the piano sounds played
+# during gameplay; ON by default"). PART SELECT RIGHT 1 mutes and unmutes the instrument's own notes, the ones it
+# plays for the keys pressed to steer the game, independently of the mode above. The way: expression (CC 11) on
+# channels 1-3 into the same MIDI IN 1 ring, 0 to mute, 127 to unmute. Those channels are the receive parts RIGHT 1,
+# RIGHT 2 and LEFT, the parts the keybed plays; expression is a per-part live controller, not a panel setting (the
+# KN5000 firmware keeps it in a live-controller array, technics-docs panel-parameter-keys.md, bank 0xB3), so nothing
+# of Felipe's settings changes. The keybed's note events still reach the MIDI OUT 1 ring the game reads its input
+# from (expression scales the sound only). The game starts with them ON and sends nothing until the key is pressed;
+# leaving puts 127 back (AudioEnd at the quit, the stop screen's quit, and DspWatch when the firmware stops calling;
+# AudioInit at a new game), retried while the ring is full (KeysSync).
 
 .equ AU_ENABLED,   AUDIO_VARS + 0x00    # u32: 1 = send MIDI (the TG mode; PART SELECT RIGHT 2 cycles)
 .equ AU_PAUSED,    AUDIO_VARS + 0x04    # u32: 1 = the help screen is up: the music is frozen
@@ -68,6 +79,9 @@
 .equ AU_MARK,      AUDIO_VARS + 0x38    # u32: the last sync mark written to var 0xF4
 .equ AU_READY,     AUDIO_VARS + 0x3C    # u32: 1 once AudioInit has run (the task's first 2.5 s yield polls)
 .equ AU_PROG,      AUDIO_VARS + 0x40    # 16 x u8: the program last sent per MIDI channel (0xFF = none)
+.equ AU_KEYWANT,   AUDIO_VARS + 0x50    # u32: 1 = the keybed's own sound muted (PART SELECT RIGHT 1 toggles)
+.equ AU_KEYSENT,   AUDIO_VARS + 0x54    # u32: the state the instrument was last told (KeysSync)
+.equ AU_KBTN,      AUDIO_VARS + 0x58    # u32: PART SELECT RIGHT 1 as it was at the last poll
 .equ AU_SLOTS,     AUDIO_VARS + 0x80    # AU_NSLOTS x SL_LEN: the notes sounding
 .equ SL_CH,        0                    #   u8: MIDI channel 0-15 (0xFF = no note)
 .equ SL_NOTE,      1                    #   u8: the note
@@ -85,6 +99,10 @@
 .equ AU_MAX_ROWS,  4                    # rows played at most per poll (then the player resyncs)
 .equ AU_BTN_OFS,   2                    # PART SELECT RIGHT 2 (CPR_SEG2 SW1; probes/cnv/README.md)
 .equ AU_BTN_BIT,   0x02
+.equ AU_KBTN_OFS,  1                    # PART SELECT RIGHT 1 (CPR_SEG1 SW1): the keybed's own sound on / off
+.equ AU_KBTN_BIT,  0x02
+.equ AU_KEY_CC,    11                   # expression
+.equ AU_KEY_CHS,   3                    # channels 1-3: RIGHT 1, RIGHT 2, LEFT
 .equ AU_MARK_VAR,  0xF4                 # the music's sync mark (rawgl VAR_MUSIC_SYNC)
 .equ AU_MUS_VOICE, 4                    # DSP mode: the music's channel c plays on voice 4 + c
 .equ AU_MUS_K,     5319481              # DSP mode: a period's step per 44.1 kHz frame is K / period, 16.16
@@ -100,6 +118,12 @@ MidiMsg:
     mov     (AU_ENABLED), d1
     cmp     0, d1
     beq     mm_ret
+    bra     mm_put
+# MidiPut(d0 as MidiMsg): the same, in every sound mode (KeysSync: the keybed's sound is not the game's).
+MidiPut:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+mm_put:
     mov     (FWV_MIDIIN1), a0       # the ring's header
     cmp     0, a0
     beq     mm_ret
@@ -150,6 +174,77 @@ mm_unmask:
     nop
 mm_ret:
     ret     [d2,d3,a2,a3], 0x20
+
+# KeysSync -> d0 = 0 when the instrument has been told AU_KEYWANT (expression 0 or 127 on channels 1-3), else 1
+# (the ring was full: KeysSync tries again at the next poll).
+KeysSync:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    mov     (AU_KEYWANT), d2
+    mov     (AU_KEYSENT), d0
+    cmp     d2, d0
+    beq     ks_ok
+    mov     (AU_DROPS), d3          # d3 = drops before
+    mov     127 << 16, a2           # a2 = the value, in place: 127 (sound), or 0 (muted)
+    cmp     0, d2
+    beq     ks_val
+    mov     0, a2
+ks_val:
+    clr     d2                      # d2 = the channel
+ks_ch:
+    mov     d2, d0
+    or      0xB0 | (AU_KEY_CC << 8), d0
+    mov     a2, d1
+    or      d1, d0
+    call    MidiPut, 0, 0
+    inc     d2
+    cmp     AU_KEY_CHS, d2
+    bcs     ks_ch
+    mov     (AU_DROPS), d0
+    cmp     d3, d0
+    bne     ks_retry
+    mov     (AU_KEYWANT), d0
+    mov     d0, (AU_KEYSENT)
+ks_ok:
+    clr     d0
+    bra     ks_ret
+ks_retry:
+    mov     1, d0
+ks_ret:
+    ret     [d2,d3,a2,a3], 0x20
+
+# KeysRestore: the keybed's own sound back on, before the game leaves; a few tries 2 ms apart while the ring is
+# full (the firmware's yield directly: this runs from DLY_TSK's quit path too).
+KeysRestore:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x10, sp
+    clr     d0
+    mov     d0, (AU_KEYWANT)
+    mov     10, d2
+kr_try:
+    call    KeysSync, 0, 0
+    cmp     0, d0
+    beq     kr_ret
+    add     -1, d2
+    beq     kr_ret
+    mov     2, d0
+    mov     (FW_DLY), a0
+    calls   (a0)
+    bra     kr_try
+kr_ret:
+    ret     [d2,d3,a2,a3], 0x20
+
+# HelpSoundState (help.s) -> d0 = what the first page's status lines show: the sound mode, the keybed's sound, the DSP's
+# failure code. Leaf.
+HelpSoundState:
+    mov     (DV_FAIL), d0
+    asl     8, d0
+    mov     (AU_KEYWANT), d1
+    or      d1, d0
+    asl     8, d0
+    mov     (DV_MODE), d1
+    or      d1, d0
+    rets
 
 # MidiCC(d0 = channel, d1 = controller, a0 = value)
 MidiCC:
@@ -335,6 +430,7 @@ as_drums:
 AudioInit:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
+    call    KeysRestore, 0, 0       # a new game: the keybed's sound on (nothing sent unless it was off)
     mov     AUDIO_VARS, a0
     mov     0x200 / 4, d1
     clr     d0
@@ -364,6 +460,10 @@ ai_midi:
     movbu   (AU_BTN_OFS, a0), d0
     and     AU_BTN_BIT, d0
     mov     d0, (AU_BTN)
+    mov     (FWV_PANEL), a0
+    movbu   (AU_KBTN_OFS, a0), d0
+    and     AU_KBTN_BIT, d0
+    mov     d0, (AU_KBTN)
     call    AudioSetup, 0, 0
     ret     [d2,d3,a2,a3], 0x20
 
@@ -384,6 +484,7 @@ AudioEnd:
     mov     d0, (AU_MOD)
     mov     1, d0
     call    AllOff, 0, 0
+    call    KeysRestore, 0, 0       # the keybed's own sound back on
     ret     [d2,d3,a2,a3], 0x20
 
 # AudioPause / AudioResume: the help screen. Silence, freeze the music; on the way out the music
@@ -863,6 +964,22 @@ AudioPoll:
     bne     ap_time                 # still held
     call    AudioNextMode, 0, 0     # pressed: the next sound mode
 ap_time:
+    mov     (FWV_PANEL), a0         # PART SELECT RIGHT 1: the keybed's own sound on / off
+    cmp     0, a0
+    beq     ap_keys
+    movbu   (AU_KBTN_OFS, a0), d0
+    and     AU_KBTN_BIT, d0
+    mov     (AU_KBTN), d1
+    mov     d0, (AU_KBTN)
+    cmp     0, d0
+    beq     ap_keys
+    cmp     0, d1
+    bne     ap_keys                 # still held
+    mov     (AU_KEYWANT), d0
+    xor     1, d0
+    mov     d0, (AU_KEYWANT)
+ap_keys:
+    call    KeysSync, 0, 0          # tell the instrument (again, if the ring was full)
     mov     (FWV_KERNEL_MS), a0
     mov     (a0), d2                # d2 = now
     mov     (AU_PAUSED), d0
@@ -914,6 +1031,7 @@ ap_slot_next:
     beq     apl_ret
     mov     1, d0
     call    AllOff, 0, 0
+    call    KeysRestore, 0, 0       # the firmware has left: the keybed's sound back on
     clr     d0
     mov     d0, (AU_ENABLED)
     mov     MODE_OFF, d0

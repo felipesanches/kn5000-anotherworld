@@ -1246,8 +1246,10 @@ dim_set:
     mov     d1, (DV_MODE)
     rets
 
-# DspModeText: DV_MODETXT = the help screen's line for the sound mode: "NOW: DSP SAMPLES", "NOW: TONE
-# GENERATOR", "NOW: OFF", and " NO DSP n" when the DSP was given up (DV_FAIL, the DF_* codes above).
+# DspModeText: the help screen's first page's status lines. DV_MODETXT = the sound mode: "NOW: DSP SAMPLES", "NOW:
+# TONE GENERATOR", "NOW: OFF", and " NO DSP n" when the DSP was given up (DV_FAIL, the DF_* codes above); DV_KEYSTXT =
+# the keybed's own sound (audio.s AU_KEYWANT): "KEYBED SOUND: ON" / "OFF"; DV_BANKTXT = the sample bank: "SENT IN
+# 12.3 S" (this run sent it), "CHECKED IN 0.3 S" (it was there: the DSP's checksum only), or "NOT LOADED".
 DspModeText:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
@@ -1281,6 +1283,42 @@ dmt_one:
     movbu   d0, (a0)
     inc     a0
 dmt_end:
+    clr     d0
+    movbu   d0, (a0)
+    mov     DV_KEYSTXT, a0          # the keybed's own sound
+    mov     hs_keys, a1
+    call    StrPut, 0, 0
+    mov     hs_on, a1
+    mov     (AU_KEYWANT), d0
+    cmp     0, d0
+    beq     dmt_keys
+    mov     hs_off, a1
+dmt_keys:
+    call    StrPut, 0, 0
+    clr     d0
+    movbu   d0, (a0)
+    mov     DV_BANKTXT, a0          # the sample bank
+    mov     hs_bank_none, a1
+    mov     (DV_READY), d0
+    cmp     0, d0
+    beq     dmt_bank_put
+    mov     hs_bank_sent, a1
+    mov     (DV_BK_SENT), d0
+    cmp     1, d0
+    beq     dmt_bank_t
+    mov     hs_bank_kept, a1
+dmt_bank_t:
+    call    StrPut, 0, 0
+    mov     a0, a2                  # (Div uses a0)
+    mov     (DV_BK_MS), d0          # tenths of a second
+    mov     100, d1
+    call    Div, 0, 0
+    mov     a2, a0
+    mov     0x101, d1
+    call    FmtNum, 0, 0
+    mov     hs_bank_s, a1
+dmt_bank_put:
+    call    StrPut, 0, 0
     clr     d0
     movbu   d0, (a0)
     ret     [d2,d3,a2,a3], 0x20
@@ -1544,6 +1582,20 @@ hs_now_off:
     .asciz  "OFF"
 hs_nodsp:
     .asciz  " NO DSP "
+hs_keys:
+    .asciz  "KEYBED SOUND: "
+hs_on:
+    .asciz  "ON"
+hs_off:
+    .asciz  "OFF"
+hs_bank_none:
+    .asciz  "NOT LOADED"
+hs_bank_sent:
+    .asciz  "SENT IN "
+hs_bank_kept:
+    .asciz  "CHECKED IN "
+hs_bank_s:
+    .asciz  " S"
 WriteHead:  # the guarded data write's first 8 bytes, less the dead flag's address (941 0x48404EF8)
     .byte   0xf8, 0x97, 0x1c, 0xf8, 0x93, 0x18, 0xfc, 0xa8
     .align  2

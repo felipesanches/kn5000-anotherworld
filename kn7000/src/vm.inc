@@ -177,6 +177,7 @@
 .equ HELP_PAGES,      4              # the fourth: the speed figures (perf.s)
 .equ HELP_TICK,       VM_MISC_BASE + 0x0120     # u32: help polls since the page was last shown
 .equ HELP_REFRESH,    16             # re-show the page every 16 polls (~0.5 s)
+.equ HELP_SNDSTATE,  VM_MISC_BASE + 0x0124     # u32: the sound mode, keybed sound and DSP failure the page shows
 
 # Splash: by default the game starts like the KN5000 port, at the copy-protection part's logo and
 # credits sequence (bytecode 0x007B), which then loads the intro. A probe that needs the old start
