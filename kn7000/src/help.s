@@ -204,7 +204,8 @@ hd_done:
     call    BlitPage, 0, 0
     ret     [d2,d3,a2,a3], 0x20
 
-# HelpText(a3 = NUL-terminated text, d0 = x, d1 = y, d2 = colour): 8x8 glyphs from AW_FONT.
+# HelpText(a3 = NUL-terminated text, d0 = x, d1 = y, d2 = colour): 8x8 glyphs from AW_FONT, but '.' (a solid
+# 2x2 dot). The pages' items all lie inside the 320x200 page (DrawChar's clip).
 HelpText:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
@@ -217,7 +218,24 @@ ht_loop:
     inc     a3
     mov     (4, sp), d0
     mov     (8, sp), d1
+    cmp     0x2E, d3                # '.': the game font's is a small ring at the baseline, which read as
+    bne     ht_glyph                # "github°com" on the URL page: a solid dot instead, the size of ':''s
+    mov     320, d3
+    add     5, d1
+    mulu    d3, d1
+    add     3, d0
+    add     d1, d0
+    mov     (CUR_PAGE_1), a0
+    add     d0, a0
+    movbu   d2, (a0)
+    movbu   d2, (1, a0)
+    movbu   d2, (320, a0)
+    movbu   d2, (321, a0)
+    mov     0x2E, d3
+    bra     ht_next
+ht_glyph:
     call    DrawChar, 0, 0          # preserves d2 (colour), d3, a2, a3
+ht_next:
     mov     (4, sp), d0
     add     8, d0
     mov     d0, (4, sp)
