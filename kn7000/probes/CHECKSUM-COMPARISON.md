@@ -49,7 +49,7 @@ Diagnostic replays/analysis (scratch, `~/compartilhado/research-scratch/kn7000-a
 cd ~/compartilhado/tmp/kn7000-aw-reference/run
 REF_BIN=... refcksum ref_checksums.log 6000
 # our log
-cd ~/compartilhado/kn5000-anotherworld/kn7000 && make card
+cd ~/compartilhado/technics-anotherworld/kn7000 && make card
 AWCK_BIN=/path/our.bin AWCK_IDX=/path/our.idx AWCK_MAX=2650 \
  ../../mame-pr/kn7000 kn7000 -bios sp7001 -rompath ../../technics_romsets \
  -harddisk build/another_sd.img -autoboot_script probes/awcksum.lua -str 330 -window -nothrottle
@@ -155,12 +155,12 @@ pixel-faithful to the reference for that input. Any future divergence localizes 
 
 ### Reproduce (scripted)
 ```
-cd ~/compartilhado/kn5000-anotherworld/kn7000 && make card
+cd ~/compartilhado/technics-anotherworld/kn7000 && make card
 AWCK_MAX=230 ../../mame-pr/kn7000 kn7000 -bios sp7001 -rompath ../../technics_romsets \
   -harddisk build/another_sd.img -autoboot_script ~/compartilhado/research-scratch/awgen.lua -str 299 -window -nothrottle
 cd ~/compartilhado/tmp/kn7000-aw-reference/run && \
   .../replaycksum ~/compartilhado/tmp/aw-inputs.csv ~/compartilhado/tmp/replay_checksums.log 231
-cd ~/compartilhado/kn5000-anotherworld/kn7000 && \
+cd ~/compartilhado/technics-anotherworld/kn7000 && \
   python3 -I probes/cksum_pages.py ~/compartilhado/tmp/awgen_pages.bin ~/compartilhado/tmp/awgen_pages.idx ~/compartilhado/tmp/kn7000_checksums.log && \
   python3 -I probes/compare_frames.py ~/compartilhado/tmp/kn7000_checksums.log ~/compartilhado/tmp/replay_checksums.log
 ```

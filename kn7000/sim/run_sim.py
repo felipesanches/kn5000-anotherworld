@@ -6,7 +6,7 @@
 import sys, os
 sys.path.insert(0, os.path.abspath("/home/fsanches/compartilhado/kn7000_disassembly/tools"))
 import mn10300_sim as S
-code = open("/home/fsanches/compartilhado/kn5000-anotherworld/kn7000/sim/sim_test.bin", "rb").read()
+code = open("/home/fsanches/compartilhado/technics-anotherworld/kn7000/sim/sim_test.bin", "rb").read()
 mem = S.Mem.__new__(S.Mem)
 mem.ram = bytearray(0x2000000); mem.devram = bytearray(0x100000); mem.io_log = []
 mem.program = b""; mem.table = b""

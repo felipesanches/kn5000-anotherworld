@@ -15,7 +15,7 @@
 --   python3 -I probes/events_to_mid.py probes/sessions/2026-10-17-fsanches-misinput1-events.csv ~/compartilhado/tmp/mi.mid
 --   cd ~/compartilhado && M2_SD=1 ~/compartilhado/mame-pr/kn7000 -rompath ~/compartilhado/technics_romsets \
 --     -skip_gameinfo -window kn7000 -bios sp7001 \
---     -harddisk ~/compartilhado/kn5000-anotherworld/kn7000/build/another_sd.img \
+--     -harddisk ~/compartilhado/technics-anotherworld/kn7000/build/another_sd.img \
 --     -midiin2 ~/compartilhado/tmp/mi.mid -autoboot_script <this file> -str 20
 local M=manager.machine; local cpu=M.devices[":maincpu"]; local sp=cpu.spaces["program"]
 local function dump(h,nm) local st=sp:read_u32(h); local wr=sp:read_u32(h+12); local s={}

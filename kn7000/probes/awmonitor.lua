@@ -27,8 +27,8 @@
 -- Run (normal speed so you can play: no -nothrottle, and no -str, which would end the session):
 --   AW_SESSION=mytest ~/compartilhado/mame-pr/kn7000 -rompath ~/compartilhado/technics_romsets \
 --     -skip_gameinfo -window kn7000 -bios sp7001 \
---     -harddisk ~/compartilhado/kn5000-anotherworld/kn7000/build/another_sd.img \
---     -autoboot_script ~/compartilhado/kn5000-anotherworld/kn7000/probes/awmonitor.lua
+--     -harddisk ~/compartilhado/technics-anotherworld/kn7000/build/another_sd.img \
+--     -autoboot_script ~/compartilhado/technics-anotherworld/kn7000/probes/awmonitor.lua
 -- Add -midiin1 "<port>" to also drive it from a USB-MIDI controller.
 
 local M  = manager.machine

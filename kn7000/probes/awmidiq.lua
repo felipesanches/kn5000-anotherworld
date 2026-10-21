@@ -13,7 +13,7 @@
 --   python3 -I probes/gen_q_mid.py ~/compartilhado/tmp/q.mid
 --   cd ~/compartilhado && ~/compartilhado/mame-pr/kn7000 -rompath ~/compartilhado/technics_romsets \
 --     -skip_gameinfo -window kn7000 -bios sp7001 \
---     -harddisk ~/compartilhado/kn5000-anotherworld/kn7000/build/another_sd.img \
+--     -harddisk ~/compartilhado/technics-anotherworld/kn7000/build/another_sd.img \
 --     -midiin1 ~/compartilhado/tmp/q.mid -autoboot_script <this file> -str 30
 local M=manager.machine; local sp=M.devices[":maincpu"].spaces["program"]
 -- program 942 (SP7001) addresses; the default 941 build's are 0x10 lower

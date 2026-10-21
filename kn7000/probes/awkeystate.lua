@@ -9,7 +9,7 @@
 --   python3 -I probes/gen_q2_mid.py ~/compartilhado/tmp/q2.mid; mkdir -p ~/compartilhado/tmp/ks
 --   cd ~/compartilhado && KS_OUT=$HOME/compartilhado/tmp/ks ~/compartilhado/mame-pr/kn7000 \
 --     -rompath ~/compartilhado/technics_romsets -skip_gameinfo -window kn7000 -bios sp7001 \
---     -harddisk ~/compartilhado/kn5000-anotherworld/kn7000/build/another_sd.img \
+--     -harddisk ~/compartilhado/technics-anotherworld/kn7000/build/another_sd.img \
 --     -midiin1 ~/compartilhado/tmp/q2.mid -autoboot_script <this file> -str 40
 --   python3 -I probes/keystate_find.py ~/compartilhado/tmp/ks
 local M=manager.machine; local sp=M.devices[":maincpu"].spaces["program"]
