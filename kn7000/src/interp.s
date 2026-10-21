@@ -613,10 +613,11 @@ cp_ret:
 #   * Intro (0x3E81): any held keybed/MIDI key -> fire, so the player can skip the intro.
 #     The intro bytecode polls var[0xFE] (ACTION_MASK) and jumps to the first playable
 #     part.
-#   * Every other part: the keybed/MIDI note map and five control-panel buttons drive a
-#     full D-pad + fire (the firmware's debounced button bitmap, vm.inc PANEL_CPR/BTN_*, is
-#     read directly); the six hero variables are written exactly as rustyworld's
-#     update_player does. The original engine reads input the same way in every part.
+#   * Every other part: the keybed/MIDI note map drives a full D-pad + fire; the six hero
+#     variables are written exactly as rustyworld's update_player does. The original engine
+#     reads input the same way in every part. No control-panel button moves the player (they
+#     did until 2026-10-21: R1/R2 OCTAVE +/-, PART SELECT LEFT / RIGHT 1, SUSTAIN); the panel
+#     keeps HELP, OTHER PART & FR, PAGE UP/DOWN, PART SELECT RIGHT 2 and EXIT.
 # Keys come from the note trackers (vm.inc NOTES_*), brought up to date here each frame.
 ReadInput:
     movm    [d2,d3,a2,a3], (sp)
@@ -668,40 +669,11 @@ ri_clear:
     call    WriteVar, 0, 0
     bra     ri_ret
 
-# ---- water part: panel D-pad + fire. Build the AW input mask in d2, then derive and
+# ---- gameplay: keybed/MIDI D-pad + fire. Build the AW input mask in d2, then derive and
 #      write the six hero variables (d2 is preserved across WriteVar). ----
 ri_gameplay:
-    clr     d2                      # d2 = OR of held inputs' AW masks
-    mov     (FWV_PANEL), a0         # RIGHT -> mask |= 1
-    movbu   (BTN_RIGHT_OFS, a0), d0
-    and     BTN_RIGHT_BIT, d0
-    beq     rig_nr
-    or      1, d2
-rig_nr:
-    mov     (FWV_PANEL), a0         # LEFT -> mask |= 2
-    movbu   (BTN_LEFT_OFS, a0), d0
-    and     BTN_LEFT_BIT, d0
-    beq     rig_nl
-    or      2, d2
-rig_nl:
-    mov     (FWV_PANEL), a0         # DOWN -> mask |= 4
-    movbu   (BTN_DOWN_OFS, a0), d0
-    and     BTN_DOWN_BIT, d0
-    beq     rig_nd
-    or      4, d2
-rig_nd:
-    mov     (FWV_PANEL), a0         # UP -> mask |= 8
-    movbu   (BTN_UP_OFS, a0), d0
-    and     BTN_UP_BIT, d0
-    beq     rig_nu
-    or      8, d2
-rig_nu:
-    mov     (FWV_PANEL), a0         # FIRE -> mask |= 0x80
-    movbu   (BTN_FIRE_OFS, a0), d0
-    and     BTN_FIRE_BIT, d0
-    beq     rig_nf
-    or      0x80, d2
-rig_nf:
+    clr     d2                      # d2 = OR of held inputs' AW masks (the keybed and MIDI IN only:
+                                    # no panel button is a game control, Felipe 2026-10-21)
     # --- fold in the held keybed/MIDI notes: note <= 60 (bass + C4) = action; F5 left,
     #     A5 down, C6 right, Bb5/B5 up. Every held direction's bit is OR'd in; an opposing
     #     pair is left for the sticky derive below, and diagonals keep both bits. ---
@@ -742,8 +714,8 @@ rkb_nu:
     beq     rkb_done
     or      1, d3
 rkb_done:
-    or      d3, d2                  # fold the note mask into the panel mask
-    # d2 = panel mask | note mask (bits R=1 L=2 D=4 U=8 A=0x80), possibly with BOTH bits of
+    or      d3, d2                  # d2 = the note mask
+    # d2 = the note mask (bits R=1 L=2 D=4 U=8 A=0x80), possibly with BOTH bits of
     # an axis set when opposing keys are held at once. Resolve each axis with a STICKY rule:
     # one direction alone wins; both held keeps the LAST-APPLIED direction (PREV_*_BITS) until a
     # key is released; neither = 0. Sticky is deterministic and brush-proof: a quick brush of

@@ -13,8 +13,9 @@
 --   splash   the splash (part 0x3E80, loaded from the SD card) plays
 --   intro    it hands over to the intro (0x3E81, loaded at the switch)
 --   skip     holding C4 (keybed) skips the intro: the lake (0x3E82)
---   panel    the panel's D-pad and fire (PART SELECT RIGHT 1 / LEFT, R1/R2 OCTAVE + / -, SUSTAIN twice)
---            each set their hero variable (var[0xFC] +1 / -1, var[0xE5] -1 / +1, var[0xFA] 1)
+--   panel    the panel's former D-pad and fire (PART SELECT RIGHT 1 twice / LEFT, R1/R2 OCTAVE + / -, SUSTAIN
+--            twice) set no hero variable (var[0xFC], var[0xE5], var[0xFA]): no panel button is a game control
+--            since 2026-10-21 (RIGHT 1 is now the keybed-sound toggle, pressed twice so it ends as it began)
 --   settings IC23's live panel settings (its header) end as they began; the firmware's own effect of
 --            each press (it still handles OCTAVE and SUSTAIN while parked) is listed
 --   keybed   holding C4 sets the hero's action variable var[0xFA] to 1
@@ -341,7 +342,8 @@ local function game()
   ok = ok and wait_until(function() return sp:read_u32(LD_CUR) == 0x3E82 end, 60)
   wait(4)
   result("skip", ok, string.format("part %04X frame %d; lake files loaded in %d ms", part(), frame(), sp:read_u32(LD_MS)))
-  -- the five panel buttons of the D-pad and fire, each with the hero variable it must set. While
+  -- the five panel buttons that were the D-pad and fire until 2026-10-21, each with the hero variable it
+  -- must NOT set any more (it is "(moved)" in the result if it does). While
   -- AW.CNV parks the firmware, the firmware still acts on R1/R2 OCTAVE + / - (the octave setting,
   -- IC23 header byte 0x6EA) and SUSTAIN (header 0xCE bit 0x08): awcnv_panelsettings.lua. So they
   -- are pressed in pairs that cancel (+ then -, SUSTAIN twice), each press's effect on IC23's header
@@ -358,18 +360,19 @@ local function game()
   -- the pairs come first and the two PART SELECT presses after them)
   for _, b in ipairs({ { "FIRE", "CPR_SEG5", 0x08, 0xFA, 1 }, { "FIRE", "CPR_SEG5", 0x08, 0xFA, 1 },
                        { "UP", "CPR_SEG6", 0x02, 0xE5, -1 }, { "DOWN", "CPR_SEG7", 0x02, 0xE5, 1 },
-                       { "RIGHT", "CPR_SEG1", 0x02, 0xFC, 1 }, { "LEFT", "CPR_SEG2", 0x01, 0xFC, -1 } }) do
+                       { "RIGHT", "CPR_SEG1", 0x02, 0xFC, 1 }, { "RIGHT", "CPR_SEG1", 0x02, 0xFC, 1 },
+                       { "LEFT", "CPR_SEG2", 0x01, 0xFC, -1 } }) do
     local hb = header()
     local ok = press_while(b[2], b[3], function() return var(b[4]) == b[5] end, 1.5)
     wait(2)
-    got[#got + 1] = b[1] .. (ok and "" or "(no)")
+    got[#got + 1] = b[1] .. (ok and "(moved)" or "")
     local d = diff(hb, header())
     if d ~= "" then fx[#fx + 1] = b[1] .. "->" .. d end
   end
   wait(3)
   local dend = diff(h0, header())
-  local all = not table.concat(got, " "):find("no")
-  result("panel", all, "each button set its hero variable: " .. table.concat(got, " "))
+  local all = not table.concat(got, " "):find("moved")
+  result("panel", all, "no button set its hero variable: " .. table.concat(got, " "))
   result("settings", dend == "", string.format("header bytes the firmware changed per press: %s; changed at the end: %s",
     #fx > 0 and table.concat(fx, " ") or "none", dend ~= "" and dend or "none"))
   wait(1); local seen = 0

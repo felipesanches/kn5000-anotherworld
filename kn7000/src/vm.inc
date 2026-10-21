@@ -151,18 +151,9 @@
 .equ FWV_MIDIOUT1,    VM_MISC_BASE + 0x020C     # u32: MIDI OUT 1 transmit ring header (the keybed)
 .equ PANEL_CPL_OFS,   0x30           # PANEL_CPL - PANEL_CPR
 
-# The Another World D-pad + fire, as offsets from FWV_PANEL. Buttons chosen for mnemonic labels
-# and for landing in distinct bytes, so any combination can be held and read at once.
-.equ BTN_LEFT_OFS,    2              # PART SELECT LEFT     (CPR_SEG2 SW0)
-.equ BTN_LEFT_BIT,    0x01
-.equ BTN_RIGHT_OFS,   1              # PART SELECT RIGHT 1  (CPR_SEG1 SW1)
-.equ BTN_RIGHT_BIT,   0x02
-.equ BTN_UP_OFS,      6              # R1/R2 OCTAVE +       (CPR_SEG6 SW1)
-.equ BTN_UP_BIT,      0x02
-.equ BTN_DOWN_OFS,    7              # R1/R2 OCTAVE -       (CPR_SEG7 SW1)
-.equ BTN_DOWN_BIT,    0x02
-.equ BTN_FIRE_OFS,    5              # SUSTAIN              (CPR_SEG5 SW3)
-.equ BTN_FIRE_BIT,    0x08
+# No panel button is a game control (Felipe, 2026-10-21): until then PART SELECT LEFT (CPR_SEG2 SW0),
+# PART SELECT RIGHT 1 (CPR_SEG1 SW1), R1/R2 OCTAVE + (CPR_SEG6 SW1), R1/R2 OCTAVE - (CPR_SEG7 SW1) and
+# SUSTAIN (CPR_SEG5 SW3) were left, right, up, down and fire. The keybed and MIDI IN play the game.
 
 # The port's own buttons (measured with probes/awbtnmap5.lua, as above): HELP shows the help
 # screens, OTHER PART & FR opens the password (level code) screen, PAGE UP/DOWN and EXIT drive

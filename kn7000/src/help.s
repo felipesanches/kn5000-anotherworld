@@ -136,36 +136,14 @@ HelpSleep:
     call    NotePoll, 0, 0
     ret     [d2,d3,a2,a3], 0x20
 
-# HelpGameInput -> d0 != 0 while any game control is held: a keybed or MIDI note, or one of the
-# five panel buttons of the D-pad and fire.
+# HelpGameInput -> d0 while any game control is held: a keybed or MIDI note (no panel button
+# is a game control).
 HelpGameInput:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x10, sp
-    clr     d2
-    mov     (FWV_PANEL), a0
-    movbu   (BTN_LEFT_OFS, a0), d0
-    and     BTN_LEFT_BIT, d0
-    or      d0, d2
-    mov     (FWV_PANEL), a0
-    movbu   (BTN_RIGHT_OFS, a0), d0
-    and     BTN_RIGHT_BIT, d0
-    or      d0, d2
-    mov     (FWV_PANEL), a0
-    movbu   (BTN_UP_OFS, a0), d0
-    and     BTN_UP_BIT, d0
-    or      d0, d2
-    mov     (FWV_PANEL), a0
-    movbu   (BTN_DOWN_OFS, a0), d0
-    and     BTN_DOWN_BIT, d0
-    or      d0, d2
-    mov     (FWV_PANEL), a0
-    movbu   (BTN_FIRE_OFS, a0), d0
-    and     BTN_FIRE_BIT, d0
-    or      d0, d2
     clr     d0                      # any note 0..127
     mov     127, d1
     call    NotesAnyHeld, 0, 0
-    or      d2, d0
     ret     [d2,d3,a2,a3], 0x20
 
 # HelpDrawPage: draw page HELP_PAGE_NO (help_pages) into HELP_BUF and show it.
