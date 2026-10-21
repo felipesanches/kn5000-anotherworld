@@ -61,8 +61,8 @@ your own copy of the game by `make sdcard` (`tools/aw_extract.py --parts`), and 
 `KN7APP.BIN` and `AWBANK.AW` are generated from the same `MEMLIST.BIN`, so the card must carry the files
 the same build wrote.
 `KN7APP.BIN`'s SHA-1 for the build in this repository and the MS-DOS release in `../../MSDOS/`:
-`7f8ed09a4fb2df12023451dd7164ff1a13207c75` (round 3: the coded bank, the keybed-only controls, the keybed-sound
-key; `build/sdcard.txt` lists it with the rest). The builds before it that ran on Felipe's KN7000: `a2fbbaa6...`
+`94910f68eec0fd4839ab2eb2842311e4ed07028f` (round 3, `7f8ed09a...`: the coded bank, the keybed-only controls, the
+keybed-sound key; then UP moved to A♭5 or B♭5; `build/sdcard.txt` lists it with the rest). The builds before it that ran on Felipe's KN7000: `a2fbbaa6...`
 (the DSP sound) and `97fbd9e6...` (the first sound build, tone generator only).
 
 **With the program menu (2026-10-20): the game in a folder of its own, `AW\`.** The card's root
