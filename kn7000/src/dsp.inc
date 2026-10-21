@@ -33,12 +33,12 @@
 .equ DV_RBFAIL,    DSP_HOST + 0x5C  # the last readback stopped early
 .equ DV_MODE,      DSP_HOST + 0x60  # the sound mode (audio.s): MODE_DSP, MODE_TG, MODE_OFF
 .equ DV_READY,     DSP_HOST + 0x64  # 1: the mixer is loaded and the whole bank is in SDRAM
-.equ DV_BK_RES,    DSP_HOST + 0x68  # the bank upload: the resource id being sent (or the next to look at)
-.equ DV_BK_OFS,    DSP_HOST + 0x6C  #   bytes of its samples sent; -1: its file is not read yet
-.equ DV_BK_LEN,    DSP_HOST + 0x70  #   bytes to send (whole copy steps)
-.equ DV_BK_DONE,   DSP_HOST + 0x74  #   words sent so far, all sounds
+.equ DV_BK_FILE,   DSP_HOST + 0x68  # the bank upload (BankStep): the next card file AWSBn.AW
+.equ DV_BK_PTR,    DSP_HOST + 0x6C  #   the next block in PART_AREA (0: no file in hand)
+.equ DV_BK_LEN,    DSP_HOST + 0x70  #   the end of the file in hand (written once it is read: the probes' mark)
+.equ DV_BK_DONE,   DSP_HOST + 0x74  #   bank words decoded or being decoded so far
 .equ DV_BK_T0,     DSP_HOST + 0x78  #   this call's start (ms)
-.equ DV_BK_SENT,   DSP_HOST + 0x7C  # 1: this run sent the bank; 2: it was already in SDRAM (the marker)
+.equ DV_BK_SENT,   DSP_HOST + 0x7C  # 1: this run sent the bank; 2: it was already in SDRAM (the marker) and checked
 .equ DV_PEND,      DSP_HOST + 0x80  # the commands not yet sent: bit v start, 8+v rate and volume, 16+v stop
 .equ DV_LASTCALLS, DSP_HOST + 0x84  # the watchdog (DspWatch): converter calls last seen,
 .equ DV_LASTMS,    DSP_HOST + 0x88  #   and when they last changed
@@ -51,10 +51,16 @@
 .equ DV_SIGA1,     DSP_HOST + 0xA4
 .equ DV_HB0,       DSP_HOST + 0xA8  # MSGR7 when the slots were hooked (the mixer's heartbeat)
 .equ DV_TMP,       DSP_HOST + 0xAC
+.equ DV_BK_BUF,    DSP_HOST + 0xB0  # the bank upload: the staging buffer the next block goes to (0 / 1)
+.equ DV_BK_HELD,   DSP_HOST + 0xB4  #   1: that block is uploaded, not yet handed to the decoder
+.equ DV_BK_PHASE,  DSP_HOST + 0xB8  #   0 blocks, 1 the checksum asked for
+.equ DV_BK_MS,     DSP_HOST + 0xBC  #   when the bank began (ms); once it is ready, how long it took (the help screen)
 .equ DV_CMDS,      DSP_HOST + 0xC0  # 8 x 5 u32: the command records as the mixer reads them (BASE, INC, END,
                                     #   LOOP, VOL), uploaded as they are: low half first, as the DMA wants them
 .equ DV_NAME,      DSP_HOST + 0x180 # 16 bytes: "AWRxx.AW", the sound file being read
 .equ DV_MODETXT,   DSP_HOST + 0x1A0 # 48 bytes: the help screen's sound line (DspModeText)
+.equ DV_KEYSTXT,   DSP_HOST + 0x1D0 # 24 bytes: its keybed-sound line
+.equ DV_BANKTXT,   DSP_HOST + 0x1E8 # 24 bytes: how long the sample bank took
 .equ DV_RBBUF,     DSP_HOST + 0x200 # 0x200 bytes: words read back (6 bytes a PM word, 4 a DM word)
 .equ RB_WORDS,     0x50             # PM words read back at a time (0x50 x 6 = 0x1E0 bytes)
 
@@ -82,6 +88,7 @@
 .equ DF_RUNDEAD,   10               #   the dead flag was set while the bank was sent
 .equ DF_WATCH,     11               #   the firmware stopped calling the converter: released (DspWatch)
 .equ DF_RUNTIME,   12               #   the dead flag was set while playing
+.equ DF_SUM,       13               #   the bank's checksum (the DSP's, over SDRAM) is not AWBANK.AW's
 
 .equ MODE_DSP,     0                # DV_MODE (audio.s)
 .equ MODE_TG,      1
@@ -104,21 +111,23 @@
 .equ DMAC_KEEP,    0x1FE4           # the bits put back: not DEN, CHEN, the read-only PS/FS, not FLSH
 .equ DATA_PORT,    0x9C4            # the firmware's id of the data port 0x9C000000
 .equ FS_POLLS,     1000             # DMAC0 reads waiting for EPB0 to hold a word (readback)
-.equ COPY_POLLS,   400              # MSGR4 reads waiting for the mixer to finish a copy, per chunk
+.equ COPY_POLLS,   400              # MSGR4 reads waiting for the decoder to finish a block (or the checksum)
 .equ CMD_POLLS,    20               # MSGR6 reads waiting for the mixer to take the last commands
-.equ STALL_CALLS,  40               # BankStep calls in a row without a finished copy: the bank gives up
-.equ BANK_MS,      200              # bank work per converter call
+.equ STALL_CALLS,  40               # BankStep calls in a row without a finished block: the bank gives up
+.equ BANK_MS,      400              # bank work per converter call
 .equ WATCH_MS,     5000             # no converter call for this long: the firmware has left (DspWatch)
-.equ MARK_MAGIC,   0x42535741       # "AWSB", DM 0x9D00
+.equ MARK_MAGIC,   0x32535741       # "AWS2", DM 0x9D00 (the coded bank, 2026-10-21; "AWSB" before)
 .equ BT_COUNT,     0x04             # AWBANK.AW (tools/aw_extract.py): entries (one per resource id)
 .equ BT_ID,        0x08             #   the bank's id (CRC-32 of its layout and samples)
 .equ BT_WORDS,     0x0C             #   words in SDRAM, all sounds
-.equ BT_ENT,       0x10             #   the entries: 20 bytes per resource id
+.equ BT_SUM,       0x10             #   its checksum (tools/dsp_bank.py checksum: the DSP's, over SDRAM)
+.equ BT_FILES,     0x14             #   the card files AWSB0.AW ... that hold it, Rice-coded (tools/dsp_bank.py)
+.equ BT_ENT,       0x20             #   the entries: 20 bytes per resource id
 .equ BE_ADDR,      0x00             #     the DSP address of its first word (0: not in the bank)
 .equ BE_END,       0x04             #     samples (bytes) in all: the first part and the loop
 .equ BE_LOOP,      0x08             #     samples in the loop (0: none)
-.equ BE_FILE,      0x0C             #     bytes of AWRxx.AW (as MEMLIST.BIN finds it in BANKxx)
-.equ BE_SIZE,      0x10             #     bytes unpacked; bit 31: a music instrument (its first 4 samples zeroed)
+.equ BE_SIZE,      0x10             #     the resource's size; bit 31: a music instrument (its first 4 samples zeroed)
 .equ BE_LEN,       20
-.equ BANK_PACKED,  PART_AREA + 0x10000  # where a packed sound file is read; it is unpacked to PART_AREA
+.equ BANK_FILE_MAX, 0x10000         # an AWSBn.AW is read whole into PART_AREA (tools/dsp_bank.py FILE_MAX: 32 KB)
+.equ BK_REC_MIN,   3                # a block: header (2 words) and at least one word of stream
 

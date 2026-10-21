@@ -257,21 +257,24 @@ def unpack_in_place(packed, size):
 def sound_bank(T, ents, raw, L):
     """The sample bank the effects DSP plays (src/dsp.s, tools/dsp_mixer.py; README-CNV.md "Sound"): every sound
     resource some part's bytecode plays (PLAY_SOUND), loads (LOAD) or uses as a music instrument (the modules its
-    bytecode plays or loads), as its own card file AWRxx.AW (the bytes MEMLIST.BIN points at, packed or stored),
-    and the table AWBANK.AW that says where each one goes in the DSP's SDRAM. The game sends the whole bank once
-    (it stays in SDRAM until the power goes off; the bank's id, a CRC-32 of the table and the samples, tells a later
-    run that it is there).
+    bytecode plays or loads), laid out as the DSP's SDRAM will hold it, Rice-coded by tools/dsp_bank.py into the
+    card files AWSB0.AW, AWSB1.AW ... (decoded by the DSP), and the table AWBANK.AW that says where each sound is in
+    SDRAM. The game sends the whole bank once (it stays in SDRAM until the power goes off; the bank's id, a CRC-32
+    of the table and the samples, tells a later run that it is there, and the DSP's checksum of the SDRAM, compared
+    with the one here, that it is intact).
 
     A sound resource: u16 BE len, u16 BE loop length (in words), 4 bytes, then the 8-bit signed samples: len*2
     played once, then loop*2 repeated (rawgl Mixer playSoundRaw, SfxPlayer handlePattern). In SDRAM: four samples a
     32-bit word, the first in the low byte, each sound from a word that is a whole number of copy steps
-    (dsp_mixer.COPY_STEP words) past the bank's first, so the copy never runs into the next sound.
+    (dsp_mixer.COPY_STEP words) past the bank's first, the words between two sounds zero; a music instrument's
+    first four samples zeroed (rawgl prepareInstruments).
 
-    AWBANK.AW (little-endian): "AWBK", u32 entries (one per resource id), u32 the bank's id, u32 words in all;
-    then per resource id 20 bytes: u32 the DSP address of its first word (0: not in the bank), u32 samples in all
-    (len*2 + loop*2), u32 samples in the loop (0: none), u32 bytes of its card file, u32 its unpacked size with
-    bit 31 set for a music instrument (rawgl prepareInstruments zeroes an instrument's first four samples)."""
+    AWBANK.AW (little-endian): "AWBK", u32 entries (one per resource id), u32 the bank's id, u32 words in all,
+    u32 the bank's checksum (dsp_bank.checksum), u32 the card files AWSBn.AW, u32 0, u32 0; then per resource id
+    20 bytes: u32 the DSP address of its first word (0: not in the bank), u32 samples in all (len*2 + loop*2), u32
+    samples in the loop (0: none), u32 0, u32 its unpacked size with bit 31 set for a music instrument."""
     import aw_partinfo
+    import dsp_bank
     import dsp_mixer
     sounds, insts = set(), set()
     for pid, name, pal, cod, v1, v2id in aw_partinfo.PARTS:
@@ -286,7 +289,7 @@ def sound_bank(T, ents, raw, L):
                     insts.add(r)
     ids = sorted(i for i in sounds | insts if T[i]["size"] >= 8)
     step = dsp_mixer.COPY_STEP
-    at, tab, files, crc = 0, {}, {}, 0
+    at, tab, crc, image = 0, {}, 0, bytearray()
     for i in ids:
         e = T[i]
         data = raw(i) if e["packed"] == e["size"] else unpack(raw(i), e["size"])
@@ -297,20 +300,26 @@ def sound_bank(T, ents, raw, L):
         if len(raw(i)) >= 0x10000 or e["size"] >= 0x10000:      # src/dsp.s BankRead's staging space
             raise SystemExit(f"aw_extract: sound 0x{i:02X} is too large for the bank's staging space")
         words = (end + 4 * step - 1) // (4 * step) * step
-        tab[i] = (dsp_mixer.BANK + at, end, loop, len(raw(i)), e["size"] | (0x80000000 if i in insts else 0))
+        tab[i] = (dsp_mixer.BANK + at, end, loop, 0, e["size"] | (0x80000000 if i in insts else 0))
         crc = zlib.crc32(struct.pack("<IIII", i, dsp_mixer.BANK + at, end, loop), crc)
         crc = zlib.crc32(data[8:8 + end], crc)
-        files[f"AWR{i:02X}.AW"] = raw(i)
+        smp = bytearray(data[8:8 + end])
+        if i in insts:
+            smp[0:4] = bytes(min(4, len(smp)))
+        image += smp + bytes(4 * words - len(smp))
         at += words
     if at > dsp_mixer.BANK_MAX:
         raise SystemExit(f"aw_extract: the sample bank needs {at} words of SDRAM; {dsp_mixer.BANK_MAX} are set aside")
-    out = b"AWBK" + struct.pack("<III", len(ents), crc, at)
+    files, csum, blocks = dsp_bank.build(bytes(image))
+    out = b"AWBK" + struct.pack("<IIIIIII", len(ents), crc, at, csum, len(files), 0, 0)
     for i in range(len(ents)):
         out += struct.pack("<IIIII", *tab.get(i, (0, 0, 0, 0, 0)))
     if len(out) > L["DSP_BANKTAB_MAX"]:
         raise SystemExit(f"aw_extract: AWBANK.AW is {len(out)} bytes; DSP_BANKTAB holds {L['DSP_BANKTAB_MAX']}")
     print(f"aw_extract: the DSP's sample bank: {len(ids)} sounds ({len(insts)} music instruments), "
-          f"{sum(t[1] for t in tab.values()):,} samples in {at:,} SDRAM words, id {crc:08X}", file=sys.stderr)
+          f"{sum(t[1] for t in tab.values()):,} samples in {at:,} SDRAM words, id {crc:08X}; coded "
+          f"{4 * at:,} -> {sum(map(len, files.values())):,} bytes, {len(blocks)} blocks in {len(files)} files, "
+          f"{sum(2 * len(b) for b in blocks):,} host-port halves, checksum {csum:08X}", file=sys.stderr)
     return out, files
 
 

@@ -708,7 +708,19 @@ dpr_load:
     mov     DF_HOOK, d2
     cmp     0, d0
     bne     dpr_fail
-    mov     DSP_MARK, d0            # the bank already in SDRAM? ("AWSB" and this bank's id)
+    call    DspNow, 0, 0            # the bank's time starts here (the help screen shows it)
+    mov     d0, (DV_BK_MS)
+    clr     d0
+    mov     d0, (DV_BK_FILE)
+    mov     d0, (DV_BK_PTR)
+    mov     d0, (DV_BK_DONE)
+    mov     d0, (DV_STALLS)
+    mov     d0, (DV_BK_BUF)
+    mov     d0, (DV_BK_HELD)
+    mov     d0, (DV_BK_PHASE)
+    mov     DS_BANK, d0
+    mov     d0, (DV_STATE)
+    mov     DSP_MARK, d0            # the bank already in SDRAM? ("AWS2" and this bank's id)
     mov     2, d1
     mov     DV_RBBUF, a0
     mov     DMAC_RB_DM, a1
@@ -725,31 +737,13 @@ dpr_load:
     mov     (DSP_BANKTAB + BT_ID), d1
     cmp     d1, d0
     bne     dpr_send
-    mov     2, d0                   # there: nothing to send
+    mov     2, d0                   # there: the DSP's checksum of it decides (BankStep), nothing is sent
     mov     d0, (DV_BK_SENT)
-    mov     DS_READY, d0
-    mov     d0, (DV_STATE)
-    mov     1, d0
-    mov     d0, (DV_READY)
+    call    BankSumAsk, 0, 0
     clr     d0
     bra     dpr_ret
 dpr_send:
-    mov     DV_RBBUF, a0            # the marker cleared until the whole bank is there again
-    clr     d0
-    mov     d0, (a0)
-    mov     d0, (4, a0)
-    mov     DSP_MARK, d0
-    mov     2, d1
-    mov     DMAC_UP_DM, a1
-    call    DspUpload, 0, 0
-    clr     d0
-    mov     d0, (DV_BK_RES)
-    mov     d0, (DV_BK_DONE)
-    mov     d0, (DV_STALLS)
-    mov     -1, d0
-    mov     d0, (DV_BK_OFS)
-    mov     DS_BANK, d0
-    mov     d0, (DV_STATE)
+    call    MarkClear, 0, 0         # the marker cleared until the whole bank is there again
     clr     d0
     bra     dpr_ret
 dpr_fail:
@@ -923,121 +917,197 @@ BankEntry:
     add     d0, a0
     rets
 
-# BankStep -> d0 = 0 more to come, 1 the bank is in SDRAM (DS_READY), 2 it failed (DspGiveUp has run). BANK_MS
-# of work: read and unpack the next sound's file, send its samples a chunk at a time.
+# MarkClear: DM MARK = 0, 0 (the bank is not known to be there).
+MarkClear:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     DV_RBBUF, a0
+    clr     d0
+    mov     d0, (a0)
+    mov     d0, (4, a0)
+    mov     DSP_MARK, d0
+    mov     2, d1
+    mov     DMAC_UP_DM, a1
+    call    DspUpload, 0, 0
+    ret     [d2,d3,a2,a3], 0x30
+
+# BankSumAsk: the DSP is to compute the checksum of the bank's words in SDRAM (MSGR5 = words, then MSGR4 = 2);
+# BankStep reads the answer.
+BankSumAsk:
+    movm    [d2,d3,a2,a3], (sp)
+    add     -0x20, sp
+    mov     DSP_MSGR5, d0
+    mov     (DSP_BANKTAB + BT_WORDS), d1
+    call    DspWrite, 0, 0
+    mov     DSP_MSGR4, d0
+    mov     2, d1
+    call    DspWrite, 0, 0
+    mov     1, d0
+    mov     d0, (DV_BK_PHASE)
+    ret     [d2,d3,a2,a3], 0x30
+
+# BankStep -> d0 = 0 more to come, 1 the bank is in SDRAM and checked (DS_READY), 2 it failed (DspGiveUp has run).
+# BANK_MS of work a converter call (tools/dsp_bank.py says what the files hold):
+#   * no file in hand: read the next AWSBn.AW whole into PART_AREA (BankRead); after the last, ask the DSP for the
+#     bank's checksum;
+#   * a block in hand: upload it into the staging buffer DV_BK_BUF (while the DSP decodes the one before, in the
+#     other), wait until the decoder is idle (MSGR4 = 0: the block before is in SDRAM), then hand it over
+#     (MSGR5 = the buffer, MSGR4 = 1);
+#   * the checksum asked for: once MSGR4 reads 0, MSGR5 holds it. Equal to AWBANK.AW's: the marker (when this run
+#     sent the bank) and DS_READY. Different: a bank found by its marker is sent again; one this run sent is given
+#     up (DF_SUM).
+# Every block is checked before it goes: its length, and that it stays inside the file and the bank.
 BankStep:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
     call    DspNow, 0, 0
     mov     d0, (DV_BK_T0)
+    clr     d0
+    mov     d0, (0x1C, sp)          # (0x1C, sp): 1 once this call has made progress
 bs_loop:
     call    DeadFlag, 0, 0
     cmp     0, d0
     bne     bs_dead
-    mov     (DV_BK_OFS), d0
+    mov     (DV_BK_PHASE), d0
     cmp     0, d0
-    bge     bs_chunk
-bs_find:                            # the next sound in the bank
-    mov     (DV_BK_RES), d2
-    cmp     RES_COUNT, d2
-    bcc     bs_end
-    mov     d2, d0
-    call    BankEntry, 0, 0
-    mov     (BE_ADDR, a0), d0
+    bne     bs_sum
+    mov     (DV_BK_PTR), d0
     cmp     0, d0
-    bne     bs_read
-    inc     d2
-    mov     d2, (DV_BK_RES)
-    bra     bs_find
-bs_read:
-    mov     d2, d0
-    call    BankRead, 0, 0          # its file, unpacked at PART_AREA
+    bne     bs_block
+    mov     (DV_BK_FILE), d0        # no file in hand: the next, or the checksum after the last
+    mov     (DSP_BANKTAB + BT_FILES), d1
+    cmp     d1, d0
+    bcc     bs_last
+    call    BankRead, 0, 0          # d0 = the file's index -> PART_AREA, DV_BK_PTR / DV_BK_LEN
     cmp     0, d0
     bne     bs_file
-    mov     (DV_BK_RES), d0
-    call    BankEntry, 0, 0
-    mov     (BE_END, a0), d0        # bytes to send: whole copy steps (DSP_COPY_STEP words)
-    add     DSP_COPY_STEP*4 - 1, d0
-    and     0xFFFFFFE0, d0          # (DSP_COPY_STEP 8: 32 bytes)
-    mov     d0, (DV_BK_LEN)
-    clr     d0
-    mov     d0, (DV_BK_OFS)
-    bra     bs_time
-bs_chunk:
-    call    CopyIdle, 0, 0          # the mixer has copied the last chunk out of STAGE?
+    mov     (DV_BK_FILE), d0
+    inc     d0
+    mov     d0, (DV_BK_FILE)
+    bra     bs_progress
+bs_last:
+    call    CopyIdle, 0, 0          # the last block decoded
     cmp     0, d0
-    beq     bs_waiting
-    clr     d0
-    mov     d0, (DV_STALLS)
-    mov     (DV_BK_LEN), d3
-    mov     (DV_BK_OFS), d2
-    sub     d2, d3                  # bytes left -> words, at most a STAGE's
-    lsr     2, d3
-    cmp     DSP_STAGE_WORDS, d3
-    bls     bs_n
-    mov     DSP_STAGE_WORDS, d3
-bs_n:
-    mov     PART_AREA + 8, a0       # the samples: after the resource's 8-byte header
-    add     d2, a0
-    mov     DSP_STAGE, d0
+    beq     bs_time
+    call    BankSumAsk, 0, 0
+    bra     bs_progress
+bs_block:
+    mov     (DV_BK_PTR), a2         # a2 = the block's record: u32 n, then its n DM words
+    mov     (a2), d3                # d3 = n
+    cmp     BK_REC_MIN, d3
+    bcs     bs_file
+    cmp     DSP_STAGE_HALF, d3
+    bhi     bs_file
+    mov     d3, d0                  # the record inside the file
+    asl     2, d0
+    add     4, d0
+    add     a2, d0
+    mov     (DV_BK_LEN), d1
+    cmp     d1, d0
+    bhi     bs_file
+    mov     (4, a2), d0             # its words inside the bank
+    mov     (8, a2), d1
+    add     d1, d0
+    mov     (DSP_BANKTAB + BT_WORDS), d1
+    cmp     d1, d0
+    bhi     bs_file
+    mov     (DV_BK_HELD), d0
+    cmp     0, d0
+    bne     bs_go
+    mov     (DV_BK_BUF), d0         # into the staging buffer the decoder is not using
+    mov     DSP_STAGE_HALF, d1
+    mulu    d1, d0
+    add     DSP_STAGE, d0
     mov     d3, d1
+    mov     a2, a0
+    add     4, a0
     mov     DMAC_UP_DM, a1
     call    DspUpload, 0, 0
-    mov     (DV_BK_RES), d0         # where: its first word, less the bank's, plus what is sent
-    call    BankEntry, 0, 0
-    mov     (BE_ADDR, a0), d1
-    mov     DSP_BANK, d0
-    sub     d0, d1
-    mov     d2, d0
-    lsr     2, d0
-    add     d0, d1
-    mov     DSP_MSGR5, d0
+    mov     1, d0
+    mov     d0, (DV_BK_HELD)
+bs_go:
+    call    CopyIdle, 0, 0          # the block before decoded?
+    cmp     0, d0
+    beq     bs_time                 # not yet: on, while the time lasts (the stall count is per call)
+    mov     DSP_MSGR5, d0           # hand it over
+    mov     (DV_BK_BUF), d1
     call    DspWrite, 0, 0
     mov     DSP_MSGR4, d0
-    mov     d3, d1
+    mov     1, d1
     call    DspWrite, 0, 0
+    clr     d0
+    mov     d0, (DV_BK_HELD)
+    mov     (DV_BK_BUF), d0
+    xor     1, d0
+    mov     d0, (DV_BK_BUF)
+    mov     (DV_BK_PTR), a2
     mov     (DV_BK_DONE), d0
-    add     d3, d0
+    mov     (8, a2), d1
+    add     d1, d0
     mov     d0, (DV_BK_DONE)
-    asl     2, d3
-    add     d3, d2
-    mov     d2, (DV_BK_OFS)
-    mov     (DV_BK_LEN), d0
-    cmp     d0, d2
-    bcs     bs_progress
-    mov     -1, d0                  # this sound is sent: the next one
-    mov     d0, (DV_BK_OFS)
-    mov     (DV_BK_RES), d0
-    inc     d0
-    mov     d0, (DV_BK_RES)
+    mov     (a2), d0                # the next record
+    asl     2, d0
+    add     4, d0
+    add     a2, d0
+    mov     (DV_BK_LEN), d1
+    cmp     d1, d0
+    bcs     bs_next
+    clr     d0                      # the file is done
+bs_next:
+    mov     d0, (DV_BK_PTR)
 bs_progress:
-    mov     (DV_BK_DONE), d0
-    mov     (DSP_BANKTAB + BT_WORDS), d1
-    call    Progress, 0, 0
+    mov     1, d0
+    mov     d0, (0x1C, sp)
 bs_time:
     call    DspNow, 0, 0
     mov     (DV_BK_T0), d1
     sub     d1, d0
     cmp     BANK_MS, d0
     bcs     bs_loop
-    clr     d0
-    bra     bs_ret
-bs_waiting:
-    mov     (DV_STALLS), d0         # no copy finished in COPY_POLLS reads: try again at the next call
+    mov     (DV_BK_DONE), d0        # the bar, once a call (the LCD is slow on the unit)
+    mov     (DSP_BANKTAB + BT_WORDS), d1
+    call    Progress, 0, 0
+    mov     (0x1C, sp), d0
+    cmp     0, d0
+    bne     bs_moved
+    mov     (DV_STALLS), d0         # a whole call without progress
     inc     d0
     mov     d0, (DV_STALLS)
     cmp     STALL_CALLS, d0
-    bcs     bs_wait_ret
+    bcs     bs_more
     mov     DF_STALL, d0
     bra     bs_fail
-bs_wait_ret:
+bs_moved:
+    clr     d0
+    mov     d0, (DV_STALLS)
+bs_more:
     clr     d0
     bra     bs_ret
-bs_end:                             # every sound sent: the last copy, then the marker
+bs_sum:                             # the checksum asked for: its answer
     call    CopyIdle, 0, 0
     cmp     0, d0
-    beq     bs_waiting
-    mov     DV_RBBUF, a0
+    beq     bs_time
+    mov     DSP_MSGR5, d0
+    call    DspRead, 0, 0
+    mov     (DSP_BANKTAB + BT_SUM), d1
+    cmp     d1, d0
+    beq     bs_good
+    mov     (DV_BK_SENT), d0        # different: a bank found by its marker is sent again
+    cmp     2, d0
+    bne     bs_bad
+    clr     d0
+    mov     d0, (DV_BK_SENT)
+    mov     d0, (DV_BK_PHASE)
+    call    MarkClear, 0, 0
+    bra     bs_progress
+bs_bad:
+    mov     DF_SUM, d0
+    bra     bs_fail
+bs_good:
+    mov     (DV_BK_SENT), d0
+    cmp     2, d0
+    beq     bs_ready
+    mov     DV_RBBUF, a0            # sent and checked: the marker, so that a later run sends nothing
     mov     MARK_MAGIC, d0
     mov     d0, (a0)
     mov     (DSP_BANKTAB + BT_ID), d0
@@ -1051,6 +1121,15 @@ bs_end:                             # every sound sent: the last copy, then the 
     bne     bs_dead
     mov     1, d0
     mov     d0, (DV_BK_SENT)
+bs_ready:
+    mov     (DSP_BANKTAB + BT_WORDS), d0
+    mov     d0, d1
+    call    Progress, 0, 0
+    call    DspNow, 0, 0            # how long the bank took, from DspPrepare
+    mov     (DV_BK_MS), d1
+    sub     d1, d0
+    mov     d0, (DV_BK_MS)
+    mov     1, d0
     mov     d0, (DV_READY)
     mov     DS_READY, d0
     mov     d0, (DV_STATE)
@@ -1067,46 +1146,26 @@ bs_fail:
 bs_ret:
     ret     [d2,d3,a2,a3], 0x30
 
-# BankRead(d0 = resource id) -> d0 = 0 when its file AWRxx.AW (in the game's folder) is read and unpacked at
-# PART_AREA, as LoadStep reads a part's files (the drive switch to the SD card and back around it, FILE_PIECE
-# bytes at a time), and a music instrument's first four samples zeroed (rawgl SfxPlayer::prepareInstruments);
-# else 1. A packed file is read to BANK_PACKED first.
+# BankRead(d0 = n) -> d0 = 0 when AWSBn.AW (in the game's folder) is read whole into PART_AREA (DV_BK_PTR =
+# PART_AREA, DV_BK_LEN = its end), as LoadStep reads a part's files (the drive switch to the SD card and back
+# around it, FILE_PIECE bytes at a time, until a short read); else 1 (missing, empty, or longer than
+# BANK_FILE_MAX).
 BankRead:
     movm    [d2,d3,a2,a3], (sp)
     add     -0x20, sp
     mov     d0, d2
-    mov     DV_NAME, a0             # "AWRxx.AW"
-    mov     aw_sound_name, a1
+    mov     DV_NAME, a0             # "AWSBn.AW"
+    mov     aw_bank_name, a1
     call    StrPut, 0, 0
     clr     d0
     movbu   d0, (a0)
     mov     d2, d0
-    lsr     4, d0
-    call    HexDigit, 0, 0
-    movbu   d0, (DV_NAME + 3)
-    mov     d2, d0
     call    HexDigit, 0, 0
     movbu   d0, (DV_NAME + 4)
-    mov     d2, d0
-    call    BankEntry, 0, 0
-    mov     a0, (0x1C, sp)          # (0x1C, sp) = the entry (the firmware's routines keep 0x14-0x1C of our frame)
-    mov     (BE_SIZE, a0), d1
-    mov     0x7FFFFFFF, d3
-    and     d3, d1                  # d1 = bytes unpacked
-    mov     (BE_FILE, a0), d0       # d0 = bytes in the file
-    mov     0x10000, d3             # the build makes sure of both (aw_extract.py): never past the staging space
-    cmp     d3, d0
-    bcc     br_bad
-    cmp     d3, d1
-    bcc     br_bad
-    mov     BANK_PACKED, d3         # where the file goes: packed, or straight to PART_AREA
-    cmp     d0, d1
-    bne     br_dest
-    mov     PART_AREA, d3
-br_dest:
-    mov     d3, (0x18, sp)          # (0x18, sp) = where the next piece goes
-    mov     1, d0                   # the file layer to the SD card
-    mov     (FW_SETEXT), a3
+    mov     PART_AREA, d0
+    mov     d0, (0x18, sp)          # (0x18, sp) = where the next piece goes (the firmware's routines keep
+    mov     1, d0                   #   0x14-0x1C of our frame for us)
+    mov     (FW_SETEXT), a3         # the file layer to the SD card
     calls   (a3)
     mov     DV_NAME, a0
     call    AppPath, 0, 0           # a0 = AW_PREFIX + the name, in the game's folder
@@ -1116,13 +1175,12 @@ br_dest:
     exth    d0
     cmp     0, d0
     blt     br_back
-    mov     (0x1C, sp), a0
-    mov     (BE_FILE, a0), d2       # d2: bytes still to read
     clr     d3                      # d3: bytes read
 br_piece:
-    cmp     0, d2
+    mov     BANK_FILE_MAX, d0       # one byte more than may come: a longer file fails
+    sub     d3, d0
+    cmp     0, d0
     beq     br_close
-    mov     d2, d0
     mov     FILE_PIECE, d1
     cmp     d1, d0
     bls     br_ask
@@ -1132,41 +1190,29 @@ br_ask:
     mov     (0x18, sp), a0
     mov     (FW_READ), a3
     calls   (a3)                    # d0 = bytes read
-    mov     (0x14, sp), d1
-    cmp     d1, d0
-    bne     br_close                # short, or an error: the count below tells
+    cmp     0, d0
+    blt     br_close
     add     d0, d3
     mov     (0x18, sp), d1
     add     d0, d1
     mov     d1, (0x18, sp)
-    sub     d0, d2
-    bra     br_piece
+    mov     (0x14, sp), d1
+    cmp     d1, d0
+    beq     br_piece                # a whole piece: there may be more
 br_close:
     mov     (FW_CLOSE), a3
     calls   (a3)
     mov     (FW_RESETEXT), a3       # the file layer back, as the firmware expects between calls
     calls   (a3)
-    mov     (0x1C, sp), a3          # a3 = the entry
-    mov     (BE_FILE, a3), d0
+    cmp     4 * BK_REC_MIN + 4, d3
+    bcs     br_bad
+    mov     BANK_FILE_MAX, d0
     cmp     d0, d3
-    bne     br_bad
-    mov     (BE_SIZE, a3), d1
-    mov     0x7FFFFFFF, d2
-    and     d2, d1
-    cmp     d0, d1
-    beq     br_inst                 # stored as is
-    mov     BANK_PACKED, a0         # BkUnpack(a0 = packed, d0 = packed size, a1 = dst, d1 = size)
-    mov     PART_AREA, a1
-    call    BkUnpack, 0, 0
-    cmp     0, d0
-    bne     br_bad
-br_inst:
-    mov     (BE_SIZE, a3), d0
-    cmp     0, d0
-    bge     br_ok                   # bit 31 clear: not a music instrument
-    clr     d0
-    mov     d0, (PART_AREA + 8)
-br_ok:
+    bcc     br_bad
+    mov     PART_AREA, d0
+    mov     d0, (DV_BK_PTR)
+    add     d3, d0
+    mov     d0, (DV_BK_LEN)
     clr     d0
     bra     br_ret
 br_back:
@@ -1486,8 +1532,8 @@ dw_ret:
     ret     [d2,d3,a2,a3], 0x30
 
 # ---- data --------------------------------------------------------------------------------------------------
-aw_sound_name:
-    .asciz  "AWR00.AW"
+aw_bank_name:
+    .asciz  "AWSB0.AW"
 hs_now:
     .asciz  "NOW: "
 hs_now_dsp:

@@ -37,8 +37,12 @@
 #       3. the mix: for each voice with POS < END, the 8-bit sample at POS (four packed in an SDRAM word, the first
 #          in the low byte), sign-extended, times VOL (0..63), summed; then POS.FRAC += INC (16.16 fixed point);
 #          past END, POS -= LOOP when the sample loops, else the voice stays silent. MIX = sum * GAIN;
-#       4. the bank upload: when MSGR4 (words) is not 0, eight words of STAGE (the host's staging buffer in
-#          internal DM) are copied into SDRAM at BANK + MSGR5 + done, a copy step per frame; at the end MSGR4 = 0;
+#       4. the bank (tools/dsp_bank.py): MSGR4 = 1 decodes the block the host has put into staging buffer MSGR5
+#          (0 or 1, STAGE_HALF words each: the first output word's offset from BANK, the words, the Rice-coded bit
+#          stream) into SDRAM, DEC_BITS bits of it a frame (about five samples), and writes MSGR4 = 0 when the
+#          block is done; MSGR4 = 2 computes the checksum (dsp_bank.checksum) of MSGR5 words of SDRAM from BANK,
+#          SUM_STEP words a frame, and writes it to MSGR5, then MSGR4 = 0. A block whose words would leave
+#          BANK..BANK+BANK_MAX is not decoded at all (the checksum then tells the host);
 #       5. unit 0's return = its input + MIX (ROUTE bit 0; else its input alone), clipped to 24 bits.
 #       The firmware's reverb program at 0x8400 is not run while the slot is ours (as in DSPTONE).
 #   E9, unit 9 (slot PM 0x80A0, normally the CHORUS at 0x8D00). Runs last in the frame: unit 9's return = MIX.
@@ -62,7 +66,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sharc_enc import (Program, alu, compute, shift_imm, shift_reg, mul_ssi, ureg_move, ureg_imm,  # noqa: E402
                        dm_read_abs, dm_write_abs, dm_read_off, dm_write_off, rts, modify_imm)
 
-PM_CODE = 0x8200          # our code: PM 0x8102-0x82FF is never written by the firmware (pass 7)
+PM_CODE = 0x8140          # our code: PM 0x8102-0x82FF is never written by the firmware (pass 7)
 PM_END = 0x8300
 PM_SLOT0 = 0x8080         # the kernel's unit-0 CALL slot (REVERB): CALL (0x8400) (DB) on the owner's unit
 PM_SLOT9 = 0x80A0         # the kernel's unit-9 CALL slot (CHORUS): CALL (0x8D00) (DB)
@@ -82,10 +86,16 @@ VOICE_LEN = 8
 CMDS = 0x9D60             # 8 x 5 words, written by the host: BASE, INC, END, LOOP, VOL
 CMD_LEN = 5
 NVOICES = 8
-VARS_END = CMDS + NVOICES * CMD_LEN       # DspVars covers VARS..VARS_END-1 (the voices and commands zeroed)
-STAGE = 0x9E00            # 256 words: the host's staging buffer for the bank upload
-STAGE_WORDS = 256
-COPY_STEP = 8             # STAGE words copied into SDRAM per frame; the host sends whole steps
+DEC = CMDS + NVOICES * CMD_LEN            # the bank decoder's state (unit 0, step 4)
+(V_RUN, V_BUF, V_NB, V_PTR, V_PREV, V_K, V_GLEFT, V_OUTW, V_SI, V_DST, V_NW, V_SUM) = range(DEC, DEC + 12)
+VARS_END = DEC + 12       # DspVars covers VARS..VARS_END-1 (the voices, commands and decoder state zeroed)
+STAGE = 0x9E00            # two staging buffers of STAGE_HALF words for the bank's blocks (tools/dsp_bank.py)
+STAGE_HALF = 128
+STAGE_WORDS = 2 * STAGE_HALF
+COPY_STEP = 8             # each sound starts a whole number of COPY_STEP words past BANK (tools/aw_extract.py)
+DEC_BITS = 20             # bank decoding: bits of the stream a frame (then the sample being decoded is finished)
+SUM_STEP = 16             # bank checksum: SDRAM words a frame
+QMAX, GROUP, KBITS = 12, 64, 3            # the code (tools/dsp_bank.py)
 BANK = 0x70000            # SDRAM: the sample bank, four 8-bit samples a word (tools/aw_extract.py places them)
 BANK_MAX = 0x30000        # words: to 0x9FFFF
 GAIN = 128                # MIX = sum(sample x volume) x GAIN: one voice at full volume and full scale = -18 dBFS
@@ -197,31 +207,190 @@ def program():
     e(dm_read_abs("R9", V_GAIN), f"R9 = DM(0x{V_GAIN:08X})")
     e(compute(mul_ssi("R12", "R12", "R9")), "R12 = R12 * R9")
     e(dm_write_abs(V_MIX, "R12"), f"DM(0x{V_MIX:08X}) = R12")            # for unit 9 (E9)
-    # the bank upload: a copy step of STAGE into SDRAM
+    # the bank (tools/dsp_bank.py): MSGR4 1 decode a block, 2 checksum; R0, R1 (the input) and R12 (MIX) are kept
     e(dm_read_abs("R7", MSGR4), "R7 = DM(0x0000000C)")
     e(compute(alu("PASS", "R7", "R7")), "R7 = PASS R7")
     p.jump("out", "LE")
-    e(dm_read_abs("R8", V_CPY), f"R8 = DM(0x{V_CPY:08X})")               # words done so far
+    e(dm_read_abs("R8", V_RUN), f"R8 = DM(0x{V_RUN:08X})")
+    e(compute(alu("PASS", "R8", "R8")), "R8 = PASS R8")
+    p.jump("running", "NE")
+    e(ureg_imm("R10", 1), "R10 = 0x00000001")                            # a new command
+    e(compute(alu("COMP", "R0", "R7", "R10")), "COMP(R7, R10)")
+    p.jump("dstart", "EQ")
+    e(ureg_imm("R10", 2), "R10 = 0x00000002")
+    e(compute(alu("COMP", "R0", "R7", "R10")), "COMP(R7, R10)")
+    p.jump("sumstart", "EQ")
+    p.jump("cmddone")                                                    # unknown: done
+    # -- decode: the block in staging buffer MSGR5 & 1
+    p.label("dstart")
     e(dm_read_abs("R9", MSGR5), "R9 = DM(0x0000000D)")
-    e(compute(alu("ADD", "R9", "R9", "R8")), "R9 = R9 + R8")
-    e(ureg_imm("R10", BANK), f"R10 = 0x{BANK:08X}")
-    e(compute(alu("ADD", "R9", "R9", "R10")), "R9 = R9 + R10")
-    e(ureg_move("I5", "R9"), "I5 = R9")                                  # SDRAM destination
+    e(ureg_imm("R10", 1), "R10 = 0x00000001")
+    e(compute(alu("AND", "R9", "R9", "R10")), "R9 = R9 AND R10")
+    e(shift_imm("LSHIFT", "R9", "R9", 7), "R9 = LSHIFT R9 BY 7")         # x STAGE_HALF
     e(ureg_imm("R10", STAGE), f"R10 = 0x{STAGE:08X}")
-    e(compute(alu("ADD", "R10", "R10", "R8")), "R10 = R10 + R8")
-    e(ureg_move("I7", "R10"), "I7 = R10")                                # STAGE source
-    e(0, "NOP")
-    for k in range(COPY_STEP):
-        e(dm_read_off("R10", k, "I7"), f"R10 = DM(0x{k:08X}, I7)")
-        e(dm_write_off(k, "I5", "R10"), f"DM(0x{k:08X}, I5) = R10")
-    e(ureg_imm("R10", COPY_STEP), f"R10 = 0x{COPY_STEP:08X}")
-    e(compute(alu("ADD", "R8", "R8", "R10")), "R8 = R8 + R10")
-    e(compute(alu("COMP", "R0", "R8", "R7")), "COMP(R8, R7)")
-    p.jump("cpyidx", "LT")
+    e(compute(alu("ADD", "R9", "R9", "R10")), "R9 = R9 + R10")
+    e(ureg_move("I7", "R9"), "I7 = R9")
+    e(0, "NOP")                                                          # I7 written: a cycle before use
+    e(dm_read_off("R10", 0, "I7"), "R10 = DM(0x00000000, I7)")           # the first word's offset from BANK
+    e(dm_read_off("R11", 1, "I7"), "R11 = DM(0x00000001, I7)")           # the words
+    e(compute(alu("PASS", "R10", "R10")), "R10 = PASS R10")
+    p.jump("cmddone", "LT")
+    e(compute(alu("PASS", "R11", "R11")), "R11 = PASS R11")
+    p.jump("cmddone", "LE")
+    e(compute(alu("ADD", "R13", "R10", "R11")), "R13 = R10 + R11")
+    e(ureg_imm("R14", BANK_MAX), f"R14 = 0x{BANK_MAX:08X}")
+    e(compute(alu("COMP", "R0", "R13", "R14")), "COMP(R13, R14)")
+    p.jump("cmddone", "GT")                                              # outside the bank: not decoded
+    e(ureg_imm("R13", BANK), f"R13 = 0x{BANK:08X}")
+    e(compute(alu("ADD", "R10", "R10", "R13")), "R10 = R10 + R13")
+    e(dm_write_abs(V_DST, "R10"), f"DM(0x{V_DST:08X}) = R10")
+    e(dm_write_abs(V_NW, "R11"), f"DM(0x{V_NW:08X}) = R11")
+    e(ureg_imm("R10", 2), "R10 = 0x00000002")
+    e(compute(alu("ADD", "R4", "R9", "R10")), "R4 = R9 + R10")           # the stream
+    e(ureg_imm("R3", 0), "R3 = 0x00000000")                              # no bits in hand
+    e(ureg_imm("R5", 0), "R5 = 0x00000000")                              # the predictor
+    e(ureg_imm("R7", 0), "R7 = 0x00000000")                              # a k first
     e(ureg_imm("R8", 0), "R8 = 0x00000000")
-    e(dm_write_abs(MSGR4, "R8"), "DM(0x0000000C) = R8")                  # done: tell the host
-    p.label("cpyidx")
-    e(dm_write_abs(V_CPY, "R8"), f"DM(0x{V_CPY:08X}) = R8")
+    e(ureg_imm("R9", 0), "R9 = 0x00000000")
+    e(ureg_imm("R10", 1), "R10 = 0x00000001")
+    e(dm_write_abs(V_RUN, "R10"), f"DM(0x{V_RUN:08X}) = R10")
+    p.jump("dgo")
+    p.label("running")
+    e(ureg_imm("R10", 1), "R10 = 0x00000001")
+    e(compute(alu("COMP", "R0", "R8", "R10")), "COMP(R8, R10)")
+    p.jump("csum", "NE")
+    e(dm_read_abs("R2", V_BUF), f"R2 = DM(0x{V_BUF:08X})")              # the decoder's state
+    e(dm_read_abs("R3", V_NB), f"R3 = DM(0x{V_NB:08X})")
+    e(dm_read_abs("R4", V_PTR), f"R4 = DM(0x{V_PTR:08X})")
+    e(dm_read_abs("R5", V_PREV), f"R5 = DM(0x{V_PREV:08X})")
+    e(dm_read_abs("R6", V_K), f"R6 = DM(0x{V_K:08X})")
+    e(dm_read_abs("R7", V_GLEFT), f"R7 = DM(0x{V_GLEFT:08X})")
+    e(dm_read_abs("R8", V_OUTW), f"R8 = DM(0x{V_OUTW:08X})")
+    e(dm_read_abs("R9", V_SI), f"R9 = DM(0x{V_SI:08X})")
+    p.label("dgo")
+    e(ureg_imm("R13", 0), "R13 = 0x00000000")                            # bits this frame
+    p.label("sd")                                                        # a sample
+    e(compute(alu("PASS", "R7", "R7")), "R7 = PASS R7")
+    p.jump("havek", "NE")
+    e(ureg_imm("R6", 0), "R6 = 0x00000000")                              # a new group: its k, 3 bits
+    e(ureg_imm("R11", KBITS), f"R11 = 0x{KBITS:08X}")
+    p.label("kl")
+    p.call("getbit")
+    e(shift_imm("LSHIFT", "R6", "R6", 1), "R6 = LSHIFT R6 BY 1")
+    e(compute(alu("OR", "R6", "R6", "R10")), "R6 = R6 OR R10")
+    e(compute(alu("DEC", "R11", "R11")), "R11 = R11 - 1")
+    p.jump("kl", "NE")
+    e(ureg_imm("R7", GROUP), f"R7 = 0x{GROUP:08X}")
+    p.label("havek")
+    e(compute(alu("DEC", "R7", "R7")), "R7 = R7 - 1")
+    e(ureg_imm("R11", 0), "R11 = 0x00000000")                            # q
+    p.label("ul")
+    p.call("getbit")
+    e(compute(alu("PASS", "R10", "R10")), "R10 = PASS R10")
+    p.jump("uend", "NE")
+    e(compute(alu("INC", "R11", "R11")), "R11 = R11 + 1")
+    e(ureg_imm("R10", QMAX), f"R10 = 0x{QMAX:08X}")
+    e(compute(alu("COMP", "R0", "R11", "R10")), "COMP(R11, R10)")
+    p.jump("ul", "LT")
+    e(ureg_imm("R14", 0), "R14 = 0x00000000")                            # the escape: z in 8 bits
+    e(ureg_imm("R11", 8), "R11 = 0x00000008")
+    p.jump("zl")
+    p.label("uend")
+    e(compute(alu("PASS", "R14", "R11")), "R14 = PASS R11")              # z = q, then k bits shifted in
+    e(compute(alu("PASS", "R11", "R6")), "R11 = PASS R6")
+    p.jump("zdone", "EQ")
+    p.label("zl")
+    p.call("getbit")
+    e(shift_imm("LSHIFT", "R14", "R14", 1), "R14 = LSHIFT R14 BY 1")
+    e(compute(alu("OR", "R14", "R14", "R10")), "R14 = R14 OR R10")
+    e(compute(alu("DEC", "R11", "R11")), "R11 = R11 - 1")
+    p.jump("zl", "NE")
+    p.label("zdone")                                                     # d = (z >> 1) xor -(z & 1)
+    e(ureg_imm("R10", 1), "R10 = 0x00000001")
+    e(compute(alu("AND", "R10", "R14", "R10")), "R10 = R14 AND R10")
+    e(ureg_imm("R11", 0), "R11 = 0x00000000")
+    e(compute(alu("SUB", "R10", "R11", "R10")), "R10 = R11 - R10")
+    e(shift_imm("LSHIFT", "R14", "R14", -1), "R14 = LSHIFT R14 BY -1")
+    e(compute(alu("XOR", "R14", "R14", "R10")), "R14 = R14 XOR R10")
+    e(compute(alu("ADD", "R5", "R5", "R14")), "R5 = R5 + R14")           # the sample: predictor + d, 8 bits
+    e(ureg_imm("R10", 0xFF), "R10 = 0x000000FF")
+    e(compute(alu("AND", "R5", "R5", "R10")), "R5 = R5 AND R10")
+    e(shift_imm("LSHIFT", "R8", "R8", -8), "R8 = LSHIFT R8 BY -8")       # into the word from the top: the first
+    e(shift_imm("LSHIFT", "R10", "R5", 24), "R10 = LSHIFT R5 BY 24")     #   sample ends in the low byte
+    e(compute(alu("OR", "R8", "R8", "R10")), "R8 = R8 OR R10")
+    e(compute(alu("INC", "R9", "R9")), "R9 = R9 + 1")
+    e(ureg_imm("R10", 4), "R10 = 0x00000004")
+    e(compute(alu("COMP", "R0", "R9", "R10")), "COMP(R9, R10)")
+    p.jump("nexts", "LT")
+    e(ureg_imm("R9", 0), "R9 = 0x00000000")                              # a whole word: into SDRAM
+    e(dm_read_abs("R14", V_DST), f"R14 = DM(0x{V_DST:08X})")
+    e(ureg_move("I5", "R14"), "I5 = R14")
+    e(0, "NOP")
+    e(dm_write_off(0, "I5", "R8"), "DM(0x00000000, I5) = R8")            # SDRAM (inside BUSLK)
+    e(compute(alu("INC", "R14", "R14")), "R14 = R14 + 1")
+    e(dm_write_abs(V_DST, "R14"), f"DM(0x{V_DST:08X}) = R14")
+    e(dm_read_abs("R14", V_NW), f"R14 = DM(0x{V_NW:08X})")
+    e(compute(alu("DEC", "R14", "R14")), "R14 = R14 - 1")
+    e(dm_write_abs(V_NW, "R14"), f"DM(0x{V_NW:08X}) = R14")
+    p.jump("cmddone", "EQ")                                              # the block is done
+    p.label("nexts")
+    e(ureg_imm("R10", DEC_BITS), f"R10 = 0x{DEC_BITS:08X}")
+    e(compute(alu("COMP", "R0", "R13", "R10")), "COMP(R13, R10)")
+    p.jump("sd", "LT")
+    e(dm_write_abs(V_BUF, "R2"), f"DM(0x{V_BUF:08X}) = R2")             # this frame's share: the state kept
+    e(dm_write_abs(V_NB, "R3"), f"DM(0x{V_NB:08X}) = R3")
+    e(dm_write_abs(V_PTR, "R4"), f"DM(0x{V_PTR:08X}) = R4")
+    e(dm_write_abs(V_PREV, "R5"), f"DM(0x{V_PREV:08X}) = R5")
+    e(dm_write_abs(V_K, "R6"), f"DM(0x{V_K:08X}) = R6")
+    e(dm_write_abs(V_GLEFT, "R7"), f"DM(0x{V_GLEFT:08X}) = R7")
+    e(dm_write_abs(V_OUTW, "R8"), f"DM(0x{V_OUTW:08X}) = R8")
+    e(dm_write_abs(V_SI, "R9"), f"DM(0x{V_SI:08X}) = R9")
+    p.jump("out")
+    # -- checksum: MSGR5 words of SDRAM from BANK
+    p.label("sumstart")
+    e(dm_read_abs("R11", MSGR5), "R11 = DM(0x0000000D)")
+    e(compute(alu("PASS", "R11", "R11")), "R11 = PASS R11")
+    p.jump("cmddone", "LT")
+    e(ureg_imm("R14", BANK_MAX), f"R14 = 0x{BANK_MAX:08X}")
+    e(compute(alu("COMP", "R0", "R11", "R14")), "COMP(R11, R14)")
+    p.jump("cmddone", "GT")
+    e(dm_write_abs(V_NW, "R11"), f"DM(0x{V_NW:08X}) = R11")
+    e(ureg_imm("R10", BANK), f"R10 = 0x{BANK:08X}")
+    e(dm_write_abs(V_DST, "R10"), f"DM(0x{V_DST:08X}) = R10")
+    e(ureg_imm("R10", 0), "R10 = 0x00000000")
+    e(dm_write_abs(V_SUM, "R10"), f"DM(0x{V_SUM:08X}) = R10")
+    e(ureg_imm("R10", 2), "R10 = 0x00000002")
+    e(dm_write_abs(V_RUN, "R10"), f"DM(0x{V_RUN:08X}) = R10")
+    p.label("csum")
+    e(dm_read_abs("R2", V_SUM), f"R2 = DM(0x{V_SUM:08X})")
+    e(dm_read_abs("R4", V_DST), f"R4 = DM(0x{V_DST:08X})")
+    e(dm_read_abs("R11", V_NW), f"R11 = DM(0x{V_NW:08X})")
+    e(ureg_imm("R3", SUM_STEP), f"R3 = 0x{SUM_STEP:08X}")
+    p.label("csl")
+    e(compute(alu("PASS", "R11", "R11")), "R11 = PASS R11")
+    p.jump("csdone", "EQ")
+    e(ureg_move("I5", "R4"), "I5 = R4")
+    e(0, "NOP")
+    e(dm_read_off("R8", 0, "I5"), "R8 = DM(0x00000000, I5)")             # SDRAM (inside BUSLK)
+    e(shift_imm("LSHIFT", "R9", "R2", 1), "R9 = LSHIFT R2 BY 1")         # c = rotl(c, 1) xor w
+    e(shift_imm("LSHIFT", "R2", "R2", -31), "R2 = LSHIFT R2 BY -31")
+    e(compute(alu("OR", "R2", "R2", "R9")), "R2 = R2 OR R9")
+    e(compute(alu("XOR", "R2", "R2", "R8")), "R2 = R2 XOR R8")
+    e(compute(alu("INC", "R4", "R4")), "R4 = R4 + 1")
+    e(compute(alu("DEC", "R11", "R11")), "R11 = R11 - 1")
+    e(compute(alu("DEC", "R3", "R3")), "R3 = R3 - 1")
+    p.jump("csl", "NE")
+    e(dm_write_abs(V_SUM, "R2"), f"DM(0x{V_SUM:08X}) = R2")
+    e(dm_write_abs(V_DST, "R4"), f"DM(0x{V_DST:08X}) = R4")
+    e(dm_write_abs(V_NW, "R11"), f"DM(0x{V_NW:08X}) = R11")
+    p.jump("out")
+    p.label("csdone")
+    e(dm_write_abs(V_SUM, "R2"), f"DM(0x{V_SUM:08X}) = R2")
+    e(dm_write_abs(MSGR5, "R2"), "DM(0x0000000D) = R2")                  # the answer
+    p.label("cmddone")                                                   # done: the host waits for MSGR4 = 0
+    e(ureg_imm("R10", 0), "R10 = 0x00000000")
+    e(dm_write_abs(V_RUN, "R10"), f"DM(0x{V_RUN:08X}) = R10")
+    e(dm_write_abs(MSGR4, "R10"), "DM(0x0000000C) = R10")
     # out: unit 0's input (+ MIX), clipped to the 24 bits the SPORT sends
     p.label("out")
     e(dm_read_abs("R9", V_ROUTE), f"R9 = DM(0x{V_ROUTE:08X})")
@@ -256,6 +425,22 @@ def program():
     e(rts(db=True), "RTS (DB)")
     e(EPILOGUE, "R4 = DM(I1, M5),  R7 = PM(I12, M8)")
     e(modify_imm("I8", 0x50), "MODIFY (I8, 0x00000050)")
+    # ---- getbit: R10 = the stream's next bit (R2 the bits in hand from the top, R3 how many, R4 the next word);
+    #      R13 + 1 (the frame's bits). Called from E0's decoder only.
+    p.label("getbit")
+    e(compute(alu("PASS", "R3", "R3")), "R3 = PASS R3")
+    p.jump("gbh", "NE")
+    e(ureg_move("I7", "R4"), "I7 = R4")
+    e(0, "NOP")
+    e(dm_read_off("R2", 0, "I7"), "R2 = DM(0x00000000, I7)")
+    e(compute(alu("INC", "R4", "R4")), "R4 = R4 + 1")
+    e(ureg_imm("R3", 32), "R3 = 0x00000020")
+    p.label("gbh")
+    e(shift_imm("LSHIFT", "R10", "R2", -31), "R10 = LSHIFT R2 BY -31")
+    e(shift_imm("LSHIFT", "R2", "R2", 1), "R2 = LSHIFT R2 BY 1")
+    e(compute(alu("DEC", "R3", "R3")), "R3 = R3 - 1")
+    e(compute(alu("INC", "R13", "R13")), "R13 = R13 + 1")
+    e(rts(db=False), "RTS")
     return p.assemble(), p.labels
 
 
@@ -293,7 +478,8 @@ def write_inc(out, words, labels):
           ("DSP_CALLDB_HI", CALL_DB >> 32), ("DSP_MARK", MARK), ("DSP_VARS", VARS), ("DSP_NVARS", VARS_END - VARS),
           ("DSP_V_HB9", V_HB9), ("DSP_V_MIX", V_MIX), ("DSP_VOICES", VOICES), ("DSP_VOICE_LEN", VOICE_LEN),
           ("DSP_CMDS", CMDS), ("DSP_CMD_LEN", CMD_LEN), ("DSP_NVOICES", NVOICES), ("DSP_STAGE", STAGE),
-          ("DSP_STAGE_WORDS", STAGE_WORDS), ("DSP_COPY_STEP", COPY_STEP), ("DSP_BANK", BANK),
+          ("DSP_STAGE_WORDS", STAGE_WORDS), ("DSP_STAGE_HALF", STAGE_HALF), ("DSP_COPY_STEP", COPY_STEP),
+          ("DSP_BANK", BANK), ("DSP_V_RUN", V_RUN), ("DSP_V_SUM", V_SUM),
           ("DSP_BANK_MAX", BANK_MAX), ("DSP_MSGR4", MSGR4), ("DSP_MSGR5", MSGR5), ("DSP_MSGR6", MSGR6),
           ("DSP_MSGR7", MSGR7)]
     with open(os.path.join(out, "dsp_equ.inc"), "w") as f:
@@ -320,6 +506,8 @@ def main():
     words, labels = program()
     assert PM_CODE + len(words) <= PM_END, f"the code ({len(words)} words) must stay in PM 0x{PM_CODE:04X}-0x{PM_END - 1:04X}"
     assert VARS_END <= STAGE and STAGE + STAGE_WORDS <= 0x9F00
+    import dsp_bank
+    assert (dsp_bank.STAGE_HALF, dsp_bank.QMAX, dsp_bank.GROUP, dsp_bank.KBITS) == (STAGE_HALF, QMAX, GROUP, KBITS)
     if "--check" in args:
         u = args[args.index("--check") + 1]
         if not os.path.exists(u):

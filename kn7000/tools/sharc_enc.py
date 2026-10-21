@@ -8,7 +8,8 @@
 # COPIED from technics-roms-disasm kn7000/tools/dsptone/sharc_enc.py (DSPTONE, iteration 1 of our own program on
 # the KN7000's effects DSP; as last changed by its commit 07d1d519f), so that this repository builds on
 # its own. Added here: the multiplier's "Rn = Rx * Ry (SSI)" (mul_ssi), the shifter's shifts by a register
-# (shift_reg) and the ALU's XOR. Keep the two copies' common part in step by hand.
+# (shift_reg) and the ALU's XOR; on 2026-10-21 (the bank decoder) Program.call, a CALL to a label. Keep the two
+# copies' common part in step by hand.
 #
 # There is no SHARC assembler in either project, so each form is encoded from the bit layout MAME's SHARC
 # disassembler decodes (src/devices/cpu/sharc/sharc_dasm.cpp: the opcode table at the end, and each dasm_*
@@ -164,14 +165,22 @@ class Program:
         """IF cond JUMP label (PC-relative, not delayed)"""
         self.items.append([("jump", label, cond), None])
 
+    def call(self, label):
+        """CALL label (absolute, not delayed)"""
+        self.items.append([("call", label, "TRUE"), None])
+
     def assemble(self):
         out = []
         for k, (w, text) in enumerate(self.items):
             pc = self.base + k
             if isinstance(w, tuple):
-                _, label, cond = w
+                kind, label, cond = w
                 target = self.labels[label]
-                w = jump_rel(target - pc, cond)
-                text = ("" if cond == "TRUE" else f"IF {cond}, ") + f"JUMP (0x{target:08X})"
+                if kind == "call":
+                    w = jump_abs(target, call=True)
+                    text = f"CALL (0x{target:08X})"
+                else:
+                    w = jump_rel(target - pc, cond)
+                    text = ("" if cond == "TRUE" else f"IF {cond}, ") + f"JUMP (0x{target:08X})"
             out.append((pc, w, text))
         return out
