@@ -37,36 +37,29 @@ settle](#what-mame-cannot-settle) · [Limits](#limits) · [History](#history-the
 write-protect tab at PROTECTED. Every MAME test below runs this very image.
 
 **The SD card: everything in `build/sdcard/`, copied to the card's root folder.** `make sdcard`
-writes exactly these 47 files there and nothing else (their sizes and SHA-1s: `build/sdcard.txt`):
+writes exactly these 141 files there and nothing else (their sizes and SHA-1s: `build/sdcard.txt`):
 
-| file(s)                              | bytes   | what                                                                                                  |
-|--------------------------------------|---------|-------------------------------------------------------------------------------------------------------|
-| `KN7APP.BIN`                         | 24,540  | the game: application header, platform layer, firmware search, VM, unpacker, speed measurement, sound |
-| `AWFONT.AW`                          | 768     | the 8x8 font (the KN5000 port's)                                                                      |
-| `AWSTRIDX.AW`, `AWSTRDAT.AW`         | 6,144   | the string tables (the KN5000 port's)                                                                 |
-| `AWSND.AW`                           | 584     | each sound's KN7000 program, note and length ("Sound"; `tools/aw_sound_map.py`)                       |
-| `AWR07.AW` ... `AWR91.AW` (42 files) | 566,944 | each resource the game draws, runs or plays, as `MEMLIST.BIN` finds it in `BANKxx`                    |
+| file(s)                              | bytes   | what                                                                                                         |
+|--------------------------------------|---------|--------------------------------------------------------------------------------------------------------------|
+| `KN7APP.BIN`                         | 31,756  | the game: application header, platform layer, firmware search, VM, unpacker, speed measurement, sound        |
+| `AWFONT.AW`                          | 768     | the 8x8 font (the KN5000 port's)                                                                             |
+| `AWSTRIDX.AW`, `AWSTRDAT.AW`         | 6,144   | the string tables (the KN5000 port's)                                                                        |
+| `AWSND.AW`                           | 584     | each sound's KN7000 program, note and length, for the tone generator mode ("Sound"; `tools/aw_sound_map.py`) |
+| `AWBANK.AW`                          | 2,936   | where each sound of the DSP's sample bank goes in its SDRAM, and the bank's id ("Sound"; `aw_extract.py`)    |
+| `AWR07.AW` ... `AWR91.AW` (42 files) | 566,944 | each resource the game draws, runs or plays as music, as `MEMLIST.BIN` finds it in `BANKxx`                  |
+| `AWR01.AW` ... `AWR8E.AW` (93 files) | 574,084 | each sound the game plays, as `MEMLIST.BIN` finds it in `BANKxx`: the DSP's sample bank                      |
 
-All 47 names, as `ls build/sdcard` gives them:
-
-    KN7APP.BIN   AWFONT.AW    AWSTRDAT.AW  AWSTRIDX.AW  AWSND.AW
-    AWR07.AW     AWR11.AW     AWR12.AW     AWR13.AW     AWR14.AW     AWR15.AW     AWR16.AW     AWR17.AW
-    AWR18.AW     AWR19.AW     AWR1A.AW     AWR1B.AW     AWR1C.AW     AWR1D.AW     AWR1E.AW     AWR1F.AW
-    AWR20.AW     AWR21.AW     AWR22.AW     AWR23.AW     AWR24.AW     AWR25.AW     AWR26.AW     AWR27.AW
-    AWR28.AW     AWR29.AW     AWR2A.AW     AWR2B.AW     AWR43.AW     AWR44.AW     AWR45.AW     AWR46.AW
-    AWR47.AW     AWR48.AW     AWR49.AW     AWR53.AW     AWR7D.AW     AWR7E.AW     AWR7F.AW     AWR8A.AW
-    AWR90.AW     AWR91.AW
-
-598,980 bytes in all (`build/sdcard.txt`), well within the 126.5 MB free on the owner's card.
+1,183,216 bytes in all (`build/sdcard.txt` lists every name, size and SHA-1), well within the 126.5 MB free on
+the owner's card.
 Each `AWRxx.AW` holds the exact bytes the original MS-DOS release's `MEMLIST.BIN` points at in its
-`BANKxx` file, ByteKiller-packed or stored, for every palette, bytecode, polygon set and bitmap, and
-the two music modules (`AWR07.AW` the intro's, `AWR8A.AW` the final part's); the sound samples are
-left out, since the KN7000's tone generator plays its own sounds for them ("Sound"). They are made
-from your own copy of the game by `make sdcard` (`tools/aw_extract.py --parts`), and the part tables
-inside `KN7APP.BIN` are generated from the same `MEMLIST.BIN`, so the card must carry the files the
-same build wrote. `KN7APP.BIN`'s SHA-1 for the build in this repository and the MS-DOS release in
-`../../MSDOS/`: `97fbd9e67fc165310c244a4a1ef1c13fc8d6c8fe` (the first sound build; `build/sdcard.txt`
-lists it with the rest; the build before it, without sound, was `e3ee3a40...`).
+`BANKxx` file, ByteKiller-packed or stored, for every palette, bytecode, polygon set and bitmap, the
+two music modules (`AWR07.AW` the intro's, `AWR8A.AW` the final part's) and, since the DSP build, the
+93 sounds the game plays (its sample bank: "Sound"). They are made from your own copy of the game by
+`make sdcard` (`tools/aw_extract.py --parts`), and the part tables inside `KN7APP.BIN` and `AWBANK.AW`
+are generated from the same `MEMLIST.BIN`, so the card must carry the files the same build wrote.
+`KN7APP.BIN`'s SHA-1 for the build in this repository and the MS-DOS release in `../../MSDOS/`:
+`a2fbbaa6c660020757b543878fc2a6cdc46ba3f2` (the DSP sound build; `build/sdcard.txt` lists it with the rest; the build before it, the
+first sound build, tone generator only, was `97fbd9e6...`, which Felipe's KN7000 played).
 
 **With the program menu (2026-10-20): the game in a folder of its own, `AW\`.** The card's root
 `KN7APP.BIN` can be the program menu (technics-roms-disasm `kn7000/tools/kn7menu`), which lists the
@@ -159,8 +152,10 @@ If anything looks wrong, write the card image from step 1 back and restore the p
 2. **DISK MENU**, then **STYLE CONVERT** (left button 3). The list shows `KN7LOAD.CNV`. Press **OK**
    (right button 4).
 3. The loader's screen flashes by. Then "LOADING ANOTHER WORLD" shows while a white bar along the
-   bottom fills: six steps of the firmware search, then the font, the strings and the shared
-   polygons. Then the splash starts. Whenever the game moves to another part, the picture stops for
+   bottom fills: eight steps of the firmware search, then the font, the strings, the sound tables and
+   the shared polygons. Then, the first time after the instrument was switched on, "LOADING ANOTHER
+   WORLD: SOUNDS" and the bar again, slowly: the game's samples going into the effects DSP ("Sound"; in
+   MAME 26 s). Then the splash starts. Whenever the game moves to another part, the picture stops for
    a moment while the bar fills again: the part's files are being read from the card.
 4. The controls (the HELP screen shows them too, with the level codes):
 
@@ -173,7 +168,7 @@ If anything looks wrong, write the card image from step 1 back and restore the p
    | action | C4 or any key below                 | SUSTAIN                                 |
    | codes  |                                     | OTHER PART & FR: the level code screen  |
    | help   |                                     | HELP; PAGE UP / PAGE DOWN turn pages    |
-   | sound  |                                     | PART SELECT RIGHT 2: off / on ("Sound") |
+   | sound  |                                     | PART SELECT RIGHT 2: DSP / TG / off     |
    | speed  |                                     | PAGE UP: the overlay on / off ("Speed") |
    | blit   |                                     | PAGE DOWN: the new blit / the old one   |
    | quit   |                                     | hold EXIT for 1.5 s                     |
@@ -221,7 +216,7 @@ source (`kn7000/tools/cnv_romdump/loader.s`, `kn7cnv.inc`) and measured in MAME 
   times a second, which parks the user interface on the converter: the firmware doesn't repaint the
   screen under the game and ignores EXIT, while the main task goes on decoding the panel and passing
   the keybed's notes to MIDI OUT, the two inputs the game reads (probe 2 in `probes/cnv/README.md`).
-- **Finding the firmware** (`src/fwfind.s`, the first six calls). `KN7APP.BIN` carries no firmware
+- **Finding the firmware** (`src/fwfind.s`, the first eight calls). `KN7APP.BIN` carries no firmware
   address. It searches the program flash and the kernel library in RAM by code signatures, the way the
   loader does, and accepts a find only when it is unambiguous and cross-checked:
 
@@ -233,6 +228,7 @@ source (`kn7000/tools/cnv_romdump/loader.s`, `kn7cnv.inc`) and measured in MAME 
   | 3    | `cre_tsk`, `sta_tsk`                          | the firmware's own "cre_tsk then sta_tsk(N, 0)" call sites: all must agree                                                   |
   | 4    | `exd_tsk`                                     | the firmware's tasks that end themselves: all must agree, a kernel stub                                                      |
   | 5    | the MIDI IN 1 and MIDI OUT 1 rings            | the library's per-port ring wrappers                                                                                         |
+  | 6, 7 | the effects DSP's host-port routines          | DSPTONE's search, one signature a call (`src/dsp.s` DspFind); not found: the game goes on with the tone generator ("Sound")  |
 
   `tools/aw_find_fw.py` runs the same searches (all but step 2) over every program image we have; the
   loader's `find_fw.py` runs the loader's:
@@ -256,9 +252,10 @@ source (`kn7000/tools/cnv_romdump/loader.s`, `kn7cnv.inc`) and measured in MAME 
 
   The 941 and 942 columns equal the addresses measured in MAME before; in MAME, the game's own search
   gives the 893 and 941 columns exactly (the session test prints them).
-- **The global files** (the next four calls): the font, the string tables and the shared polygons
-  (resource 0x11), one file per call. Then the game starts a task of its own (`cre_tsk` / `sta_tsk`,
-  ids 10 then 9, priority 3) that runs the VM.
+- **The global files** (the next six calls): the font, the string tables, the two sound tables
+  (`AWSND.AW`, `AWBANK.AW`) and the shared polygons (resource 0x11), one file per call. Then, when the
+  effects DSP's routines were found, its mixer and the sample bank ("Sound"). Then the game starts a task
+  of its own (`cre_tsk` / `sta_tsk`, ids 10 then 9, priority 3) that runs the VM.
 - **Parts on demand.** Like the original engine, the game holds one part at a time. At a part switch
   the game task asks for the new part (`EnsurePart`) and yields until it is there. Each converter call
   then reads one of the part's files from the card's root into the part area, with the loader's
@@ -278,8 +275,105 @@ source (`kn7000/tools/cnv_romdump/loader.s`, `kn7cnv.inc`) and measured in MAME 
 
 ## Sound
 
-**First iteration (2026-10-20): sound effects and music, played by the KN7000's own tone generator.**
-**On the instrument (2026-10-21):** Felipe ran this build (`KN7APP.BIN` `97fbd9e6...`, from the menu's `AW\`)
+The sound has three modes, and **PART SELECT RIGHT 2** cycles through them: **DSP samples** (the game's own
+sounds, played by the instrument's effects DSP), **tone generator** (the KN7000's own voices over MIDI, the first
+iteration) and **off**: DSP, then tone generator, then off, then DSP again (off goes to the tone generator when
+the DSP cannot be used). The first page of the HELP screen shows the mode in its last line: "NOW: DSP SAMPLES",
+"NOW: TONE GENERATOR" or "NOW: OFF", with "NO DSP n" after it when the DSP was given up (n below). The game
+starts in the DSP mode when it could set the DSP up, else in the tone generator's. In every mode the module
+player runs and writes its sync marks into var 0xF4 as before, so the intro keeps its timing.
+
+### The DSP mode (iteration 2, 2026-10-21): the game's own samples
+
+The KN7000's tone generators play only their wave ROMs, so sound of the game's own has to come from the effects
+DSP (IC306, an ADSP-21065L with 1M words of SDRAM), which the firmware host-boots and keeps running its own
+effects kernel. Iteration 1, DSPTONE (technics-roms-disasm `kn7000/tools/dsptone`), put a program of ours into
+it through the firmware's own host-port routines, as one effect unit of that kernel, and it played on Felipe's
+KN7000 on 2026-10-21 (a 440 Hz tone and a PCM sweep from SDRAM; heartbeat 44,087 frames a second; the reverb
+back after STOP). The game does the same with a sample mixer (`tools/dsp_mixer.py` builds it, `src/dsp.s` drives
+it):
+
+- **The bank, once.** Every sound the game plays (PLAY_SOUND, LOAD, or a music instrument): 93 of the release's
+  sound resources, 684,980 samples, as their own card files (`AWRxx.AW`), with `AWBANK.AW` saying where each goes.
+  At the start, after the global files, the converter reads each file into `PART_AREA`, unpacks it there and
+  sends its samples to the DSP: 256 words at a time into a staging buffer in the DSP's internal memory, which
+  the mixer copies into SDRAM, 8 words a frame. Four 8-bit samples go in a word: 171,576 words of SDRAM from
+  `0x70000` (the kernel's delay rings end at `0x69D3F`; DSPTONE's PCM at `0x70000` played on the unit). The host
+  port moves one 16-bit half per DSP frame, 88 KB a second at best, so this is the slow part: "LOADING ANOTHER
+  WORLD: SOUNDS" and the load bar while it runs, 200 ms of it per converter call; in MAME 25.9 s. It is done once
+  per power-on: the mixer leaves a marker in DSP memory ("AWSB" and the bank's id, a CRC-32 of its layout and
+  samples), and a later run (YES at "Continue Next?", or the game started again from the menu) that finds it
+  sends nothing (in MAME its DSP setup took 0.1 s). The whole bank rather than a part's sounds at each part
+  switch: one wait, no pause added to the part switches, and no list of which part needs which sound.
+- **The mixer.** 162 SHARC instructions at PM `0x8200`, eight voices: PLAY_SOUND's four channels on voices 0-3
+  and the music's four on 4-7, as rawgl's mixer and module player keep them apart (the tone generator mode does
+  the same with its note slots). Per voice: a start in SDRAM, a 16.16 position and step (PLAY_SOUND's
+  frequency, `freqTable`, or the module's Amiga period, 7,159,092 / (2 x period) Hz, over 44,100 frames a
+  second), the end, the loop (a sound plays its first part once and repeats its loop part, as the original's
+  mixer) and the volume (0-63). The nearest sample, no interpolation; the sum times 128, so one voice at full
+  volume peaks at -18 dBFS. It costs at most about 650 of the 1,360 instruction cycles a frame has (all eight
+  voices sounding, a command and a copy step in one frame; 10 a silent voice, 39 a sounding one), less than the
+  reverb and the chorus it stands in for.
+- **Commands.** The game task fills a five-word record per voice (start, step, end, loop, volume) and a mask
+  (start, change step and volume, stop) in RAM; at every poll (each VM thread switch and every 4 ms of a yield)
+  it waits until the mixer has taken the last mask (MSGR6 reads 0), uploads the records that changed into DSP
+  memory and writes the mask to MSGR6. The mixer applies it at its next frame and writes MSGR6 = 0. A sound
+  effect or a row's notes so cost 20 to 100 DSP frames of host traffic (0.5-2.3 ms).
+- **Where it is heard.** The mixer sits in two of the kernel's unit slots: unit 0 (PM `0x8080`, normally the
+  panel REVERB), whose return is unit 0's input plus the mix, and unit 9 (PM `0x80A0`, normally the CHORUS),
+  whose return is the mix alone. The tone generator mixes unit 0's return into the DAC only while REVERB is on
+  (the crossfade `0x803A`; DSPTONE needed REVERB on). The CHORUS has no return register (kn7000_mame
+  `notes/effect-return-routing.md`: its button moves only its send), so unit 9's return should be heard whatever
+  REVERB and CHORUS are: that is the path for REVERB off, and **it has not been heard on the unit yet**. With
+  REVERB on, both paths carry the mix, so it may sound about 6 dB louder than with REVERB off. The reverb and
+  the chorus are off while the game's sound is on the DSP (their programs are not run; the keybed's notes go
+  through dry). MAME mixes unit 9's return only while the CHORUS is on, so the MAME check below hears unit 0's.
+- **Putting it back.** Leaving the DSP mode with RIGHT 2, quitting (before the game answers 0xFE), a failure
+  while it is being set up, and the firmware ending the converter some other way (the game task notices that
+  the converter has not been called for 5 s) all stop the voices and put both slots back as they were found,
+  each read back, with MSGR4-MSGR7 at 0 and the external port's channel 8 as found: the firmware's reverb and
+  chorus run again at once (their programs were never touched). The help screen, a part switch and LOAD 0 only
+  stop the voices. Coming back to the DSP mode hooks the slots again.
+- **Safety, as DSPTONE.** Only the firmware's own host-port routines (found by DSPTONE's search, two more steps
+  of the game's firmware search: 8 in all), with their lock, their per-frame handshake and their "DSP dead"
+  guard: `tools/ic23_guard.py` now also refuses any reference to the port's addresses (`0x98000000`,
+  `0x9C000000`). Before it touches anything: the dead flag, the kernel downloaded, SYSCON, channel 8, both slots
+  read back as the kernel's "CALL (0x8xxx) (DB)" (a slot an earlier program of ours left pointing at PM
+  `0x8100`-`0x82FF` is put back first). The mixer and its variables are read back and compared before the
+  hook. No M0-M7 (the 893 and 941 kernels set them differently). The dead flag is checked at every step; if the
+  firmware ever sets it, the game goes on with the tone generator ("NO DSP 10" or "12").
+
+**Trying it on the instrument** (it has run only in MAME; DSPTONE, which it builds on, ran on the unit):
+
+1. Before starting: **REVERB on** (its lamp lit), MAIN VOLUME low to moderate, and a few notes played to hear
+   the reverb and the chorus as they are.
+2. Start the game from the menu. The first time after switching on, "LOADING ANOTHER WORLD: SOUNDS" and the
+   bar stay a while (26 s in MAME; the card and the chip decide here). Later starts skip it.
+3. In the intro you should hear the original game's own sounds: its music and its effects, not the instrument's
+   voices. HELP's first page shows "NOW: DSP SAMPLES" in its last line; "NO DSP n" there means the DSP was not
+   used (n above): note n.
+4. Then with **REVERB off**: quit, switch REVERB off on the main screen, start the game again (quick now). Is it
+   heard, and how loud against REVERB on? That decides which of the two paths the instrument mixes.
+5. PART SELECT RIGHT 2: the tone generator (the first iteration's GM sound), again: off, again: the DSP.
+6. Quit (EXIT held), then play a few notes: the reverb and the chorus should be as before the game.
+
+What to report: whether the game's own sounds were heard with REVERB on and with it off; how loud against your
+notes; anything garbled, clicking or stuck (a sound that keeps playing after the help screen, a part switch, RIGHT
+2 or the quit); the help line ("NO DSP n"); how long the sounds took to load; whether the reverb and the chorus
+were back after quitting. **If anything goes wrong, switch the instrument off and on**: the firmware resets and
+reloads the DSP at every power-on, and nothing of this outlives that (no IC23, no user memory, no card writes
+but `AWPERFn.TXT`).
+
+The `n` of "NO DSP n" (`src/dsp.inc`, `DF_*`): 1 the routines not found, 2 the DSP was already marked dead, 3 its
+kernel never downloaded, 4 SYSCON or channel 8 not as the firmware leaves them, 5 a slot unreadable or not the
+kernel's form, 6 the mixer read back different, 7 a hooked slot read back different, 8 a sound file missing or
+damaged, 9 the mixer stopped taking the bank, 10 the DSP marked dead while the bank was sent, 11 the firmware
+stopped calling the game (the slots were put back), 12 the DSP marked dead while playing.
+
+### The tone generator mode (iteration 1, 2026-10-20)
+
+The first iteration: sound effects and music, played by the KN7000's own tone generator, unchanged but for the
+mode switch. **On the instrument (2026-10-21):** Felipe ran this build (`KN7APP.BIN` `97fbd9e6...`, from the menu's `AW\`)
 on his KN7000 (program 893) and reported that the sound plays properly; no further detail was recorded.
 The game never outputs a sample. It becomes a MIDI source inside the instrument (`src/audio.s`), and
 the firmware plays its notes by its normal path, the one an external sequencer on MIDI IN uses.
@@ -315,16 +409,17 @@ the firmware plays its notes by its normal path, the one an external sequencer o
   LOAD 0 stop everything (as rawgl's `restartAt` and `stopAll`); the help screen sends all notes off
   and freezes the music; **quitting sends all notes off, all sound off and reset all controllers on
   every channel the game used**, before the game task ends.
-- **PART SELECT RIGHT 2 turns the sound off and on** (off: all notes off, all sound off, nothing more is
-  sent; on: the channels set up again). The music player keeps running while the sound is off, so the
-  intro's timing does not depend on the button. The help screen's first page lists it.
+- **PART SELECT RIGHT 2 takes the sound on to OFF** (all notes off, all sound off, nothing more is sent),
+  and from OFF to the DSP; coming into this mode (from the DSP, or from OFF when the DSP cannot be used) sets
+  the channels up again. The music player keeps running in every mode, so the intro's timing does not depend
+  on the button.
 - **MIDI IN as input now means channels 1-3.** The game's own notes go into the same ring as MIDI IN,
   so its note trackers count only channels 1-3 there (`MIDI_IN_CHANNELS`); the keybed is unaffected.
 
-What to listen for on the instrument, and what to report: whether the intro's music and the effects
-sound at all; which effects sound wrong or too loud (the resource ids are in `aw_sound_map.py`, the
-next iteration tunes that table); whether any note keeps sounding after the help screen, a part switch,
-the sound button or quitting; whether RIGHT 1, RIGHT 2 and LEFT still have your voices afterwards.
+What was asked of the instrument for this mode: whether the intro's music and the effects sound at all;
+which effects sound wrong or too loud (the resource ids are in `aw_sound_map.py`); whether any note keeps
+sounding after the help screen, a part switch, the sound button or quitting; whether RIGHT 1, RIGHT 2 and LEFT
+still have your voices afterwards.
 
 ## Speed
 
@@ -477,22 +572,24 @@ map, laid out around the loader's contract `kn7cnv.inc` (which the game includes
 | `0x502B9C00`-`0x502B9C7F` | LV_STR: the loader's line buffer                                                      |
 | `0x502B9D00`-`0x502B9DFF` | LOADER_VARS: the loader's variables and the saved SD folder                           |
 | `0x502B9E00`-`0x502B9E6B` | SVC: the loader's service table (the game reads it)                                   |
-| `0x502BA000`-`0x502BFFFF` | KN7APP.BIN: header, code and tables (24,540 bytes, to 0x502BFFDC)                     |
-| `0x502C0000`-`0x502C03FF` | CNV_VARS: the entry's and the part loader's variables                                 |
-| `0x502C0400`-`0x502C04FF` | FW_VARS: what fwfind.s found, and its scratch                                         |
-| `0x502C0800`-`0x502C083F` | AW_PATHS: the game's folder, from the menu's launch block                             |
-| `0x502C1000`-`0x502C11FF` | VM_POLY_BASE: rasterizer scratch                                                      |
-| `0x502C2000`-`0x502C30FF` | VM_INTERP_BASE: VM variables, threads, call stack                                     |
-| `0x502C4000`-`0x502C53FF` | VM_MISC_BASE: input, help, guard, note trackers                                       |
-| `0x502C6000`-`0x502C6247` | RES_TAB: where each resource is now                                                   |
-| `0x502C7000`-`0x502C7FFF` | VM_PERF_BASE: speed figures, the blit's palette and pixel pairs                       |
+| `0x502BA000`-`0x502C7FFF` | KN7APP.BIN: header, code and tables (31,756 bytes, to 0x502C1C0C)                     |
 | `0x502C8000`-`0x502D79FF` | HELP_BUF: help pages, stop screen, bitmap unpacking                                   |
 | `0x502D8000`-`0x502D82FF` | AW_FONT: the 8x8 font, from AWFONT.AW                                                 |
 | `0x502D8300`-`0x502D8AFF` | AW_STRIDX: string index, from AWSTRIDX.AW                                             |
 | `0x502D8B00`-`0x502D9AFF` | AW_STRDAT: strings, from AWSTRDAT.AW                                                  |
 | `0x502DA000`-`0x502DA1FF` | AUDIO_VARS: audio.s: MIDI producer, music player, note slots                          |
 | `0x502DA200`-`0x502DA5FF` | SND_TAB: each sound's program, note, length, from AWSND.AW                            |
+| `0x502DA600`-`0x502DA9FF` | DSP_HOST: dsp.s: the effects DSP's routines, state, commands, readback                |
 | `0x502DB000`-`0x502DEFFF` | MUSIC_BUF: the current part's music module                                            |
+| `0x502DF000`-`0x502DF3FF` | CNV_VARS: the entry's and the part loader's variables                                 |
+| `0x502DF400`-`0x502DF4FF` | FW_VARS: what fwfind.s found, and its scratch                                         |
+| `0x502DF800`-`0x502DF83F` | AW_PATHS: the game's folder, from the menu's launch block                             |
+| `0x502E0000`-`0x502E01FF` | VM_POLY_BASE: rasterizer scratch                                                      |
+| `0x502E1000`-`0x502E20FF` | VM_INTERP_BASE: VM variables, threads, call stack                                     |
+| `0x502E3000`-`0x502E43FF` | VM_MISC_BASE: input, help, guard, note trackers                                       |
+| `0x502E5000`-`0x502E5247` | RES_TAB: where each resource is now                                                   |
+| `0x502E6000`-`0x502E6FFF` | VM_PERF_BASE: speed figures, the blit's palette and pixel pairs                       |
+| `0x502E7000`-`0x502E7EFF` | DSP_BANKTAB: the DSP's sample bank: where each sound goes, from AWBANK.AW             |
 | `0x502E7F00`-`0x502E7FFF` | LB_ADDR: the program menu's launch block (kn7cnv.inc): read, never ours               |
 | `0x502E8000`-`0x502EE3FF` | VIDEO2_AT: the shared polygons (0x11)                                                 |
 | `0x502EE400`-`0x5031AFFF` | PART_AREA: the current part's files                                                   |
@@ -544,9 +641,14 @@ Three checks keep the game inside its range:
 
 The task's stack is the kernel's: `cre_tsk` allocates it and `exd_tsk` frees it.
 
-Outside its RAM the game writes only the mailbox's request, the LCD frame, and, at each quit, one new
-file in the SD card's root (`AWPERF0.TXT` .. `AWPERF9.TXT`, the first name that does not exist: "Speed"),
-through the loader's file routines.
+Outside its RAM the game writes only the mailbox's request, the LCD frame, at each quit one new file in
+the SD card's root (`AWPERF0.TXT` .. `AWPERF9.TXT`, the first name that does not exist: "Speed"), through
+the loader's file routines, and, through the firmware's own host-port routines, the effects DSP's memory
+("Sound"): its mixer at PM `0x8200`-`0x82A1`, its variables, voices, command records, staging buffer and
+marker at DM `0x9D00`-`0x9EFF` (never written by the firmware: the ROM dumper's pass 7), the sample bank
+at SDRAM `0x70000`-`0x99E37` (above the kernel's delay rings), MSGR4-MSGR7, and the CALL slots of units 0
+and 9, which it puts back as it found them. All of that is the DSP's, which the firmware resets and
+reloads at every power-on.
 
 ## How it was checked
 
@@ -651,6 +753,21 @@ through the loader, and, for comparison, from the floppy with the retired `AW.CN
   square lead (GM 80) falls by about 40 dB within a second of its note-off either way; a piano (GM 0)
   rings on after its note-off either way, which is the overlay's tone generator, not the path.
 
+### The DSP sound (2026-10-21)
+
+Light, as asked: one MAME session through the program menu, as Felipe runs it (`probes/cnv/run_dsp.sh`,
+`awcnv_dsp.lua`, `dsp_report.py`; program 893, the owner's loader floppy, a copy of the real card with the menu as
+the root `KN7APP.BIN` and the game in `AW\`), and the build's guards (`leafcheck` 0 unsafe calls, `ic23_guard`
+clean with the DSP host port now forbidden too, `cnv_layout` ok, every word of the mixer checked against MAME's
+SHARC disassembler). On `KN7APP.BIN` `a2fbbaa6...`, 11 of 11 checks (`probes/cnv/README.md`, "Sound on the
+effects DSP"; the run's files: `probes/cnv/dsp-results-2026-10-21/`): the firmware's dead flag 0 throughout; the
+whole bank sent in 25.9 s; both slots hooked and both units' counts at 44,100 a second through the intro; all
+eight voices sounding, the music's alone audible in the recording (-52 to -43 dBFS); no MIDI sent in the DSP
+mode; RIGHT 2 to the tone generator put both slots back, and back to the DSP hooked them again; after each quit
+both slots as found, MSGR4-MSGR7 0, the reverb running again; a second game from the menu found the bank by its
+marker and did not send it again. Not run: the acceptance suite (`run_cnv_tests.sh`, `run_menu_route.sh`),
+program 941, the help screen's mode line, the watchdog.
+
 ## What MAME cannot settle
 
 - **Everything rests on the emulation of program 893.** The `-bios v13` program and table images are
@@ -694,24 +811,35 @@ through the loader, and, for comparison, from the floppy with the retired `AW.CN
   chosen without hearing the KN7000 play them. And the routing is the instrument's initial one: if
   PART 4-14 have been given other channels, NOTE ONLY or no program change in the MIDI menus, or MIDI IN
   is set to BASS PEDAL, the game may sound differently or not at all.
+- **The DSP sound on the instrument.** What iteration 1 (DSPTONE) settled on the unit: the firmware's
+  host-port routines, the upload and readback of a program, a unit slot hooked and put back, SDRAM from
+  `0x70000` written and played, the heartbeat at 44,087 frames a second, unit 0's return heard with REVERB
+  on. What is new here and has run only in MAME: SDRAM up to `0x99E37` (the bank's 171,576 words; DSPTONE's
+  PCM reached `0x7AC44`), the multiply and the shifts by a register on the chip, unit 9's slot and its
+  return (MAME mixes it only while the CHORUS is on; whether the instrument mixes it whatever REVERB and
+  CHORUS are is the open question), host traffic from a task of ours rather than the firmware's main task,
+  how long the bank takes, and the level. MAME runs the DSP at exactly 44,100 frames a second and moves
+  the host's words straight into DSP memory; the chip moves them through the external port's FIFO and
+  DMA, as the firmware's own uploads, which is why every upload is read back before the hook.
 - **IC23, the pools and the loader are only measured in MAME.** The game names no address there and
   refuses any computed one outside its RAM, but the first run should still check the instrument's
   memory: "Before the first run on the instrument".
 
 ## Limits
 
-- **Sound: a first iteration** ("Sound"). The effects are GM sounds picked from each sample's
-  analysis, not the game's own samples; the music is the original's notes on GM instruments. The
-  SP7001 build stays silent.
+- **Sound: the DSP's is a second iteration** ("Sound"). No interpolation between samples, and the level
+  against the instrument's own sound is not set (one voice at full volume peaks at -18 dBFS at the DSP).
+  While it plays, the instrument's REVERB and CHORUS are off (the keybed sounds dry). The bank takes a
+  while to load after each power-on. The tone generator mode is the first iteration's: GM sounds for the
+  effects, the music's notes on GM instruments. The SP7001 build stays silent.
 - **Load pauses** at each part switch, up to 130 KB of files (the city).
 - **One card per build.** `KN7APP.BIN`'s part tables name the files of the build that wrote them:
   copy the whole of `build/sdcard/` each time, never `KN7APP.BIN` alone.
 - **YES restarts from scratch.** The loader reloads `KN7APP.BIN` for "Continue Next?" YES, so a new
   game repeats the firmware search and the global files before the splash, and its speed figures
   start afresh (the new blit, the overlay off).
-- **No room left in `KN7APP.BIN`.** The sound build ends at `0x502BFFDC`, 36 bytes below
-  `IMAGE_END_MAX` (`CNV_VARS` follows it). Anything more needs the variables moved up (the probes name
-  their addresses) or code loaded from a file.
+- **Room in `KN7APP.BIN`.** The variables moved up on 2026-10-21 (they were right after the image, at
+  `0x502C0000`); the image may now reach `0x502C8000` (`IMAGE_END_MAX`): 25,588 bytes are left.
 - **Ten speed reports at most.** With `AWPERF0.TXT` .. `AWPERF9.TXT` all on the card, a quit writes no
   more; delete them after copying them off.
 

@@ -1,0 +1,21 @@
+    0.00 installed; dead flag at 0x500066D8
+   30.02 boot: slots 06BE04008400 06BE04008D00, dead 0
+   57.43 menu: up, 1 programs, Another World at 0
+   59.45 RUN: "ANOTHER WORLD" at APP_BASE, launch folder ""
+   66.23 first: firmware search done (DSP routines found 1F), global files loading
+   92.95 first: the game task starts after 25.9 s of DSP setup: DSP state 2, fail 0, hooked 3, mode 0, bank sent 1 (171576 of 171576 words), slots 06BE04008200 06BE04008296
+   96.77 the intro starts
+  121.77 RIGHT 2: -> tone generator
+  123.10 mode 1 hooked 0 slots 06BE04008400 06BE04008D00
+  132.10 RIGHT 2: -> off
+  133.43 mode 2 hooked 0
+  142.43 RIGHT 2: -> DSP
+  143.78 mode 0 hooked 3 slots 06BE04008200 06BE04008296
+  159.82 first quit: task done 1, DSP state 3, hooked 0, slots 06BE04008400 06BE04008D00, MSGR4-7 0 0 0 0
+  167.85 menu: up, 1 programs, Another World at 0
+  169.90 RUN: "ANOTHER WORLD" at APP_BASE, launch folder ""
+  176.67 again: firmware search done (DSP routines found 1F), global files loading
+  177.62 again: the game task starts after 0.1 s of DSP setup: DSP state 2, fail 0, hooked 3, mode 0, bank sent 2 (0 of 171576 words), slots 06BE04008200 06BE04008296
+  195.65 again quit: task done 1, DSP state 3, hooked 0, slots 06BE04008400 06BE04008D00, MSGR4-7 0 0 0 0
+  206.53 left STYLE CONVERT; slots 06BE04008400 06BE04008D00; a C4 on the keybed
+  212.53 end

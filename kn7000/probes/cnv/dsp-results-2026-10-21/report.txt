@@ -1,0 +1,12 @@
+dead      PASS  the dead flag 0 at 771 of 771 samples from the boot's end (20.0-212.5 s); the firmware's slots then 06BE04008400, 06BE04008D00
+setup     PASS  bank sent 1 (171,576 words), hooked 3, mode 0; the DSP setup 67.3-92.8 s (25.5 s): ['first: the game task starts after 25.9 s of DSP setup: DSP state 2, fail 0, hooked 3, mode 0, bank sent 1 (171576 of 171576 words), slots 06BE04008200 06BE04008296']
+hooked    PASS  93 samples of the intro in DSP mode (98.0-121.0 s): slots 06BE04008200 / 06BE04008296 in all; MSGR7 44,100/s, HB9 44,100/s (medians)
+voices    PASS  voices seen 11111111 (music in 63, effects in 46 of 93 samples); peaks: mix 1,224,576, unit 0's return 1,224,576, unit 9's 1,224,576 (24-bit full scale 8,388,607); flushes 43, MSGR6 busy 0
+midi      PASS  MIDI messages sent: DSP 0, TG 76, OFF 0, DSP again 0
+modes     PASS  TG: 35 samples, the firmware's slots and nothing hooked in all; DSP again: 54 samples, both hooked in all; voices in DSP again 11110100
+restored  PASS  after the quit at 159.8 s: 16 samples, slots as at boot, MSGR4-7 0 in all; DM 0xC003 1 value(s) in the samples before, 16 after (the reverb runs again)
+restored2 PASS  after the quit at 195.7 s: 16 samples, slots as at boot, MSGR4-7 0 in all; DM 0xC003 1 value(s) in the samples before, 16 after (the reverb runs again)
+again     PASS  the second game: bank sent 2 (2 = still in SDRAM), hooked 3: ['again: the game task starts after 0.1 s of DSP setup: DSP state 2, fail 0, hooked 3, mode 0, bank sent 2 (0 of 171576 words), slots 06BE04008200 06BE04008296']
+sound     PASS  before the game -240.0 dBFS; the intro on the DSP, 1 s windows: 23 of 23 more than 20 dB above that, -61.9 to -38.4 dBFS; TG -36.7 to -28.1; OFF -29.2 to -28.3
+music     PASS  47 quarter-seconds of the intro with only the music's voices sounding: 47 of them more than 20 dB above the silence, -52.1 to -43.4 dBFS
+dsp_report: 11 of 11 checks

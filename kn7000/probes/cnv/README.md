@@ -8,6 +8,11 @@ input), with the owner's loader floppy and a copy of the real KN7000's SD card. 
 (2026-10-20) come first; the probes that established the platform (2026-10-18, program 941, with
 `AW.CNV`, the floppy-only predecessor that kept its data in the `0x44000000` window) follow.
 
+**Addresses.** On 2026-10-21 (the DSP sound build, commit `f87fc55`) the game's variables moved up as one
+block, from `0x502C0000`-`0x502C7FFF` to `0x502DF000`-`0x502E6FFF` (`src/platformcnv.inc`), and the image may
+now reach `0x502C8000`. The Lua probes here name the new addresses, so they run against that build and later;
+the results below for earlier builds were measured with the old ones (the git history has those scripts).
+
 ## Acceptance tests (2026-10-20): through the loader, program 893 and 941
 
 `run_cnv_tests.sh OUT CASE...` runs them, after `make sdcard`; `OUT` is a scratch directory. Each
@@ -242,6 +247,50 @@ load errors 0, guard 0", and `compare_frames.py`: 2612 of 2612 frames identical 
 (the checksum log: research-scratch `aw-kn7load-2026-10-20/intro_checksums_kn7app.log`). With `AW.CNV` and its floppy (`b7214529...`) the same check
 gave "captured 2613 frames (last tick 2612); part loads 3, load errors 0, guard 0", and 2612 of 2612
 frames identical.
+
+## Sound on the effects DSP (2026-10-21): the game's own samples
+
+The DSP build (README-CNV.md, "Sound": `src/dsp.s`, `tools/dsp_mixer.py`) in one MAME session through the program
+menu, as Felipe runs it. Light, as asked for this iteration: one session, no sweeps.
+
+| file            | what it is                                                                                                 |
+|-----------------|------------------------------------------------------------------------------------------------------------|
+| `run_dsp.sh`    | the runner: builds the card (the menu as the root `KN7APP.BIN`, `build/sdcard/` as `AW\`), runs MAME       |
+| `awcnv_dsp.lua` | the session (below) and a tap of the game's and the DSP's state every 0.25 s (`OUT/tap.txt`, `events.txt`) |
+| `dsp_report.py` | the verdict: one line per check (its docstring says what each reads), "dsp_report: N of M checks"          |
+
+    probes/cnv/run_dsp.sh ~/compartilhado/tmp/aw-dsp/run    # from kn7000/; DISPLAY=:0; about 10 minutes
+
+The session (program 893, `-bios v13`; the owner's loader floppy as released; a fresh copy of the real card): DISK
+MENU, STYLE CONVERT, OK; the menu; "Another World", RUN; the firmware search, the global files, the DSP set up and
+the whole bank sent; the splash skipped (`NO_SPLASH`, as `awcnv_cksum.lua`); the intro with no input; PART SELECT
+RIGHT 2 at intro + 25 s (tone generator), + 35 s (off), + 45 s (DSP again); EXIT held 2 s at intro + 60 s; EXIT;
+"Continue Next?" YES; the menu, RUN again (the bank must not be sent again); 15 s of the game; EXIT held; EXIT; NO;
+a C4 on the keybed. The recording (`OUT/run.wav`) is the game's own music: never commit it.
+
+What it showed, for `KN7APP.BIN` `a2fbbaa6...` (the run's files: `dsp-results-2026-10-21/`; the published overlay,
+md5 `3077b137...`; the menu `0566fba3...`), `dsp_report: 11 of 11 checks`:
+
+| check      | result                                                                                                                                                  |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dead`     | the firmware's dead flag 0 at all 771 samples after the boot (20-212.5 s)                                                                               |
+| `setup`    | the 8-step firmware search 6.8 s from RUN (DSP routines found: `1F`); the mixer loaded, read back, hooked; the whole bank, 171,576 words, in 25.9 s     |
+| `hooked`   | through the intro in DSP mode PM `0x8080` = `06BE04008200`, PM `0x80A0` = `06BE04008296`; MSGR7 and unit 9's count both 44,100 a second                 |
+| `voices`   | all eight voices sounded (the music's in 63, the effects' in 46 of 93 quarter-seconds); unit 0's and unit 9's returns carried the mix, peak 1,224,576   |
+| `midi`     | MIDI messages sent: 0 in the DSP mode, 76 in the tone generator's, 0 when off, 0 in the DSP mode again                                                  |
+| `modes`    | TG: both slots back as at boot, nothing hooked (35 samples); DSP again: both hooked (54 samples)                                                        |
+| `restored` | after each quit both slots as at boot, MSGR4-MSGR7 0; DM `0xC003` (the reverb's store of I6) 1 value while hooked, 16 in the 4 s after: the reverb runs |
+| `again`    | YES, the menu, RUN: the bank found in SDRAM by its marker, not sent again (the DSP setup 0.1 s)                                                         |
+| `sound`    | the recording: -240 dBFS before the game; the intro on the DSP -61.9 to -38.4 dBFS a second, every second more than 20 dB above that                    |
+| `music`    | the 47 quarter-seconds in which only the music's voices sounded: -52.1 to -43.4 dBFS, all of them audible                                               |
+
+The tone generator's notes in MAME ring on after their note-off (the overlay's tone generator, as in "Sound" below),
+so after the TG interval the recording and unit 0's input stay loud (-29 to -28 dBFS) through OFF and later: that
+is not the DSP. MAME mixes unit 9's return only while the CHORUS is on (its bridge), so the recording heard the mix
+through unit 0's return (REVERB on, the default); the tap shows unit 9's return carrying the same mix. In MAME the
+DSP's sound is about 10 dB below the tone generator's for the same intro: MAME's return level is not calibrated.
+Not checked here: the help screen's mode line, a part switch, the watchdog (the firmware stopping the calls), a
+program build other than 893.
 
 ## Sound (2026-10-20): the game as a MIDI source on the firmware's receive ring
 
