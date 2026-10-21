@@ -386,8 +386,8 @@ it):
   whose return is the mix alone. The tone generator mixes unit 0's return into the DAC only while REVERB is on
   (the crossfade `0x803A`; DSPTONE needed REVERB on). The CHORUS has no return register (kn7000_mame
   `notes/effect-return-routing.md`: its button moves only its send), so unit 9's return should be heard whatever
-  REVERB and CHORUS are: that is the path for REVERB off, and **it has not been heard on the unit yet**. With
-  REVERB on, both paths carry the mix, so it may sound about 6 dB louder than with REVERB off. The reverb and
+  REVERB and CHORUS are: that is the path for REVERB off. **Heard on the unit (2026-10-21):** Felipe hears the game
+  properly with REVERB and CHORUS both off, and a little louder with REVERB on, when both paths carry the mix. The reverb and
   the chorus are off while the game's sound is on the DSP (their programs are not run; the keybed's notes go
   through dry). MAME mixes unit 9's return only while the CHORUS is on, so the MAME check below hears unit 0's.
 - **Putting it back.** Leaving the DSP mode with RIGHT 2, quitting (before the game answers 0xFE), a failure
@@ -913,8 +913,8 @@ not to move the player), program 941, a part switch, the watchdog.
   `0x70000` written and played, the heartbeat at 44,087 frames a second, unit 0's return heard with REVERB
   on. What is new here and has run only in MAME: SDRAM up to `0x99E37` (the bank's 171,576 words; DSPTONE's
   PCM reached `0x7AC44`), the multiply and the shifts by a register on the chip, unit 9's slot and its
-  return (MAME mixes it only while the CHORUS is on; whether the instrument mixes it whatever REVERB and
-  CHORUS are is the open question), host traffic from a task of ours rather than the firmware's main task,
+  return (MAME mixes it only while the CHORUS is on; the instrument mixes it whatever REVERB and
+  CHORUS are, as Felipe heard on 2026-10-21), host traffic from a task of ours rather than the firmware's main task,
   how long the bank takes, and the level. MAME runs the DSP at exactly 44,100 frames a second and moves
   the host's words straight into DSP memory; the chip moves them through the external port's FIFO and
   DMA, as the firmware's own uploads, which is why every upload is read back before the hook.
