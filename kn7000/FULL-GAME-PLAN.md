@@ -111,7 +111,10 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    the drums on PART 10. Each resource's GM program (or drum key) and pitch is a hand-made table
    (`tools/aw_sound_map.py`, from each sample's analysis); the frequency index moves the note by
    semitones, the volume is the velocity, the sample's length at that rate is the note's length. The
-   SP7001 build stays silent (`src/audio_stub.s`).
+   SP7001 build stays silent (`src/audio_stub.s`). **Second iteration done (2026-10-21, `src/dsp.s`,
+   `tools/dsp_mixer.py`, README-CNV.md "Sound"):** the game's own samples, played by the effects DSP
+   (an 8-voice mixer in two of its kernel's unit slots, the whole bank in its SDRAM), the default
+   when the DSP can be used; the MIDI sound is kept as a second mode (PART SELECT RIGHT 2: DSP, TG, off).
 4. **Music** (modules 0x07 intro, 0x8A final; 0x89 preloaded by the lake, never played), the
    original's 4-channel module player, instruments taken from the sound resources. **First iteration
    done (same place):** the module player of rawgl (`SfxPlayer`) runs on the kernel's millisecond
@@ -121,7 +124,8 @@ played sessions replayed into both VMs (`probes/awreplay.lua` + `replaycksum`), 
    the event's value; the intro module has 24 of them, values 1..49), whether the sound is on or off,
    so the intro's scenes follow the music again; with the stub they stayed 0 in both VMs. The intro
    is therefore no longer the frame-identical one of `CHECKSUM-COMPARISON.md`: the reference VM would
-   need a player too.
+   need a player too. In the DSP mode (second iteration) the same player drives the DSP's voices 4-7
+   with the modules' own instruments, at the periods' exact rates.
 5. **Pacing in the big parts.** City and baths have the largest code and polygon sets (62 KB and
    51 KB of bytecode, 65 KB of video1 each); measure each part's frame work time against
    `var[0xFF] × 20 ms` once they are played through. A lead: the module blits the 320x200 page to
