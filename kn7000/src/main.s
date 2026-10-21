@@ -8,7 +8,7 @@
 # The real-instrument build is the STYLE CONVERT one, cnv_main.s (README-CNV.md).
 #
 # A port of the Another World bytecode VM from the KN5000 version
-# (github.com/felipesanches/kn5000-anotherworld, TLCS-900) to the KN7000's
+# (github.com/felipesanches/technics-anotherworld, TLCS-900) to the KN7000's
 # Panasonic MN10300, running as a ride-along module in the SP7001 SD plug-in.
 #
 # Flow (see ../README.md):

@@ -391,7 +391,7 @@ help_page2:
     .long   hs_l15
     .word   60, 160, 2, 0
     .long   hs_url1
-    .word   84, 170, 2, 0
+    .word   76, 170, 2, 0             # 21 columns, centred under hs_url1 (60..259)
     .long   hs_url2
     .word   128, 184, 1, 0
     .long   hs_page_3
@@ -463,5 +463,5 @@ hs_l14:          .asciz "In the armoured car"
 hs_c15:          .asciz "LFCK"
 hs_l15:          .asciz "The grand finale"
 hs_url1:         .asciz "github.com/felipesanches/"
-hs_url2:         .asciz "kn5000-anotherworld"
+hs_url2:         .asciz "technics-anotherworld"
     .align  4

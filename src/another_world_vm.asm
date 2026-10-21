@@ -1993,7 +1993,7 @@ _help_draw_page_2:
 	LD B, 2
 	LD XIY, _str_url1
 	CALL _help_draw_text
-	LD DE, 32
+	LD DE, 24
 	LD HL, 164
 	LD B, 2
 	LD XIY, _str_url2
@@ -2065,7 +2065,7 @@ _str_level_ckjl:	DB "In the armoured car", 0
 _str_code_lfck:		DB "LFCK", 0
 _str_level_lfck:	DB "The grand finale", 0
 _str_url1:			DB "github.com/felipesanches/", 0
-_str_url2:			DB "kn5000-anotherworld", 0
+_str_url2:			DB "technics-anotherworld", 0
 
 	endif ; TARGET_MAINCPU (HELP_SCREEN)
 
