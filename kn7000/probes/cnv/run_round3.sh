@@ -1,7 +1,7 @@
 #!/bin/bash
 # (c) 2026 Felipe Correa da Silva Sanches <juca@members.fsf.org>; GPL v3+
 #
-# run_round3.sh OUT [bank|full] -- Felipe's third round (probes/cnv/README.md, "Round 3") in one MAME session
+# run_round3.sh OUT [bank|keys|full] -- Felipe's third round (probes/cnv/README.md, "Round 3") in one MAME session
 # through the program menu, as run_dsp.sh: the menu as the card's root KN7APP.BIN, the game in AW\, the published
 # overlay emulator (EMU, default ~/compartilhado/kn7000-emulator), -bios v13 (program 893, the owner's), the owner's
 # loader floppy as released, awcnv_round3.lua as the autoboot script (AWR_MODE = the second argument, default full).

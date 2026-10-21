@@ -167,7 +167,7 @@ If anything looks wrong, write the card image from step 1 back and restore the p
 
    | game   | keybed (or MIDI IN 1, channels 1-3) |
    |--------|-------------------------------------|
-   | up     | B♭5 or B5                           |
+   | up     | A♭5 or B♭5                          |
    | down   | A5                                  |
    | left   | F5                                  |
    | right  | C6                                  |
@@ -185,9 +185,9 @@ If anything looks wrong, write the card image from step 1 back and restore the p
    | blit         | PAGE DOWN: the new blit / the old one                                   |
    | quit         | hold EXIT for 1.5 s                                                     |
 
-   B♭5 and B5 are both UP, as before; B5 is the one to use while also holding an action key and a
-   direction (run and jump): with three keys down the keybed's scan matrix can lose B♭5, not B5
-   (`src/vm.inc`, `KBD_UP_NOTE_*`).
+   A♭5 and B♭5 are both UP, the black keys either side of A5 (DOWN); B5 is no control (Felipe,
+   2026-10-21). With three keys down (an action key, a direction and up: run and jump) the keybed's
+   scan matrix can lose either of them (`src/vm.inc`, `KBD_UP_NOTE_*`).
 
    **The keybed's own sound** (PART SELECT RIGHT 1). The instrument plays its own voice for every key
    you press to steer the game. RIGHT 1 mutes those notes and brings them back; the game's own sound

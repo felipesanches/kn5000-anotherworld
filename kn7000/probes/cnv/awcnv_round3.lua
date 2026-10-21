@@ -6,6 +6,7 @@
 -- AWR_MODE=bank: only the sample bank's first load, timed and taken apart, then MAME exits. Works on the build
 -- before round 3 (KN7APP.BIN a2fbbaa6...) and after it: it reads only variables both keep (dsp.inc DV_*,
 -- cnv_main.s CV_*) and the host port itself.
+-- AWR_MODE=keys: the bank load, the intro, the lake and the keybed D-pad below, then MAME exits.
 -- AWR_MODE=full (the default): the bank load as above, then
 --   * the intro with the sound on the DSP (voices sounding, the mix not 0);
 --   * a C4 skips to the lake; Bb5 alone, B5 alone: var 0xE5 (up/down) must read -1 and var 0xFD hold 8 while each is
@@ -245,7 +246,9 @@ local co = coroutine.create(function()
   wait_until(function() return sp:read_u16(PART) == 0x3E82 end, 30)
   wait(8)
   E("the lake (part %04X): %s", sp:read_u16(PART), hero())
-  hold_key("A5#"); hold_key("B5"); hold_key("A5")
+  -- the keybed D-pad (Felipe 2026-10-21): Ab5 and Bb5 up (var 0xE5 -1, 0xFD 8), A5 down, F5 left, C6 right; B5 nothing
+  hold_key("G5#"); hold_key("A5#"); hold_key("B5"); hold_key("A5"); hold_key("F5"); hold_key("C6")
+  if MODE == "keys" then E("end"); ev:close(); M:exit(); return end
   hold_panel("R1/R2 OCTAVE +", "CPR_SEG6", 0x02); hold_panel("R1/R2 OCTAVE +", "CPR_SEG6", 0x02)
   hold_panel("R1/R2 OCTAVE -", "CPR_SEG7", 0x02); hold_panel("R1/R2 OCTAVE -", "CPR_SEG7", 0x02)
   hold_panel("PART SELECT LEFT", "CPR_SEG2", 0x01)

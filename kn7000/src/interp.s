@@ -675,7 +675,7 @@ ri_gameplay:
     clr     d2                      # d2 = OR of held inputs' AW masks (the keybed and MIDI IN only:
                                     # no panel button is a game control, Felipe 2026-10-21)
     # --- fold in the held keybed/MIDI notes: note <= 60 (bass + C4) = action; F5 left,
-    #     A5 down, C6 right, Bb5/B5 up. Every held direction's bit is OR'd in; an opposing
+    #     A5 down, C6 right, Ab5/Bb5 up. Every held direction's bit is OR'd in; an opposing
     #     pair is left for the sticky derive below, and diagonals keep both bits. ---
     call    NotePoll, 0, 0          # bring the note trackers up to date
     clr     d3                      # note mask accumulator
@@ -700,8 +700,15 @@ rkb_nl:
     beq     rkb_nd
     or      4, d3
 rkb_nd:
-    mov     KBD_UP_NOTE_A, d0       # Bb5..B5 (82..83) -> up
-    mov     KBD_UP_NOTE_B, d1
+    mov     KBD_UP_NOTE_A, d0       # Ab5 -> up
+    mov     d0, d1
+    call    NotesAnyHeld, 0, 0
+    cmp     0, d0
+    beq     rkb_nua
+    or      8, d3
+rkb_nua:
+    mov     KBD_UP_NOTE_B, d0       # Bb5 -> up (not a range: A5 between them is DOWN)
+    mov     d0, d1
     call    NotesAnyHeld, 0, 0
     cmp     0, d0
     beq     rkb_nu

@@ -1,0 +1,21 @@
+    0.00 installed (mode keys)
+   30.02 boot: slots 06BE04008400 06BE04008D00, dead 0
+   57.43 menu: up, 1 programs, Another World at 0
+   59.47 RUN: "ANOTHER WORLD" at APP_BASE
+   78.67 bank: 11.62 s (card 3.90, unpacking 0.00, outside the converter 0.21, in the calls otherwise 7.51); 238646 handshakes (5.41 s at 44,100 a s): upload halves 215375, register halves 11944, MSGR4 polls 9240, other reads 2087; 29 calls, 14 files; sent 1 (171576 of 171576 words)
+   82.52 the intro starts; mode 0 hooked 3 slots 06BE04008140 06BE04008257
+   97.52 intro, 15 s in DSP mode: voices seen 3F, |mix| max 925824, dead 0
+  106.63 the lake (part 3E82): LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  107.13 G5# held: LR 0 UD -1 JUMP -1 POS 08 ACT 0 AMASK 08
+  107.63 G5# released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  108.13 A5# held: LR 0 UD -1 JUMP -1 POS 08 ACT 0 AMASK 08
+  108.63 A5# released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  109.13 B5 held: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  109.63 B5 released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  110.13 A5 held: LR 0 UD 1 JUMP 1 POS 04 ACT 0 AMASK 04
+  110.63 A5 released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  111.13 F5 held: LR -1 UD 0 JUMP 0 POS 02 ACT 0 AMASK 02
+  111.63 F5 released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  112.13 C6 held: LR 1 UD 0 JUMP 0 POS 01 ACT 0 AMASK 01
+  112.63 C6 released: LR 0 UD 0 JUMP 0 POS 00 ACT 0 AMASK 00
+  112.63 end
